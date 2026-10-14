@@ -196,7 +196,10 @@ cleanup() {
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
       chown -R root:root /opt/station-archive
       chown root:www-data /opt/station-archive
-      chmod 0750 /opt/station-archive
+      find /opt/station-archive -type d -exec chmod 0750 {} +
+      find /opt/station-archive -type f -exec chmod g+r {} +
+      chown -R root:www-data /opt/station-archive/.venv || true
+      chmod -R g+rX /opt/station-archive/.venv || true
       /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
       systemctl restart station-archive >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
@@ -216,7 +219,10 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
 chown -R root:root /opt/station-archive
 chown root:www-data /opt/station-archive
-chmod 0750 /opt/station-archive
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod g+r {} +
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive
@@ -271,3 +277,4 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
+
