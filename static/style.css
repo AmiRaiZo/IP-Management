@@ -180,12 +180,14 @@ html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
 html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 
 
-/* Center each directory value directly under its column heading. */
+/* Center directory values under their headings, while keeping Name left-aligned. */
 .inventory-panel .table-scroll table th,.inventory-panel .table-scroll table td{text-align:center;vertical-align:middle}
-/* Keep the profile/avatar separate but snug against the Name column. */
-.inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:48px;min-width:48px;padding-left:10px;padding-right:6px}
-.inventory-panel .table-scroll td.avatar-cell .record-avatar{margin:0 auto}
-.inventory-panel .table-scroll th:nth-child(2),.inventory-panel .table-scroll td:nth-child(2){text-align:left;padding-left:8px}
+/* Pin each profile to the left edge of its own narrow column. */
+.inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:56px;min-width:56px;padding-left:18px;padding-right:0}
+.inventory-panel .table-scroll td.avatar-cell{text-align:left}
+.inventory-panel .table-scroll td.avatar-cell .record-avatar{margin:0}
+/* Align Name text exactly below its heading and leave clear space after the profile. */
+.inventory-panel .table-scroll th:nth-child(2),.inventory-panel .table-scroll td:nth-child(2){text-align:left;padding-left:24px;padding-right:18px}
 .inventory-panel .table-scroll .record-name{justify-content:flex-start}
 .inventory-panel .table-scroll .actions{justify-content:center}
 
