@@ -178,3 +178,9 @@ html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
 
 /* Keep the update-complete check badge dark-theme friendly. */
 html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
+
+
+/* Center each directory value directly under its column heading. */
+.inventory-panel .table-scroll table th,.inventory-panel .table-scroll table td{text-align:center;vertical-align:middle}
+.inventory-panel .table-scroll .record-name{justify-content:center}
+.inventory-panel .table-scroll .actions{justify-content:center}
