@@ -19,7 +19,7 @@
   <h1>Welcome back</h1>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
+    <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username" value="{{ login_username|default('') }}">
     <label for="password">Password</label><div class="password-field"><input class="login-input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button class="password-toggle" type="button" data-toggle-password="password" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
     <button class="btn btn-primary full login-submit" type="submit">Login</button>
   </form>
