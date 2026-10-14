@@ -148,7 +148,6 @@ if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
-(more lines follow — continue from line 151)
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
 from pathlib import Path
 import re, sys
@@ -274,3 +273,4 @@ echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration
 echo "Backups: $BACKUP_DIR"
 echo "Application URL: https://$DOMAIN:$HTTPS_PORT"
 echo "Updater: sudo /usr/local/sbin/station-archive-update"
+
