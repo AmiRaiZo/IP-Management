@@ -830,7 +830,7 @@ def update_app():
         UPDATE_TARGET_VERSION_FILE.write_text(release["version"] + "\n", encoding="utf-8")
         UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
         with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
-            subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=subprocess.STDOUT,
+            subprocess.Popen(["sudo", "-n", "/usr/bin/systemctl", "start", "station-archive-update.service"], stdout=log, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
         audit("update_requested", f"target={target_sha}")
         return redirect(url_for("update_progress"))
