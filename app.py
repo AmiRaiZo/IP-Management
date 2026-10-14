@@ -206,11 +206,13 @@ def remembered_two_factor(user_id):
 def establish_login(user):
     session.clear()
     # Keep the authenticated session as a browser-session cookie. Passwords
-    # are required again after the browser session ends; only 2FA is remembered.
+    # are required again after the browser session ends.
     session.permanent = False
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     session["csrf_token"] = secrets.token_urlsafe(32)
+    if two_factor_required():
+        session["two_factor_verified"] = True
     audit("login_success")
 
 
@@ -222,6 +224,15 @@ def superadmin_required(fn):
             abort(403)
         return fn(*args, **kwargs)
     return wrapped
+
+
+@app.before_request
+def enforce_global_two_factor():
+    if (two_factor_required() and session.get("user_id")
+            and not session.get("two_factor_verified")
+            and request.endpoint not in ("login", "static")):
+        session.clear()
+        return redirect(url_for("login"))
 
 
 @app.before_request
@@ -349,6 +360,7 @@ def setup_2fa():
             session["user_id"] = user_id
             session["username"] = user["username"]
             session["csrf_token"] = secrets.token_urlsafe(32)
+            session["two_factor_verified"] = True
             audit("two_factor_enabled")
             flash("Two-factor authentication is enabled.", "success")
             return redirect(url_for("index"))
