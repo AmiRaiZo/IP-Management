@@ -241,6 +241,7 @@ cleanup() {
   rm -rf -- "$TMP"
 }
 trap cleanup EXIT
+trap 'rc=$?; echo "ERROR: updater command failed (exit ${rc}): ${BASH_COMMAND}" >&2' ERR
 echo "PROGRESS:12:Downloading repository and checking target version"
 git init -q "$TMP/source"
 git -C "$TMP/source" remote add origin "${UPDATE_REPO%/}"
@@ -308,7 +309,7 @@ chmod -R g+rX /opt/station-archive/.venv
 	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
 	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version; then
+	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/python -m gunicorn --version; then
 	  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
 	  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
 	  python3 -m venv /opt/station-archive/.venv
@@ -318,7 +319,7 @@ chmod -R g+rX /opt/station-archive/.venv
 	  chmod -R g+rX /opt/station-archive/.venv
 	  chown root:www-data /opt/station-archive/.venv/bin/gunicorn
 	  chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-	  runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
+	  runuser -u www-data -- /opt/station-archive/.venv/bin/python -m gunicorn --version
 	fi
 	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
