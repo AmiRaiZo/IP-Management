@@ -183,6 +183,13 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             row = db.execute("SELECT two_factor_enabled FROM users WHERE id=?", (user_id,)).fetchone()
         self.assertEqual(row["two_factor_enabled"], 1)
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "selected-user", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("setup-2fa", response.location)
 
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
