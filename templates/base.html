@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{% block title %}{{ app_settings.brand_name|default("IP Archive") }}{% endblock %}</title>
+  <title>{% block title %}{{ "IP Management" }}{% endblock %}</title>
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
   <style>:root{--primary:{{ app_settings.accent_color|default("#4569e8") }};--primary-hover:{{ app_settings.accent_color|default("#4569e8") }};}</style><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
