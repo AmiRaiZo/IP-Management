@@ -8,7 +8,7 @@
   <style>:root{--primary:{{ app_settings.accent_color|default("#4569e8") }};--primary-hover:{{ app_settings.accent_color|default("#4569e8") }};}</style><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell">\n  <button type="button" class="theme-toggle global-theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button>
   {% if current_user %}
   <aside class="sidebar">
     <a class="brand" href="{{ url_for('index') }}">{% if app_settings.brand_logo|default("") %}<img class="brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
@@ -25,7 +25,7 @@
   </aside>
   {% endif %}
   <div class="main-column {% if not current_user %}auth-column{% endif %}">
-    {% if request.endpoint == 'login' %}<button type="button" class="theme-toggle auth-theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button>{% else %}<header class="topbar"><div class="topbar-title">{% block breadcrumb %}{% endblock %}</div><div class="topbar-actions"><button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button></div></header>{% endif %}
+    {% if request.endpoint != 'login' %}<header class="topbar"><div class="topbar-title">{% block breadcrumb %}{% endblock %}</div></header>{% endif %}
     <main class="container {% block main_class %}{% endblock %}">
       {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}{% if category == 'welcome' %}<div class="welcome-toast" role="status" data-auto-dismiss="2600"><span class="welcome-toast-avatar">{% if current_avatar %}<img src="{{ url_for('media_file', filename=current_avatar) }}" alt="">{% else %}{{ current_user[:1]|upper if current_user else '✓' }}{% endif %}</span><span class="welcome-toast-copy"><strong>{{ message }}</strong><small>Signed in successfully</small></span><button type="button" class="welcome-toast-close" aria-label="Dismiss notification">×</button></div>{% else %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endif %}{% endfor %}{% endwith %}
       {% block content %}{% endblock %}
