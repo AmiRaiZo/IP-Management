@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import base64
+import json
 from io import BytesIO
 import os
 import re
@@ -8,6 +9,8 @@ import secrets
 import sqlite3
 import subprocess
 import time
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -43,6 +46,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-archive-remember-2fa")
 REMEMBER_2FA_COOKIE = "ip_archive_2fa"
 REMEMBER_2FA_SECONDS = 24 * 60 * 60
+VERSION_FILE = DATA_DIR / "version"
+UPDATE_TARGET_FILE = DATA_DIR / "update-target"
+UPDATE_LOG_FILE = DATA_DIR / "update.log"
 
 
 @contextmanager
@@ -593,11 +599,73 @@ def settings():
 @app.get("/update")
 @superadmin_required
 def update_page():
-    return render_template("update_app.html", current_version="Installed release", latest_version=None,
-                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
-                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")),
-                           update_status="Updates are pulled from the configured public GitHub repository.",
-                           update_available=True)
+    current = installed_version()
+    return render_template("update_app.html", current_version=current,
+                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")),
+                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
+
+
+def installed_version():
+    try:
+        value = VERSION_FILE.read_text(encoding="utf-8").strip()
+        if re.fullmatch(r"[0-9a-f]{40}", value):
+            return value
+    except OSError:
+        pass
+    return "Legacy install (untracked)"
+
+
+def latest_repository_commit():
+    repo_url = os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")).rstrip("/")
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", repo_url)
+    if not match:
+        raise ValueError("Configured GitHub repository URL is invalid.")
+    api_url = f"https://api.github.com/repos/{match.group(1)}/{match.group(2)}/commits/main"
+    req = Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive-Updater"})
+    with urlopen(req, timeout=8) as response:
+        payload = json.loads(response.read(256_000).decode("utf-8"))
+    sha = payload.get("sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("GitHub did not return a valid commit SHA.")
+    return sha
+
+
+@app.get("/update/check")
+@superadmin_required
+def check_update():
+    current = installed_version()
+    try:
+        latest = latest_repository_commit()
+    except (URLError, HTTPError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": f"Could not check GitHub: {exc}", "current": current}, 502
+    return {"ok": True, "current": current, "latest": latest,
+            "update_available": latest != current, "message": "A new version is available." if latest != current else "You already have the latest version."}
+
+
+@app.get("/update/status")
+@superadmin_required
+def update_status():
+    try:
+        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")[-30000:]
+    except OSError:
+        log = ""
+    progress = 0
+    phase = "Waiting for update process…"
+    done = False
+    success = False
+    for line in log.splitlines():
+        match = re.match(r"PROGRESS:(\d{1,3}):(.*)", line)
+        if match:
+            progress = max(progress, min(99, int(match.group(1))))
+            phase = match.group(2).strip()
+        if "IP Archive updated successfully." in line:
+            progress, phase, done, success = 100, "Update completed successfully", True, True
+        elif "Update failed" in line or "Update failed;" in line or "Update process failed" in line:
+            done, success, phase = True, False, "Update failed. Check the log output below."
+    if not done and log and "Starting update" not in log and progress == 0:
+        phase = "Running server update commands…"
+    return {"log": log, "progress": progress, "phase": phase, "done": done, "success": success,
+            "current": installed_version()}
 
 
 @app.post("/update")
@@ -607,16 +675,51 @@ def update_app():
     if not os.path.isfile(updater):
         flash("Updater is not installed on this server.", "error")
         return redirect(url_for("settings"))
+    target_sha = request.form.get("target_sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", target_sha):
+        flash("Check for updates first, then select the available version.", "error")
+        return redirect(url_for("update_page"))
     try:
-        # Detach the updater so restarting Gunicorn cannot terminate the HTTP response.
-        with open(DATA_DIR / "update.log", "a", encoding="utf-8") as log:
-            subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=log,
+        latest = latest_repository_commit()
+        current = installed_version()
+        if latest != target_sha:
+            flash("GitHub changed since the check. Check for updates again before installing.", "error")
+            return redirect(url_for("update_page"))
+        if latest == current:
+            flash("No update is available. Your installation is already current.", "success")
+            return redirect(url_for("update_page"))
+        UPDATE_TARGET_FILE.write_text(target_sha + "\n", encoding="utf-8")
+        UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
+        with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
+            subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-        audit("update_requested", "started")
-        flash("Update started. Wait a few seconds, then refresh this page.", "success")
-    except (subprocess.SubprocessError, OSError) as exc:
+        audit("update_requested", f"target={target_sha}")
+        return redirect(url_for("update_progress"))
+    except (subprocess.SubprocessError, OSError, URLError, HTTPError, TimeoutError, ValueError) as exc:
         flash(f"Update could not start: {exc}", "error")
     return redirect(url_for("update_page"))
+
+
+@app.get("/update/progress")
+@superadmin_required
+def update_progress():
+    return render_template("update_progress.html")
+
+
+@app.get("/update/finish")
+@superadmin_required
+def update_finish():
+    try:
+        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log = ""
+    if "IP Archive updated successfully." in log:
+        flash("Update completed successfully. The latest version is now installed.", "success")
+        return redirect(url_for("index"))
+    if "Update failed" in log or "Update process failed" in log:
+        flash("Update failed. Review the server output on the Updates page and try again after fixing the issue.", "error")
+        return redirect(url_for("update_page"))
+    return redirect(url_for("update_progress"))
 
 
 @app.errorhandler(400)
