@@ -1,2 +1,30 @@
-{% extends 'base.html' %}{% block title %}Sign in | IP Archive{% endblock %}{% block main_class %}login-wrap{% endblock %}
-{% block content %}<section class="login-card"><a class="login-brand" href="{{ url_for('login') }}"><span class="brand-symbol">IP</span><span>IP Archive<small>SECURE ACCESS</small></span></a><p class="eyebrow login-eyebrow">WELCOME BACK</p><h1>Sign in to your workspace</h1><p class="muted">Enter your account details to access your network inventory.</p><form method="post" action="{{ url_for('login') }}" autocomplete="on"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Your username"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><label for="code">Two-factor authentication code <span class="muted">(if enabled)</span></label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="6-digit authenticator code"><button class="btn btn-primary full" type="submit">Sign in securely <span>→</span></button></form><div class="secure-note"><span class="secure-check">✓</span> Private workspace · Protected sign-in</div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ 'Verify your identity' if stage == 'verify' else 'Sign in' }} | IP Archive{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block content %}
+<section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
+  <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
+  <a class="login-brand" href="{{ url_for('login') }}"><span class="brand-symbol login-logo">IP</span><span>IP Archive<small>NETWORK MANAGEMENT</small></span></a>
+  <div class="login-emblem" aria-hidden="true">{% if stage == 'verify' %}⌁{% else %}↗{% endif %}</div>
+  {% if stage == 'verify' %}
+  <p class="eyebrow login-eyebrow">STEP 02 · SECURITY CHECK</p><h1>One last step.</h1>
+  <p class="muted login-description">Enter the 6-digit code from your authenticator app to continue.</p>
+  <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="code">Authenticator code</label><input class="login-input otp-input" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus placeholder="000 000">
+    <button class="btn btn-primary full login-submit" type="submit">Verify and sign in <span>→</span></button>
+  </form>
+  <form class="back-to-password" method="get" action="{{ url_for('login') }}"><input type="hidden" name="reset" value="1"><button type="submit">← Use a different account</button></form>
+  {% else %}
+  <p class="eyebrow login-eyebrow">WELCOME BACK</p><h1>Your network. <span>Your command.</span></h1>
+  <p class="muted login-description">Sign in to securely manage your IP inventory.</p>
+  <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
+    <label for="password">Password</label><input class="login-input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password">
+    <button class="btn btn-primary full login-submit" type="submit">Continue securely <span>→</span></button>
+  </form>
+  {% endif %}
+  <div class="login-bottom"><span class="login-lock">◇</span><span>Encrypted access</span><i></i><span>IP Archive</span></div>
+</section>
+{% endblock %}
