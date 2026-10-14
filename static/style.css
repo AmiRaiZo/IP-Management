@@ -186,8 +186,10 @@ html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 .inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:56px;min-width:56px;padding-left:18px;padding-right:0}
 .inventory-panel .table-scroll td.avatar-cell{text-align:left}
 .inventory-panel .table-scroll td.avatar-cell .record-avatar{margin:0}
-/* Center the Name heading and each record name on the same column axis. */
+/* Center the Name heading and the actual name text inside the full Name cell. */
 .inventory-panel .table-scroll th:nth-child(2),.inventory-panel .table-scroll td:nth-child(2){text-align:center;padding-left:12px;padding-right:12px}
-.inventory-panel .table-scroll .record-name{justify-content:center}
+.inventory-panel .table-scroll td:nth-child(2) .record-name{display:flex;width:100%;justify-content:center;align-items:center;text-align:center}
+.inventory-panel .table-scroll td:nth-child(2) .record-name>span{display:block;width:100%;text-align:center}
+.inventory-panel .table-scroll td:nth-child(2) .record-name strong{display:block;width:100%;text-align:center}
 .inventory-panel .table-scroll .actions{justify-content:center}
 
