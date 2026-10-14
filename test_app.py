@@ -94,7 +94,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIsNone(self.client.get_cookie("ip_management_2fa"))
         response = self.client.get(response.location)
         self.assertIn(b'Welcome back, two-step!', response.data)
-        self.assertIn(b'data-auto-dismiss="2600"', response.data)
+        self.assertIn(b'data-auto-dismiss="8000"', response.data)
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
