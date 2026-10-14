@@ -92,7 +92,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "asset=station-archive-$TAG.zip" >> "$GITHUB_OUTPUT"
-          mv "station-archive-v$VERSION.zip" "station-archive-$TAG.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
