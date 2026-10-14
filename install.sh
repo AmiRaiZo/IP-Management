@@ -13,7 +13,7 @@ valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ));
 # If an installation already exists, route the same install command into the
 # dedicated in-place upgrader before asking for fresh-install credentials.
 REPO_URL="https://github.com/AmiRaiZo/IP-Management"
-UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh?cachebust=15572c905a3e33aba30a7431e5031c4e886633b7"
+UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh?cachebust=20261014-pip-fix-v2"
 if [[ -e /opt/station-archive ]]; then
   if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
     echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
@@ -75,7 +75,6 @@ chown root:www-data /opt/station-archive
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 python3 -m venv --clear /opt/station-archive/.venv
-/opt/station-archive/.venv/bin/pip install --upgrade pip
 /opt/station-archive/.venv/bin/python -m pip install --upgrade pip
 /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 chown -R root:www-data /opt/station-archive/.venv
@@ -213,7 +212,6 @@ cleanup() {
       chown -R www-data:www-data /var/lib/station-archive || true
       find /var/lib/station-archive -type d -exec chmod 0750 {} + || true
       find /var/lib/station-archive -type f -exec chmod 0640 {} + || true
-      /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
       systemctl restart station-archive >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
     else
@@ -246,7 +244,8 @@ install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
 chown -R www-data:www-data /var/lib/station-archive
 find /var/lib/station-archive -type d -exec chmod 0750 {} +
 find /var/lib/station-archive -type f -exec chmod 0640 {} +
-/opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive
 systemctl reload nginx
