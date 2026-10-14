@@ -580,13 +580,11 @@ def users():
         elif role not in ("admin", "superadmin"):
             flash("Invalid role.", "error")
         else:
-            secret = pyotp.random_base32()
             try:
                 with connect_db() as db:
-                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)", (username, password_hash(password), now(), role, secret))
+                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)", (username, password_hash(password), now(), role, ""))
                 audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
-                uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="IP Management")
-                flash(f"User created. Configure an authenticator app with this secret: {secret} | URI: {uri}", "success")
+                flash("User created. The account will be prompted to enroll in two-factor authentication when the global policy is enabled.", "success")
                 return redirect(url_for("users"))
             except sqlite3.IntegrityError:
                 flash("That username already exists.", "error")
