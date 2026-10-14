@@ -218,7 +218,7 @@ def two_factor_required():
 
 
 def remembered_two_factor(user_id):
-    if two_factor_required():
+    if two_factor_mode() != "off":
         return False
     token = request.cookies.get(REMEMBER_2FA_COOKIE, "")
     if not token:
@@ -238,8 +238,6 @@ def establish_login(user):
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     session["csrf_token"] = secrets.token_urlsafe(32)
-    if two_factor_required():
-        session["two_factor_verified"] = True
     audit("login_success")
 
 
@@ -255,11 +253,12 @@ def superadmin_required(fn):
 
 @app.before_request
 def enforce_global_two_factor():
-    if (two_factor_required() and session.get("user_id")
-            and not session.get("two_factor_verified")
+    if (session.get("user_id") and not session.get("two_factor_verified")
             and request.endpoint not in ("login", "static")):
-        session.clear()
-        return redirect(url_for("login"))
+        user = current_user_row()
+        if user_requires_two_factor(user):
+            session.clear()
+            return redirect(url_for("login"))
 
 
 @app.before_request
@@ -313,7 +312,7 @@ def login():
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
-    if (request.method == "GET" and two_factor_required()
+    if (request.method == "GET" and two_factor_mode() == "per_user"
             and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
         return redirect(url_for("setup_2fa"))
     if request.method == "POST":
@@ -322,12 +321,12 @@ def login():
             code = re.sub(r"\s", "", request.form.get("code", ""))
             with connect_db() as db:
                 user = db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone()
-            if user and user["totp_secret"] and pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1):
+            mode = two_factor_mode()
+            secret = shared_two_factor_secret() if mode == "shared" else (user["totp_secret"] if user else "")
+            if user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
                 establish_login(user)
-                response = redirect(safe_login_target())
-                response.set_cookie(REMEMBER_2FA_COOKIE, two_factor_serializer.dumps({"uid": user["id"]}),
-                                    max_age=REMEMBER_2FA_SECONDS, httponly=True, secure=app.config["SESSION_COOKIE_SECURE"], samesite="Lax", path="/")
-                return response
+                session["two_factor_verified"] = True
+                return redirect(safe_login_target())
             time.sleep(0.35)
             flash("The verification code is invalid. Try again.", "error")
             return render_template("login.html", stage="verify")
@@ -337,13 +336,18 @@ def login():
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
         if user and password_matches(password, user["password_hash"]):
-            if two_factor_required():
-                if not user["totp_secret"]:
+            if user_requires_two_factor(user):
+                mode = two_factor_mode()
+                if mode == "per_user" and not user["totp_secret"]:
                     session.clear()
                     session["pending_2fa_user_id"] = user["id"]
                     session["pending_2fa_secret"] = pyotp.random_base32()
                     session["csrf_token"] = secrets.token_urlsafe(32)
                     return redirect(url_for("setup_2fa"))
+                secret = shared_two_factor_secret() if mode == "shared" else user["totp_secret"]
+                if not secret:
+                    flash("Two-factor authentication is not configured. Contact the super administrator.", "error")
+                    return redirect(url_for("login"))
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_urlsafe(32)
@@ -366,13 +370,13 @@ def setup_2fa():
     # Signed-in users cannot alter their own authenticator configuration.
     user_id = session.get("pending_2fa_user_id")
     secret = session.get("pending_2fa_secret")
-    if not two_factor_required() or not user_id or not secret:
+    if two_factor_mode() != "per_user" or not user_id or not secret:
         if session.get("user_id"):
             abort(403)
         return redirect(url_for("login"))
     with connect_db() as db:
-        user = db.execute("SELECT id,username FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
-    if not user:
+        user = db.execute("SELECT id,username,two_factor_enabled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
+    if not user or not user["two_factor_enabled"]:
         session.clear()
         return redirect(url_for("login"))
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
