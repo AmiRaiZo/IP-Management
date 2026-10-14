@@ -38,11 +38,11 @@
       if (status) status.textContent = result.message;
       if (latestLine) {
         latestLine.hidden = false;
-        latestLine.innerHTML = `LATEST VERSION <strong>${result.latest.slice(0, 12)}</strong>`;
+        latestLine.textContent = `LATEST VERSION ${result.latest}`;
       }
       if (form && result.update_available) {
         form.hidden = false;
-        document.getElementById('target-sha').value = result.latest;
+        document.getElementById('target-sha').value = result.latest_sha;
       }
     } catch (error) {
       if (status) status.textContent = error.message || 'Could not check for updates.';
