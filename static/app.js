@@ -1,4 +1,15 @@
 (() => {
+  document.querySelectorAll('[data-toggle-password]').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      const input = document.getElementById(toggle.dataset.togglePassword);
+      if (!input) return;
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      toggle.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+      toggle.setAttribute('title', reveal ? 'Hide password' : 'Show password');
+      toggle.classList.toggle('is-visible', reveal);
+    });
+  });
   document.querySelectorAll('form[data-confirm]').forEach(form => {
     form.addEventListener('submit', event => {
       if (!window.confirm(form.dataset.confirm || 'Continue?')) event.preventDefault();
