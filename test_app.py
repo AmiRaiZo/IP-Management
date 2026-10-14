@@ -124,6 +124,50 @@ class ArchiveTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 403)
 
+    def test_shared_authenticator_policy_requires_site_code_for_every_user(self):
+        _, admin_secret = self.create_user("shared-admin", role="superadmin")
+        self.assertEqual(self.login("shared-admin", admin_secret).status_code, 302)
+        response = self.client.post("/settings/security", data={
+            "csrf_token": self.csrf(), "action": "generate_shared_secret",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            shared = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()["value"]
+        response = self.client.post("/settings/security", data={
+            "csrf_token": self.csrf(), "two_factor_mode": "shared",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(archive.two_factor_mode(), "shared")
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Authenticator code", response.data)
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
+        })
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess.get("two_factor_verified"))
+
+    def test_superadmin_controls_per_user_two_factor_setting(self):
+        admin_id, admin_secret = self.create_user("peruser-admin", role="superadmin")
+        self.assertEqual(self.login("peruser-admin", admin_secret).status_code, 302)
+        user_id, _ = self.create_user("selected-user", role="admin", secret="")
+        response = self.client.get(f"/users/{user_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'name="two_factor_enabled"', response.data)
+        response = self.client.post(f"/users/{user_id}", data={
+            "csrf_token": self.csrf(), "role": "admin", "enabled": "1",
+            "two_factor_enabled": "1", "password": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT two_factor_enabled FROM users WHERE id=?", (user_id,)).fetchone()
+        self.assertEqual(row["two_factor_enabled"], 1)
+
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
         self.assertEqual(self.login("rootadmin", secret).status_code, 302)
