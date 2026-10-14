@@ -1013,6 +1013,8 @@ def update_status():
             progress, phase, done, success = 100, "Update completed successfully", True, True
         elif ("Update failed" in line or "Update failed;" in line or "Update process failed" in line
               or "unable to change to root gid" in line or "error initializing audit plugin" in line
+              or "Traceback (most recent call last):" in line
+              or re.match(r"^(ModuleNotFoundError|ImportError|SyntaxError|PermissionError|FileNotFoundError):", line.strip())
               or (("Operation not permitted" in line or line.lstrip().startswith("sudo:"))
                   and "unable to send audit message" not in line.lower())):
             done, success, phase = True, False, "Update failed"
