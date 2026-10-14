@@ -616,9 +616,9 @@ def users():
         else:
             try:
                 with connect_db() as db:
-                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)", (username, password_hash(password), now(), role, ""))
+                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,0,1)", (username, password_hash(password), now(), role, "")
                 audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
-                flash("User created. The account will be prompted to enroll in two-factor authentication when the global policy is enabled.", "success")
+                flash("User created. Configure this account’s two-factor policy in user settings if per-user authentication is selected.", "success")
                 return redirect(url_for("users"))
             except sqlite3.IntegrityError:
                 flash("That username already exists.", "error")
@@ -631,7 +631,7 @@ def users():
 @superadmin_required
 def user_edit(user_id):
     with connect_db() as db:
-        user = db.execute("SELECT id,username,role,enabled,created_at FROM users WHERE id=?", (user_id,)).fetchone()
+        user = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled FROM users WHERE id=?", (user_id,)).fetchone()
         groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
         ips = db.execute("SELECT id,ip_address,name,group_id FROM ips ORDER BY ip_address").fetchall()
         allowed_groups = {r[0] for r in db.execute("SELECT group_id FROM user_group_access WHERE user_id=?", (user_id,))}
@@ -641,6 +641,7 @@ def user_edit(user_id):
     if request.method == "POST":
         role = request.form.get("role", "admin")
         enabled = 1 if request.form.get("enabled") == "1" else 0
+        two_factor_enabled = 1 if request.form.get("two_factor_enabled") == "1" else 0
         password = request.form.get("password", "")
         if user_id == request.user["id"] and (role != "superadmin" or not enabled):
             flash("You cannot remove your own superadmin role or disable your own account.", "error")
@@ -649,7 +650,9 @@ def user_edit(user_id):
         else:
             selected_groups = {int(x) for x in request.form.getlist("groups") if x.isdigit()}
             with connect_db() as db:
-                db.execute("UPDATE users SET role=?,enabled=? WHERE id=?", (role, enabled, user_id))
+                db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=? WHERE id=?", (role, enabled, two_factor_enabled, user_id))
+                if not two_factor_enabled:
+                    db.execute("UPDATE users SET totp_secret='' WHERE id=?", (user_id,))
                 if password:
                     db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password), user_id))
                 db.execute("DELETE FROM user_group_access WHERE user_id=?", (user_id,))
@@ -664,17 +667,31 @@ def user_edit(user_id):
             audit("user_permissions_updated", f"id={user_id}; role={role}")
             flash("User and visibility permissions updated.", "success")
             return redirect(url_for("user_edit", user_id=user_id))
-    return render_template("user_edit.html", user=user, groups=groups, ips=ips, allowed_groups=allowed_groups, ip_rules=ip_rules)
+    return render_template("user_edit.html", user=user, groups=groups, ips=ips, allowed_groups=allowed_groups, ip_rules=ip_rules, two_factor_mode=two_factor_mode())
 
 
 @app.post("/settings/security")
 @superadmin_required
 def update_security_settings():
-    required = "1" if request.form.get("two_factor_required") == "1" else "0"
+    if request.form.get("action") == "generate_shared_secret":
+        secret = pyotp.random_base32()
+        with connect_db() as db:
+            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (secret,))
+        audit("shared_two_factor_secret_generated")
+        flash("Shared Authenticator secret generated. Enroll the site Authenticator before enabling shared mode.", "success")
+        return redirect(url_for("settings") + "#security")
+    mode = request.form.get("two_factor_mode", "off")
+    if mode not in ("off", "shared", "per_user"):
+        flash("Select a valid two-factor policy.", "error")
+        return redirect(url_for("settings") + "#security")
+    if mode == "shared" and not shared_two_factor_secret():
+        flash("Generate the shared Authenticator secret before enabling shared mode.", "error")
+        return redirect(url_for("settings") + "#security")
     with connect_db() as db:
-        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (required,))
-    audit("global_two_factor_policy_updated", f"required={required}")
-    flash("Global two-factor policy saved. All users must sign in again for the new policy to apply.", "success")
+        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (mode,))
+        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("1" if mode == "shared" else "0",))
+    audit("two_factor_policy_updated", f"mode={mode}")
+    flash("Two-factor policy saved. Users must sign in again for the new policy to apply.", "success")
     return redirect(url_for("settings") + "#security")
 
 
@@ -716,8 +733,17 @@ def settings():
         values.setdefault(key, value)
     values["brand_name"] = "IP Management"
     values.setdefault("brand_logo", "")
+    shared_secret = shared_two_factor_secret()
+    shared_uri = pyotp.TOTP(shared_secret).provisioning_uri(name="All users", issuer_name="IP Management") if shared_secret else ""
+    shared_qr = ""
+    if shared_uri:
+        import qrcode
+        qr_buffer = BytesIO()
+        qrcode.make(shared_uri).save(qr_buffer, format="PNG")
+        shared_qr = "data:image/png;base64," + base64.b64encode(qr_buffer.getvalue()).decode("ascii")
     return render_template("settings.html", app_values=values,
-                           two_factor_required=two_factor_required(),
+                           two_factor_mode=two_factor_mode(), shared_two_factor_secret=shared_secret,
+                           shared_two_factor_uri=shared_uri, shared_two_factor_qr=shared_qr,
                            github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
 
