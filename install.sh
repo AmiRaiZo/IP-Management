@@ -13,7 +13,7 @@ valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ));
 # If an installation already exists, route the same install command into the
 # dedicated in-place upgrader before asking for fresh-install credentials.
 REPO_URL="https://github.com/AmiRaiZo/IP-Management"
-UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh"
+UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh?cachebust=15572c905a3e33aba30a7431e5031c4e886633b7"
 if [[ -e /opt/station-archive ]]; then
   if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
     echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
