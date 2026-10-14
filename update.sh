@@ -4,6 +4,7 @@ umask 077
 
 APP_DIR=/opt/station-archive
 DATA_DIR=/var/lib/station-archive
+BACKUP_ROOT=/var/backups
 ENV_FILE=/etc/station-archive/env
 REPO_SLUG=AmiRaiZo/IP-Management
 API_URL="https://api.github.com/repos/$REPO_SLUG/releases/latest"
