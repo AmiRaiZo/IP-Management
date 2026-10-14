@@ -6,7 +6,9 @@
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
 
   {% if stage == 'verify' %}
-  <h1>Verification code</h1>
+  {% if login_user %}<div class="login-user-card">{% if login_user.profile_image %}<img class="login-user-avatar-image" src="{{ url_for('media_file', filename=login_user.profile_image) }}" alt="{{ login_user.username }} profile">{% else %}<div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div>{% endif %}<div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h1>{{ login_user.username }}</h1><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
+  <h2 class="verify-title">Verification code</h2>
+  <p class="login-description verify-description">Enter the 6-digit code from your authenticator to continue.</p>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="code">Authenticator code</label><input class="login-input otp-input" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus placeholder="000 000">
