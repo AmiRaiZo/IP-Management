@@ -1,1 +1,35 @@
-{% extends 'base.html' %}{% block title %}Application updates | IP Archive{% endblock %}{% block content %}<div class="page-heading"><div><p class="eyebrow">MAINTENANCE</p><h1>Application updates</h1><p class="muted">Review the installed release and run the configured updater.</p></div></div><section class="panel update-card"><div class="update-symbol">↻</div><div class="update-info"><span class="stat-caption">INSTALLED VERSION</span><h2>{{ current_version|default('Installed release') }}</h2><p class="muted">{{ update_status|default('Updates are pulled from the configured public GitHub repository.') }}</p>{% if latest_version %}<p class="version-line">Latest available <strong>{{ latest_version }}</strong></p>{% endif %}</div><form method="post" action="{{ url_for('update_app') }}" data-confirm="Apply the latest code from the configured GitHub repository? The service may restart."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-primary" type="submit">Update from GitHub</button></form></section><p class="helper-note">Create a verified backup before applying an update to a production workspace.</p>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Application updates | IP Archive{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">MAINTENANCE</p><h1>Application updates</h1><p class="muted">Check published releases and update safely without SSH.</p></div>
+</div>
+<section class="panel update-card">
+  <div class="update-symbol">↻</div>
+  <div class="update-info">
+    <span class="stat-caption">INSTALLED VERSION</span>
+    <h2>{{ current_version }}</h2>
+    <p class="muted">{{ update_status }}</p>
+    {% if latest_version %}
+      <p class="version-line">Latest release <strong>{{ latest_version }}</strong></p>
+      {% if published_at %}<p class="muted">Published: {{ published_at[:10] }}</p>{% endif %}
+      {% if release_url %}<p><a href="{{ release_url }}" target="_blank" rel="noopener noreferrer">View release notes on GitHub ↗</a></p>{% endif %}
+    {% endif %}
+  </div>
+  <form method="post" action="{{ url_for('update_app') }}" data-confirm="Install the latest published release? The application may restart briefly. Your database, secrets, domain, Nginx and SSL settings are backed up/preserved.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if update_available %}
+      <button class="btn btn-primary" type="submit">Install update{% if latest_version %} {{ latest_version }}{% endif %}</button>
+    {% else %}
+      <button class="btn btn-secondary" type="button" disabled>No update available</button>
+    {% endif %}
+  </form>
+</section>
+{% if release_notes %}
+<section class="panel form-panel release-notes-panel">
+  <div class="panel-heading"><div><h2>What's new</h2><p>Notes published with the latest release.</p></div></div>
+  <pre class="release-notes">{{ release_notes }}</pre>
+</section>
+{% endif %}
+<p class="helper-note">Updates are downloaded from versioned GitHub Releases. A timestamped backup is created before installation. If the update fails, the updater attempts to restore the previous application and data.</p>
+{% endblock %}
