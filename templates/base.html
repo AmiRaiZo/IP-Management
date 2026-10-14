@@ -14,12 +14,13 @@
     <a class="brand" href="{{ url_for('index') }}">{% if app_settings.brand_logo|default("") %}<img class="brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
     <nav class="nav-links">
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon">▦</span>IP addresses</a>
+      <a href="{{ url_for('profile') }}" class="{% if request.endpoint == 'profile' %}active{% endif %}"><span class="nav-icon">◉</span>My profile</a>
       {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon">▤</span>{{ app_settings.group_label }}</a>
       <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit'] %}active{% endif %}"><span class="nav-icon">♙</span>{{ app_settings.user_label }}</a>{% endif %}
     </nav>
     {% if current_role == 'superadmin' %}<p class="nav-label nav-label-spaced">ADMINISTRATION</p><nav class="nav-links">
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}"><span class="nav-icon">⚙</span>Settings</a>
-      <a href="{{ url_for('profile') }}" class="{% if request.endpoint == 'profile' %}active{% endif %}"><span class="nav-icon">◉</span>My profile</a><a href="{{ url_for('update_page') }}" class="{% if request.endpoint in ['update_page','update_app'] %}active{% endif %}"><span class="nav-icon">↻</span>Updates</a>
+      <a href="{{ url_for('update_page') }}" class="{% if request.endpoint in ['update_page','update_app'] %}active{% endif %}"><span class="nav-icon">↻</span>Updates</a>
     </nav>{% endif %}
     <div class="sidebar-bottom"><a href="{{ url_for('profile') }}" class="profile-dot">{% if current_avatar %}<img src="{{ url_for('media_file', filename=current_avatar) }}" alt="">{% else %}{{ (current_user|string)[:1]|upper }}{% endif %}</a><div class="profile-info"><strong>{{ current_user }}</strong><span>{{ current_role|replace('superadmin','Superadmin')|title }}</span></div><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-button" type="submit" title="Sign out" aria-label="Sign out">↗</button></form></div>
   </aside>
