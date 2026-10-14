@@ -280,7 +280,7 @@ chown www-data:www-data "$VERSION_FILE"
 chmod 0640 "$VERSION_FILE"
 SUCCESS=1
 echo "PROGRESS:100:Update completed successfully"
-echo "IP Archive updated successfully."
+echo "IP Management updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
@@ -295,7 +295,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
 OVERRIDE
 cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'
 [Unit]
-Description=IP Archive privileged updater
+Description=IP Management privileged updater
 After=network-online.target
 Wants=network-online.target
 
