@@ -86,7 +86,7 @@ jobs:
           version=sys.argv[1]
           root=pathlib.Path(".")
           output=pathlib.Path(f"station-archive-v{version}.zip")
-          include=["app.py","requirements.txt","setup_admin.py","install.sh","upgrade_existing.sh","update.sh","VERSION","README.md"]
+          include=["app.py","requirements.txt","setup_admin.py","install.sh","upgrade_existing.sh","update.sh","uninstall.sh","VERSION","README.md"]
           with zipfile.ZipFile(output,"w",zipfile.ZIP_DEFLATED) as archive:
               for item in include:
                   path=root/item
