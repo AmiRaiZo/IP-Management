@@ -160,4 +160,7 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 .directory-heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.copy-password{margin-left:5px;padding:4px 7px}.password-field input{padding-right:48px}.settings-content .permission-option{display:flex;align-items:center;gap:9px;margin:0!important;white-space:nowrap}.settings-content .permission-option input{width:auto;accent-color:var(--primary)}@media(max-width:650px){.directory-heading-actions{align-items:flex-end;flex-direction:column}.directory-heading-actions .btn{width:100%}}
 
 .copy-value{display:inline-flex;align-items:center;gap:0;border:0;padding:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:5px}.copy-value:hover code,.copy-value:hover{color:var(--primary)}.copy-value:focus-visible{outline:2px solid var(--primary);outline-offset:3px}.copy-value.is-copied code,.copy-value.is-copied{color:#16865d}.copy-value code{pointer-events:none}
-163
+
+
+/* Keep HTML hidden controls hidden even when component styles set display. */
+[hidden]{display:none!important}
