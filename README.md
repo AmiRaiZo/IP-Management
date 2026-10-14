@@ -1,6 +1,6 @@
-# IP Archive
+# IP Management
 
-IP Archive is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
 
 ## Versioned releases and one-command installation
 
@@ -28,7 +28,7 @@ The installer asks for the domain, HTTPS port (default `443`), superadmin userna
 curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/uninstall.sh | sudo bash
 ```
 
-The script requires typing `DELETE IP ARCHIVE DATA` before it proceeds. It removes IP Archive's application, database, environment file, service, updater, site-specific Nginx configuration, ACME webroot, and IP Archive-named backups. It attempts to remove the detected domain's Certbot certificate. Shared system packages and unrelated Nginx sites are kept. After it finishes, run the fresh installation command above.
+The script requires typing `DELETE IP ARCHIVE DATA` before it proceeds. It removes IP Management's application, database, environment file, service, updater, site-specific Nginx configuration, ACME webroot, and IP Management-named backups. It attempts to remove the detected domain's Certbot certificate. Shared system packages and unrelated Nginx sites are kept. After it finishes, run the fresh installation command above.
 
 ### Upgrade an existing installation
 
