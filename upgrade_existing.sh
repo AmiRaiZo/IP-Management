@@ -116,7 +116,11 @@ cleanup() {
       chown -R root:www-data "$APP_DIR/.venv" || true
       find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + || true
       find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} + || true
-      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} + || true
+      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
+# Ensure the service account can traverse and read all installed Python packages.
+chmod -R g+rX "$APP_DIR/.venv"
+# Test imports as the actual systemd account using the same EnvironmentFile.
+systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p EnvironmentFile=$ENV_FILE -p WorkingDirectory=$APP_DIR "$APP_DIR/.venv/bin/python" -c 'import app; from flask import Flask; from cryptography.fernet import Fernet; print("APP_IMPORT_OK")' || true
     fi
     chown root:www-data /etc/station-archive || true
     chmod 0750 /etc/station-archive || true
@@ -154,7 +158,7 @@ with zipfile.ZipFile(archive) as z:
             raise SystemExit("Unsafe path in release package.")
     z.extractall(destination)
 PY
-for required in app.py requirements.txt VERSION templates static update.sh; do
+for required in app.py requirements.txt VERSION templates static update.sh uninstall.sh; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; exit 1; }
 done
 echo "Preparing in-place upgrade to ${RELEASE_INFO[0]} from GitHub Releases."
