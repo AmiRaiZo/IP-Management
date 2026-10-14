@@ -100,7 +100,7 @@ cleanup() {
     echo "Upgrade failed; restoring the application files and environment from $BACKUP_DIR." >&2
     rsync -a --delete --exclude='.venv/' "$BACKUP_DIR/app/" "$APP_DIR/" || true
     cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
-    chown -R root:root "$APP_DIR"
+    chown -R root:www-data "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
     find "$APP_DIR" -type d -exec chmod 0750 {} + || true
     find "$APP_DIR" -type f -exec chmod g+r {} + || true
@@ -124,7 +124,7 @@ done
 DEPLOYED=1
 systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
-chown -R root:root "$APP_DIR"
+chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
 find "$APP_DIR" -type d -exec chmod 0750 {} +
 find "$APP_DIR" -type f -exec chmod g+r {} +
@@ -181,7 +181,7 @@ DEPLOYED=0; SUCCESS=0
 cleanup() {
   if (( DEPLOYED == 1 && SUCCESS == 0 )); then
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
-      chown -R root:root /opt/station-archive
+      chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
       find /opt/station-archive -type d -exec chmod 0750 {} +
       find /opt/station-archive -type f -exec chmod g+r {} +
@@ -204,7 +204,7 @@ rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup
 DEPLOYED=1
 systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
-chown -R root:root /opt/station-archive
+chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -type d -exec chmod 0750 {} +
 find /opt/station-archive -type f -exec chmod g+r {} +
