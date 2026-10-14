@@ -722,18 +722,19 @@ def settings():
                 "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
                 "group_label": "Groups", "user_label": "Users & permissions"}
     if request.method == "POST":
-        values = {key: request.form.get(key, "").strip()[:500] for key in defaults}
-        values["brand_name"] = "IP Management"
-        if not re.fullmatch(r"#[0-9a-fA-F]{6}", values.get("accent_color", "")):
+        values = {key: request.form.get(key, "").strip()[:500] for key in defaults if key in request.form}
+        if "brand_name" in values:
+            values["brand_name"] = "IP Management"
+        if "accent_color" in values and not re.fullmatch(r"#[0-9a-fA-F]{6}", values["accent_color"]):
             flash("Accent color must be a valid six-digit hex color.", "error")
-            return redirect(url_for("settings"))
+            return redirect(url_for("settings") + "#branding")
         logo = request.files.get("brand_logo")
         logo_name = ""
         if logo and logo.filename:
             ext = Path(secure_filename(logo.filename)).suffix.lower()
             if ext not in ALLOWED_IMAGE_EXTENSIONS:
                 flash("Logo must be PNG, JPG, JPEG, or WEBP.", "error")
-                return redirect(url_for("settings"))
+                return redirect(url_for("settings") + "#branding")
             logo_name = "brand" + ext
             logo.save(UPLOAD_DIR / logo_name)
         with connect_db() as db:
@@ -742,8 +743,8 @@ def settings():
             if logo_name:
                 db.execute("INSERT INTO app_settings(key,value) VALUES('brand_logo',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (logo_name,))
         audit("application_settings_updated")
-        flash("Application appearance and text settings saved.", "success")
-        return redirect(url_for("settings"))
+        flash("Application settings saved.", "success")
+        return redirect(url_for("settings") + ("#branding" if "brand_subtitle" in values or "brand_logo_text" in values else "#text"))
     with connect_db() as db:
         values = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM app_settings")}
     for key, value in defaults.items():
