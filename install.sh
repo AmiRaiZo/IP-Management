@@ -252,18 +252,28 @@ find /opt/station-archive -type f -exec chmod 0640 {} +
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
 echo "PROGRESS:62:Installing Python dependencies"
+# Rebuild the environment if Gunicorn's actual WSGI module is missing, even if pip metadata says installed.
+if ! /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run' >/dev/null 2>&1; then
+  mv /opt/station-archive/.venv "$TMP/venv-before-rebuild"
+  python3 -m venv /opt/station-archive/.venv
+fi
+/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
 /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
 chown root:www-data /opt/station-archive/.venv/bin/gunicorn
 chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
+sudo -u www-data /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn service-account check OK:", gunicorn.__version__)'
 echo "PROGRESS:80:Validating server configuration"
 nginx -t
 echo "PROGRESS:88:Restarting application and web server"
 systemctl restart station-archive
 systemctl reload nginx
 systemctl is-active --quiet station-archive
+HTTP_CODE="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_INTERNAL_PORT:-443}/" || true)"
+[[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]] || { echo "Application health check failed (HTTP $HTTP_CODE)." >&2; exit 1; }
 printf '%s\n' "$SOURCE_SHA" > "$VERSION_FILE"
 chown www-data:www-data "$VERSION_FILE"
 chmod 0640 "$VERSION_FILE"
