@@ -65,6 +65,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("setup-2fa", response.location)
         response = self.client.get("/setup-2fa")
         self.assertEqual(response.status_code, 200)
+        self.assertIn(b"data:image/png;base64,", response.data)
         with self.client.session_transaction() as sess:
             secret = sess["pending_2fa_secret"]
         response = self.client.post("/setup-2fa", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
