@@ -140,15 +140,20 @@ chmod -R g+rX "$APP_DIR/.venv"
 chown -R www-data:www-data "$DATA_DIR"
 find "$DATA_DIR" -type d -exec chmod 0750 {} +
 find "$DATA_DIR" -type f -exec chmod 0640 {} +
-if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"; fi
+# Detect an incomplete/corrupt virtualenv before attempting an in-place pip repair.
+if [[ ! -x "$APP_DIR/.venv/bin/python" ]] || ! "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run' >/dev/null 2>&1; then
+  if [[ -d "$APP_DIR/.venv" ]]; then mv "$APP_DIR/.venv" "$BACKUP_DIR/venv-before-rebuild"; fi
+  python3 -m venv "$APP_DIR/.venv"
+fi
+"$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
 "$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
-# pip may consider Gunicorn installed even when its package files are missing.
-# Force-reinstall it and verify the exact module used by the systemd entrypoint.
 "$APP_DIR/.venv/bin/python" -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-# Make the entry point executable by the www-data service account.
+chown -R root:www-data "$APP_DIR/.venv"
+chmod -R g+rX "$APP_DIR/.venv"
 chown root:www-data "$APP_DIR/.venv/bin/gunicorn"
 chmod 0750 "$APP_DIR/.venv/bin/gunicorn"
 "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
+sudo -u www-data "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn service-account check OK:", gunicorn.__version__)'
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
@@ -271,6 +276,8 @@ nginx -t
 systemctl daemon-reload
 systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
+HTTP_CODE="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" || true)"
+[[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]] || { echo "Application health check failed (HTTP $HTTP_CODE)." >&2; exit 1; }
 git -C "$WORK_DIR/source" rev-parse HEAD > "$DATA_DIR/version"
 chown www-data:www-data "$DATA_DIR/version"
 chmod 0640 "$DATA_DIR/version"
