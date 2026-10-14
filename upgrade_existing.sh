@@ -195,6 +195,10 @@ umask 077
 ENV_FILE=/etc/station-archive/env
 [[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
 set -a; . "$ENV_FILE"; set +a
+# The deployed environment stores APP_INTERNAL_PORT; the old updater mistakenly
+# referenced an unset APP_PORT under `set -u`, causing rollback after restart.
+APP_PORT="${APP_INTERNAL_PORT:-${APP_PORT:-}}"
+[[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Configured internal application port is missing or invalid." >&2; exit 1; }
 UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
 [[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
 [[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
