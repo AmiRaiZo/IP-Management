@@ -339,6 +339,25 @@ class ArchiveTests(unittest.TestCase):
             self.assertFalse(payload["done"])
             self.assertEqual(payload["progress"], 12)
 
+    def test_update_status_marks_python_traceback_as_failure(self):
+        user_id, _ = self.create_user("status-traceback-admin")
+        with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
+            log_file.read_text.return_value = "\\n".join([
+                "Starting update…",
+                "PROGRESS:80:Verifying Gunicorn as the actual service user",
+                "Traceback (most recent call last):",
+                "ModuleNotFoundError: No module named 'gunicorn.app'",
+            ])
+            with self.client.session_transaction() as sess:
+                sess["user_id"] = user_id
+                sess["two_factor_verified"] = True
+            response = self.client.get("/update/status")
+            self.assertEqual(response.status_code, 200)
+            payload = response.get_json()
+            self.assertTrue(payload["done"])
+            self.assertFalse(payload["success"])
+            self.assertEqual(payload["phase"], "Update failed")
+
     def test_superadmin_can_save_public_domain_and_port_settings(self):
         _, secret = self.create_user("deployment-settings")
         self.assertEqual(self.login("deployment-settings", secret).status_code, 302)
