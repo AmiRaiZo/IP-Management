@@ -1,0 +1,57 @@
+(() => {
+  const phase = document.getElementById('deploy-phase');
+  const percent = document.getElementById('deploy-percent');
+  const fill = document.getElementById('deploy-progress-fill');
+  const progress = document.getElementById('deploy-progress');
+  const log = document.getElementById('deploy-log');
+  const message = document.getElementById('deploy-message');
+  const spinner = document.getElementById('deploy-spinner');
+  const live = document.getElementById('terminal-live');
+  let finished = false;
+  let previousLog = '';
+  async function poll() {
+    if (finished) return;
+    try {
+      const response = await fetch(`/update/status?t=${Date.now()}`, {cache: 'no-store', headers: {'Accept': 'application/json'}});
+      if (!response.ok) throw new Error('The application service is restarting. Reconnecting…');
+      const data = await response.json();
+      if (data.log !== previousLog) {
+        previousLog = data.log;
+        log.textContent = data.log || 'Waiting for server output…';
+        log.scrollTop = log.scrollHeight;
+      }
+      const value = Math.max(0, Math.min(100, Number(data.progress) || 0));
+      percent.textContent = `${value}%`;
+      fill.style.width = `${value}%`;
+      progress.setAttribute('aria-valuenow', String(value));
+      phase.textContent = data.phase || 'Running update…';
+      if (data.done && data.success) {
+        finished = true;
+        percent.textContent = '100%';
+        fill.style.width = '100%';
+        phase.textContent = 'Update completed successfully';
+        message.textContent = 'Returning to the home page…';
+        spinner.hidden = true;
+        live.textContent = 'DONE';
+        live.classList.add('terminal-live-done');
+        setTimeout(() => { window.location.assign('/update/finish'); }, 1800);
+        return;
+      }
+      if (data.done && !data.success) {
+        finished = true;
+        phase.textContent = 'Update failed';
+        message.textContent = 'The existing version was restored when possible. Review the output and try again after resolving the error.';
+        spinner.hidden = true;
+        live.textContent = 'FAILED';
+        live.classList.add('terminal-live-failed');
+        return;
+      }
+      setTimeout(poll, 1000);
+    } catch (error) {
+      phase.textContent = error.message || 'Reconnecting to the server…';
+      if (message) message.textContent = 'The app may restart during deployment. Waiting for it to come back online…';
+      setTimeout(poll, 1500);
+    }
+  }
+  poll();
+})();
