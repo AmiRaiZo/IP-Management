@@ -70,7 +70,7 @@ done
 
 install -d -o root -g root -m 0750 /opt/station-archive
 rsync -a --delete --exclude='.git/' "$SOURCE_DIR/" /opt/station-archive/
-chown -R root:root /opt/station-archive
+chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 chmod 0750 /opt/station-archive
 python3 -m venv /opt/station-archive/.venv
@@ -194,7 +194,7 @@ SUCCESS=0
 cleanup() {
   if (( DEPLOYED == 1 && SUCCESS == 0 )); then
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
-      chown -R root:root /opt/station-archive
+      chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
       find /opt/station-archive -type d -exec chmod 0750 {} +
       find /opt/station-archive -type f -exec chmod g+r {} +
@@ -217,7 +217,7 @@ rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup
 DEPLOYED=1
 systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
-chown -R root:root /opt/station-archive
+chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -type d -exec chmod 0750 {} +
 find /opt/station-archive -type f -exec chmod g+r {} +
