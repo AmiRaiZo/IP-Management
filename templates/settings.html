@@ -46,7 +46,7 @@
 
     <section class="panel form-panel settings-section" id="directory" data-settings-section="directory">
       <div class="panel-heading"><div><h2>IP Directory display</h2><p>Password visibility and copying.</p></div></div>
-      <div class="setting-row"><div><strong>Saved connection passwords</strong><p class="muted">The Password column is shown to the super administrator beside Username. Click a password to copy it. Passwords remain encrypted in the database and are not shown to regular users.</p></div></div>
+      <div class="setting-row"><div><strong>Saved connection passwords</strong><p class="muted">Super administrators always have access. To choose which other accounts can see and copy saved device passwords, open Users, select an account, and enable “Can view saved IP passwords”. This permission is managed separately for each user. Passwords remain encrypted in the database.</p></div><a class="btn btn-secondary" href="{{ url_for('users') }}">Manage users &amp; permissions</a></div>
     </section>
 
     <section class="panel form-panel settings-section" id="general" data-settings-section="general">

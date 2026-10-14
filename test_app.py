@@ -282,6 +282,44 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(edit.status_code, 403)
         self.assertNotIn(b"hidden-device-secret", edit.data)
 
+    def test_superadmin_can_grant_password_visibility_to_selected_user(self):
+        _, root_secret = self.create_user("password-permission-root")
+        self.assertEqual(self.login("password-permission-root", root_secret).status_code, 302)
+        user_id, user_secret = self.create_user("password-reader", role="admin")
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            db.execute(
+                "INSERT INTO ips(name,ip_address,username,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                ("Permitted router", "192.0.2.100", "operator", archive.vault.encrypt(b"allowed-secret").decode(), group_id, "root", archive.now(), archive.now()),
+            )
+        edit_page = self.client.get(f"/users/{user_id}")
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertIn(b'name="can_view_passwords"', edit_page.data)
+        response = self.client.post(f"/users/{user_id}", data={
+            "csrf_token": self.csrf(), "role": "admin", "enabled": "1",
+            "can_view_passwords": "1", "groups": [str(group_id)],
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT can_view_passwords FROM users WHERE id=?", (user_id,)).fetchone()
+        self.assertEqual(row["can_view_passwords"], 1)
+
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.assertEqual(self.login("password-reader", user_secret).status_code, 302)
+        directory = self.client.get("/")
+        self.assertEqual(directory.status_code, 200)
+        self.assertIn(b"<th>Password</th>", directory.data)
+        self.assertIn(b"allowed-secret", directory.data)
+        self.assertIn(b'data-copy-value="allowed-secret"', directory.data)
+
+    def test_update_success_button_says_ok(self):
+        _, secret = self.create_user("update-success-user")
+        self.assertEqual(self.login("update-success-user", secret).status_code, 302)
+        response = self.client.get("/?update=success")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="close-update-success">OK</button>', response.data)
+        self.assertNotIn(b"Back to IP addresses", response.data)
+
     def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
         _, secret = self.create_user("grouporder")
         self.assertEqual(self.login("grouporder", secret).status_code, 302)

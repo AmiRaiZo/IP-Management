@@ -135,7 +135,7 @@ def init_db():
         """)
         # In-place migrations preserve the database created by the first release.
         user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)")}
-        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
+        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1"), ("can_view_passwords", "INTEGER NOT NULL DEFAULT 0")):
             if name not in user_cols:
                 db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
         if "profile_image" not in user_cols:
@@ -482,7 +482,7 @@ def index():
         lower = term.casefold()
         rows = [r for r in rows if lower in (r["ip_address"] or "").casefold() or lower in (r["name"] or "").casefold() or lower in (r["username"] or "").casefold() or lower in (r["notes"] or "").casefold()]
     with connect_db() as db:
-        show_ip_passwords = request.user["role"] == "superadmin"
+        show_ip_passwords = request.user["role"] == "superadmin" or bool(request.user.get("can_view_passwords", 0))
         if request.user["role"] == "superadmin":
             groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
         else:
@@ -506,7 +506,7 @@ def index():
             prepared_rows.append(item)
         rows = prepared_rows
     return render_template("index.html", ips=rows, q=term, groups=groups, group_filter=group_filter,
-                           show_ip_passwords=show_ip_passwords and request.user["role"] == "superadmin",
+                           show_ip_passwords=show_ip_passwords,
                            update_success=request.args.get("update") == "success")
 
 
@@ -714,7 +714,7 @@ def users():
 @superadmin_required
 def user_edit(user_id):
     with connect_db() as db:
-        user = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled FROM users WHERE id=?", (user_id,)).fetchone()
+        user = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,can_view_passwords FROM users WHERE id=?", (user_id,)).fetchone()
         groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
         ips = db.execute("SELECT id,ip_address,name,group_id FROM ips ORDER BY ip_address").fetchall()
         allowed_groups = {r[0] for r in db.execute("SELECT group_id FROM user_group_access WHERE user_id=?", (user_id,))}
@@ -724,6 +724,7 @@ def user_edit(user_id):
     if request.method == "POST":
         role = request.form.get("role", "admin")
         enabled = 1 if request.form.get("enabled") == "1" else 0
+        can_view_passwords = 1 if role == "superadmin" or request.form.get("can_view_passwords") == "1" else 0
         two_factor_setting_submitted = "two_factor_enabled" in request.form
         two_factor_enabled = (1 if request.form.get("two_factor_enabled") == "1" else 0
                               if two_factor_setting_submitted else int(user["two_factor_enabled"]))
@@ -735,7 +736,7 @@ def user_edit(user_id):
         else:
             selected_groups = {int(x) for x in request.form.getlist("groups") if x.isdigit()}
             with connect_db() as db:
-                db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=? WHERE id=?", (role, enabled, two_factor_enabled, user_id))
+                db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=?,can_view_passwords=? WHERE id=?", (role, enabled, two_factor_enabled, can_view_passwords, user_id))
                 if two_factor_setting_submitted and not two_factor_enabled:
                     db.execute("UPDATE users SET totp_secret='',two_factor_enrolled=0 WHERE id=?", (user_id,))
                 if password:
