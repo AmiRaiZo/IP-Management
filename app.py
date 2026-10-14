@@ -45,8 +45,8 @@ app.config.update(
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-archive-remember-2fa")
-REMEMBER_2FA_COOKIE = "ip_archive_2fa"
+two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-management-remember-2fa")
+REMEMBER_2FA_COOKIE = "ip_management_2fa"
 REMEMBER_2FA_SECONDS = 24 * 60 * 60
 VERSION_FILE = DATA_DIR / "version"
 UPDATE_TARGET_FILE = DATA_DIR / "update-target"
@@ -184,7 +184,15 @@ def login_required(fn):
     return wrapped
 
 
+def two_factor_required():
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_required'").fetchone()
+    return bool(row and row["value"] == "1")
+
+
 def remembered_two_factor(user_id):
+    if two_factor_required():
+        return False
     token = request.cookies.get(REMEMBER_2FA_COOKIE, "")
     if not token:
         return False
@@ -233,14 +241,15 @@ def inject_globals():
     with connect_db() as db:
         settings_rows = db.execute("SELECT key,value FROM app_settings").fetchall()
     app_settings = {row["key"]: row["value"] for row in settings_rows}
-    defaults = {"brand_name": "IP Archive", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
-                "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
-                "accent_color": "#4569e8", "footer_text": "IP Archive · Secure network inventory",
+    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
+                "login_title": "Welcome back", "login_subtitle": "",
+                "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
                 "app_description": "Keep connection details organized, searchable, and available to the right people.",
                 "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
                 "group_label": "Groups", "user_label": "Users & permissions"}
     for key, value in defaults.items():
         app_settings.setdefault(key, value)
+    app_settings["brand_name"] = "IP Management"
     return {"csrf_token": session["csrf_token"], "current_user": session.get("username"),
             "current_role": user["role"] if user else "", "dark_mode": True, "app_settings": app_settings,
             "current_avatar": user["profile_image"] if user else ""}
@@ -286,20 +295,20 @@ def login():
         password = request.form.get("password", "")
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
-        if user and password_matches(password, user["password_hash"]) and not user["totp_secret"]:
-            session.clear()
-            session["pending_2fa_user_id"] = user["id"]
-            session["pending_2fa_secret"] = pyotp.random_base32()
-            session["csrf_token"] = secrets.token_urlsafe(32)
-            return redirect(url_for("setup_2fa"))
         if user and password_matches(password, user["password_hash"]):
-            if remembered_two_factor(user["id"]):
-                establish_login(user)
-                return redirect(safe_login_target())
-            session.clear()
-            session["pending_2fa_user_id"] = user["id"]
-            session["csrf_token"] = secrets.token_urlsafe(32)
-            return render_template("login.html", stage="verify")
+            if two_factor_required():
+                if not user["totp_secret"]:
+                    session.clear()
+                    session["pending_2fa_user_id"] = user["id"]
+                    session["pending_2fa_secret"] = pyotp.random_base32()
+                    session["csrf_token"] = secrets.token_urlsafe(32)
+                    return redirect(url_for("setup_2fa"))
+                session.clear()
+                session["pending_2fa_user_id"] = user["id"]
+                session["csrf_token"] = secrets.token_urlsafe(32)
+                return render_template("login.html", stage="verify")
+            establish_login(user)
+            return redirect(safe_login_target())
         time.sleep(0.35)
         flash("Invalid username or password.", "error")
     return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password")
@@ -312,31 +321,25 @@ def safe_login_target():
 
 @app.route("/setup-2fa", methods=["GET", "POST"])
 def setup_2fa():
-    authenticated_user = current_user_row() if session.get("user_id") else None
-    if authenticated_user and not session.get("setup_2fa_user_id"):
-        session["setup_2fa_user_id"] = authenticated_user["id"]
-        session["setup_2fa_secret"] = pyotp.random_base32()
-    user_id = session.get("pending_2fa_user_id") or session.get("setup_2fa_user_id")
-    secret = session.get("pending_2fa_secret") or session.get("setup_2fa_secret")
-    if not user_id or not secret:
+    # Enrollment is only allowed in the mandatory first-login flow.
+    # Signed-in users cannot alter their own authenticator configuration.
+    user_id = session.get("pending_2fa_user_id")
+    secret = session.get("pending_2fa_secret")
+    if not two_factor_required() or not user_id or not secret:
+        if session.get("user_id"):
+            abort(403)
         return redirect(url_for("login"))
     with connect_db() as db:
         user = db.execute("SELECT id,username FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
     if not user:
         session.clear()
         return redirect(url_for("login"))
-    uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Archive")
+    uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
     if request.method == "POST":
         code = re.sub(r"\s", "", request.form.get("code", ""))
         if pyotp.TOTP(secret).verify(code, valid_window=1):
             with connect_db() as db:
                 db.execute("UPDATE users SET totp_secret=? WHERE id=?", (secret, user_id))
-            if authenticated_user:
-                session.pop("setup_2fa_user_id", None)
-                session.pop("setup_2fa_secret", None)
-                audit("two_factor_reconfigured")
-                flash("Two-factor authentication settings updated.", "success")
-                return redirect(url_for("settings"))
             session.clear()
             # Authentication must remain a browser-session cookie. Only the
             # separate signed 2FA-remember cookie is persistent (24 hours).
@@ -570,7 +573,7 @@ def users():
                 with connect_db() as db:
                     cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)", (username, password_hash(password), now(), role, secret))
                 audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
-                uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="IP Archive")
+                uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="IP Management")
                 flash(f"User created. Configure an authenticator app with this secret: {secret} | URI: {uri}", "success")
                 return redirect(url_for("users"))
             except sqlite3.IntegrityError:
@@ -620,17 +623,29 @@ def user_edit(user_id):
     return render_template("user_edit.html", user=user, groups=groups, ips=ips, allowed_groups=allowed_groups, ip_rules=ip_rules)
 
 
+@app.post("/settings/security")
+@superadmin_required
+def update_security_settings():
+    required = "1" if request.form.get("two_factor_required") == "1" else "0"
+    with connect_db() as db:
+        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (required,))
+    audit("global_two_factor_policy_updated", f"required={required}")
+    flash("Global two-factor policy saved. All users must sign in again for the new policy to apply.", "success")
+    return redirect(url_for("settings") + "#security")
+
+
 @app.route("/settings", methods=["GET", "POST"])
 @superadmin_required
 def settings():
-    defaults = {"brand_name": "IP Archive", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
+    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
                 "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
-                "accent_color": "#4569e8", "footer_text": "IP Archive · Secure network inventory",
+                "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
                 "app_description": "Keep connection details organized, searchable, and available to the right people.",
                 "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
                 "group_label": "Groups", "user_label": "Users & permissions"}
     if request.method == "POST":
         values = {key: request.form.get(key, "").strip()[:500] for key in defaults}
+        values["brand_name"] = "IP Management"
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", values.get("accent_color", "")):
             flash("Accent color must be a valid six-digit hex color.", "error")
             return redirect(url_for("settings"))
@@ -655,8 +670,10 @@ def settings():
         values = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM app_settings")}
     for key, value in defaults.items():
         values.setdefault(key, value)
+    values["brand_name"] = "IP Management"
     values.setdefault("brand_logo", "")
     return render_template("settings.html", app_values=values,
+                           two_factor_required=two_factor_required(),
                            github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
 
@@ -796,10 +813,12 @@ def update_status():
         if match:
             progress = max(progress, min(99, int(match.group(1))))
             phase = match.group(2).strip()
-        if "IP Archive updated successfully." in line:
+        if "IP Management updated successfully." in line:
             progress, phase, done, success = 100, "Update completed successfully", True, True
-        elif "Update failed" in line or "Update failed;" in line or "Update process failed" in line:
-            done, success, phase = True, False, "Update failed. Check the log output below."
+        elif ("Update failed" in line or "Update failed;" in line or "Update process failed" in line
+              or "unable to change to root gid" in line or "error initializing audit plugin" in line
+              or "Operation not permitted" in line or "sudo:" in line):
+            done, success, phase = True, False, "Update failed. Copy the diagnostic output below and send it for troubleshooting."
     if not done and log and "Starting update" not in log and progress == 0:
         phase = "Running server update commands…"
     return {"log": log, "progress": progress, "phase": phase, "done": done, "success": success,
@@ -852,7 +871,7 @@ def update_finish():
         log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")
     except OSError:
         log = ""
-    if "IP Archive updated successfully." in log:
+    if "IP Management updated successfully." in log:
         flash("Update completed successfully. The latest version is now installed.", "success")
         return redirect(url_for("index"))
     if "Update failed" in log or "Update process failed" in log:
