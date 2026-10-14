@@ -290,6 +290,8 @@ install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
 cat > /etc/systemd/system/station-archive.service.d/update-privileges.conf <<'OVERRIDE'
 [Service]
 NoNewPrivileges=false
+# sudo needs setuid/setgid within the service capability bounding set.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
 OVERRIDE
 cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'
 [Unit]
