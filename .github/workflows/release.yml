@@ -59,10 +59,18 @@ jobs:
           except Exception:
               tag = ""
           if re.fullmatch(r"\d+\.\d+\.\d+", tag):
-              old_major, old_minor, old_patch = map(int, tag.split("."))
-              if (old_major, old_minor) == (major, minor):
-                  patch = max(patch, old_patch + 1)
-          print(f"{major}.{minor}.{patch}")
+              base_tuple = (major, minor, patch)
+              latest_tuple = tuple(map(int, tag.split(".")))
+              if base_tuple > latest_tuple:
+                  # VERSION explicitly starts a newer major/minor series.
+                  next_version = base_tuple
+              else:
+                  # Never publish an automatically generated version below
+                  # the latest release, including after a manual major bump.
+                  next_version = (latest_tuple[0], latest_tuple[1], latest_tuple[2] + 1)
+          else:
+              next_version = (major, minor, patch)
+          print(".".join(map(str, next_version)))
           PY
           )"
           fi
