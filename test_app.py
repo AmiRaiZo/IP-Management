@@ -41,10 +41,14 @@ class ArchiveTests(unittest.TestCase):
 
     def login(self, username, secret, password="test-pass"):
         self.client.get("/login")
-        return self.client.post("/login", data={
+        response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": username, "password": password,
-            "code": pyotp.TOTP(secret).now(),
         })
+        if response.status_code == 200 and b'name="code"' in response.data:
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now(),
+            })
+        return response
 
     def test_private_pages_require_login(self):
         response = self.client.get("/")
@@ -68,6 +72,22 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             user = db.execute("SELECT totp_secret FROM users WHERE username='firstadmin'").fetchone()
         self.assertEqual(user["totp_secret"], secret)
+
+    def test_password_then_totp_and_remember_2fa_for_one_day(self):
+        _, secret = self.create_user("two-step")
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Authenticator code', response.data)
+        self.assertNotIn(b'name="password"', response.data)
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(self.client.get_cookie("ip_archive_2fa"))
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/", response.location)
 
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
