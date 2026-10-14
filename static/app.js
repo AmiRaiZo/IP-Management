@@ -9,7 +9,7 @@
     sidebarToggle.setAttribute('aria-expanded', String(open));
     sidebarToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
     sidebarToggle.title = open ? 'Close navigation' : 'Open navigation';
-    sidebarToggle.querySelector('span').textContent = open ? '×' : '☰';
+    sidebarToggle.querySelector('span').textContent = '☰';
   }
   if (sidebar && sidebarToggle) {
     const mobileSidebar = window.matchMedia('(max-width: 720px)');
