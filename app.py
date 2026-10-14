@@ -917,8 +917,9 @@ def update_status():
             progress, phase, done, success = 100, "Update completed successfully", True, True
         elif ("Update failed" in line or "Update failed;" in line or "Update process failed" in line
               or "unable to change to root gid" in line or "error initializing audit plugin" in line
-              or "Operation not permitted" in line or "sudo:" in line):
-            done, success, phase = True, False, "Update failed. Copy the diagnostic output below and send it for troubleshooting."
+              or (("Operation not permitted" in line or line.lstrip().startswith("sudo:"))
+                  and "unable to send audit message" not in line.lower())):
+            done, success, phase = True, False, "Update failed"
     if not done and log and "Starting update" not in log and progress == 0:
         phase = "Running server update commands…"
     return {"log": log, "progress": progress, "phase": phase, "done": done, "success": success,
