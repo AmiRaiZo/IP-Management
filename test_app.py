@@ -1,7 +1,6 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
