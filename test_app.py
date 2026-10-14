@@ -90,8 +90,8 @@ class ArchiveTests(unittest.TestCase):
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/", response.location)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Authenticator code', response.data)
 
     def test_global_two_factor_policy_is_superadmin_controlled(self):
         _, secret = self.create_user("policyadmin", role="superadmin")
@@ -106,6 +106,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertFalse(archive.two_factor_required())
 
         self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
         _, user_secret = self.create_user("policyuser", role="admin")
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": "policyuser", "password": "test-pass",
