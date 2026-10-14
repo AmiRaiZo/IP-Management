@@ -658,6 +658,7 @@ def latest_release():
 @app.get("/update/check")
 @superadmin_required
 def check_update():
+    current = installed_version()
     try:
         release = latest_release()
         current = installed_version(release)
