@@ -72,10 +72,13 @@ install -d -o root -g root -m 0750 /opt/station-archive
 rsync -a --delete --exclude='.git/' "$SOURCE_DIR/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-chmod 0750 /opt/station-archive
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod 0640 {} +
 python3 -m venv /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install --upgrade pip
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
 
 install -d -o root -g root -m 0750 /etc/station-archive
 install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
@@ -107,6 +110,9 @@ chown root:www-data /etc/station-archive/env
 chmod 0640 /etc/station-archive/env
 chown root:www-data /etc/station-archive
 chmod 0750 /etc/station-archive
+chown -R www-data:www-data /var/lib/station-archive
+find /var/lib/station-archive -type d -exec chmod 0750 {} +
+find /var/lib/station-archive -type f -exec chmod 0640 {} +
 
 cat > /etc/systemd/system/station-archive.service <<EOF
 [Unit]
@@ -197,9 +203,12 @@ cleanup() {
       chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
       find /opt/station-archive -type d -exec chmod 0750 {} +
-      find /opt/station-archive -type f -exec chmod g+r {} +
+      find /opt/station-archive -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
+      chown -R www-data:www-data /var/lib/station-archive || true
+      find /var/lib/station-archive -type d -exec chmod 0750 {} + || true
+      find /var/lib/station-archive -type f -exec chmod 0640 {} + || true
       /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
       systemctl restart station-archive >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
@@ -220,9 +229,13 @@ rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/stati
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -type d -exec chmod 0750 {} +
-find /opt/station-archive -type f -exec chmod g+r {} +
+find /opt/station-archive -type f -exec chmod 0640 {} +
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
+install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
+chown -R www-data:www-data /var/lib/station-archive
+find /var/lib/station-archive -type d -exec chmod 0750 {} +
+find /var/lib/station-archive -type f -exec chmod 0640 {} +
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive
@@ -277,4 +290,3 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
-
