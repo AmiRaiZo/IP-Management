@@ -106,6 +106,7 @@
   const updateState = document.getElementById('update-modal-state');
   const copyUpdateLog = document.getElementById('copy-update-log');
   let updatePollHandle = null;
+  let updatePollFailures = 0;
   function showUpdateModal() {
     if (!updateModal) return;
     updateModal.hidden = false;
@@ -134,6 +135,7 @@
       const response = await fetch('/update/status', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not read updater status.');
+      updatePollFailures = 0;
       updateLog.value = result.log || '(No output received yet.)';
       updateLog.scrollTop = updateLog.scrollHeight;
       updatePhase.textContent = result.phase || 'Working…';
@@ -154,11 +156,17 @@
         } else finishUpdateModal(false);
       }
     } catch (error) {
-      updateLog.value += '\n' + (error.message || 'Unable to poll updater status.');
-      updatePhase.textContent = 'Could not read updater status.';
-      if (updatePollHandle) clearInterval(updatePollHandle);
-      updatePollHandle = null;
-      finishUpdateModal(false);
+      // The app service is stopped briefly during deployment. Keep polling while
+      // it restarts instead of treating a temporary 502/network error as failure.
+      updatePollFailures += 1;
+      updatePhase.textContent = 'Reconnecting…';
+      updateState.textContent = 'RUNNING';
+      if (updatePollFailures >= 600) {
+        if (updatePollHandle) clearInterval(updatePollHandle);
+        updatePollHandle = null;
+        updateLog.value += '\nUpdate status could not be reached for 12 minutes.';
+        finishUpdateModal(false);
+      }
     }
   }
   applyUpdateForm?.addEventListener('submit', async event => {
@@ -172,7 +180,7 @@
       const html = await response.text();
       if (!response.ok || /Update could not start|Updater is not installed|Check for updates first|GitHub changed since the check|No update is available/.test(html)) {
         updateLog.value = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || ('HTTP ' + response.status);
-        throw new Error('The updater did not start. Copy the diagnostic output below.');
+        throw new Error('Could not start update.');
       }
       updatePollHandle = setInterval(pollUpdateStatus, 1200);
       await pollUpdateStatus();
