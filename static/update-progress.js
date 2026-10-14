@@ -8,6 +8,11 @@
   const spinner = document.getElementById('deploy-spinner');
   const live = document.getElementById('terminal-live');
   let finished = false;
+  let updateRunning = true;
+  const warnLeaving = event => { if (!updateRunning) return; event.preventDefault(); event.returnValue = 'The server update is still running. Leave this page?'; return event.returnValue; };
+  window.addEventListener('beforeunload', warnLeaving);
+  history.pushState({deployment:true}, '', location.href);
+  window.addEventListener('popstate', () => { if (updateRunning) { history.pushState({deployment:true}, '', location.href); message.textContent = 'The update is still running. Please wait here until it finishes.'; } });
   let previousLog = '';
   async function poll() {
     if (finished) return;
@@ -26,7 +31,7 @@
       progress.setAttribute('aria-valuenow', String(value));
       phase.textContent = data.phase || 'Running update…';
       if (data.done && data.success) {
-        finished = true;
+        finished = true; updateRunning = false; window.removeEventListener('beforeunload', warnLeaving);
         percent.textContent = '100%';
         fill.style.width = '100%';
         phase.textContent = 'Update completed successfully';
@@ -38,7 +43,7 @@
         return;
       }
       if (data.done && !data.success) {
-        finished = true;
+        finished = true; updateRunning = false; window.removeEventListener('beforeunload', warnLeaving);
         phase.textContent = 'Update failed';
         message.textContent = 'The existing version was restored when possible. Review the output and try again after resolving the error.';
         spinner.hidden = true;
