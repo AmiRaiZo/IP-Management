@@ -102,7 +102,18 @@ install -d -o root -g root -m 0755 "$BACKUP_ROOT"
 BACKUP="$BACKUP_ROOT/station-archive-release-$STAMP"
 install -d -o root -g root -m 0700 "$BACKUP/app" "$BACKUP/data"
 rsync -a --exclude='.venv/' "$APP_DIR/" "$BACKUP/app/"
-rsync -a "$DATA_DIR/" "$BACKUP/data/"
+# Use SQLite's online backup API so the snapshot includes committed WAL data
+# even if users are still working while the release package is downloaded.
+rsync -a --exclude='archive.sqlite3*' "$DATA_DIR/" "$BACKUP/data/"
+if [[ -f "$DATA_DIR/archive.sqlite3" ]]; then
+  python3 - "$DATA_DIR/archive.sqlite3" "$BACKUP/data/archive.sqlite3" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=30) as source:
+    with sqlite3.connect(sys.argv[2]) as target:
+        source.backup(target)
+PY
+  chmod 0600 "$BACKUP/data/archive.sqlite3"
+fi
 install -o root -g root -m 0600 "$ENV_FILE" "$BACKUP/env"
 echo "Backup created at $BACKUP"
 DEPLOYED=1
