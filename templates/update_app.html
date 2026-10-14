@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Application updates | IP Archive{% endblock %}
+{% block title %}Updates | IP Management{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">SYSTEM MAINTENANCE</p><h1>Updates</h1><p class="muted">Check the repository before installing anything.</p></div></div>
 <section class="panel update-card update-card-modern">
@@ -10,4 +10,15 @@
   </div>
 </section>
 <p class="helper-note">Installing only starts when GitHub confirms that a different version is available. The update process keeps the database and application secrets.</p>
+<div class="update-modal-backdrop" id="update-modal" hidden role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
+  <section class="update-modal-panel">
+    <div class="update-modal-head"><div><p class="eyebrow">IP MANAGEMENT UPDATER</p><h2 id="update-modal-title">Updating application</h2></div><span class="update-modal-spinner" id="update-spinner" aria-hidden="true"></span></div>
+    <p id="update-modal-phase" class="muted">Starting update…</p>
+    <div class="update-progress-track"><div id="update-modal-progress" class="update-progress-fill"></div></div>
+    <div class="update-progress-meta"><strong id="update-modal-percent">0%</strong><span id="update-modal-state">RUNNING</span></div>
+    <label for="update-modal-log">Server output</label><textarea id="update-modal-log" class="update-modal-log" readonly spellcheck="false">Waiting for server output…</textarea>
+    <div class="update-modal-actions"><button type="button" class="btn btn-secondary" id="copy-update-log">Copy output / error</button><button type="button" class="btn btn-primary" id="close-update-modal" disabled>Close</button></div>
+    <p class="muted update-copy-status" id="update-copy-status" aria-live="polite"></p>
+  </section>
+</div>
 {% endblock %}
