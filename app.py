@@ -700,8 +700,13 @@ def profile():
 
 
 @app.get("/media/<path:filename>")
-@login_required
 def media_file(filename):
+    # The application logo is public so it can render on the sign-in page.
+    # User avatars remain available only to authenticated users.
+    if filename.startswith("avatars/") and not current_user_row():
+        return redirect(url_for("login"))
+    if filename not in {"brand.png", "brand.jpg", "brand.jpeg", "brand.webp"} and not filename.startswith("avatars/"):
+        abort(404)
     return send_from_directory(UPLOAD_DIR, filename)
 
 
