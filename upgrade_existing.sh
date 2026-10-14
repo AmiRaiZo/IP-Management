@@ -269,8 +269,37 @@ echo "IP Archive updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
+# Permit only the fixed systemd start action from the web process. The actual
+# updater runs as a separate root-owned systemd unit outside the web sandbox.
+install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
+cat > /etc/systemd/system/station-archive.service.d/update-privileges.conf <<'OVERRIDE'
+[Service]
+NoNewPrivileges=false
+OVERRIDE
+cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'
+[Unit]
+Description=IP Archive privileged updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-update
+StandardOutput=append:/var/lib/station-archive/update.log
+StandardError=inherit
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=false
+ReadWritePaths=/opt/station-archive /var/lib/station-archive
+UMask=0077
+UPDATEUNIT
+chown root:root /etc/systemd/system/station-archive-update.service /etc/systemd/system/station-archive.service.d/update-privileges.conf
+chmod 0644 /etc/systemd/system/station-archive-update.service /etc/systemd/system/station-archive.service.d/update-privileges.conf
 cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/station-archive-update
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service
 SUDOERS
 chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update
