@@ -102,7 +102,12 @@ cleanup() {
     cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
     chown -R root:root "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
-    chmod 0750 "$APP_DIR" || true
+    find "$APP_DIR" -type d -exec chmod 0750 {} + || true
+    find "$APP_DIR" -type f -exec chmod g+r {} + || true
+    if [[ -d "$APP_DIR/.venv" ]]; then
+      chown -R root:www-data "$APP_DIR/.venv" || true
+      chmod -R g+rX "$APP_DIR/.venv" || true
+    fi
     chown root:www-data /etc/station-archive || true
     chmod 0750 /etc/station-archive || true
     systemctl restart station-archive.service || true
@@ -121,7 +126,10 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
 chown -R root:root "$APP_DIR"
 chown root:www-data "$APP_DIR"
-chmod 0750 "$APP_DIR"
+find "$APP_DIR" -type d -exec chmod 0750 {} +
+find "$APP_DIR" -type f -exec chmod g+r {} +
+chown -R root:www-data "$APP_DIR/.venv"
+chmod -R g+rX "$APP_DIR/.venv"
 if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"; fi
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
@@ -175,7 +183,10 @@ cleanup() {
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
       chown -R root:root /opt/station-archive
       chown root:www-data /opt/station-archive
-      chmod 0750 /opt/station-archive
+      find /opt/station-archive -type d -exec chmod 0750 {} +
+      find /opt/station-archive -type f -exec chmod g+r {} +
+      chown -R root:www-data /opt/station-archive/.venv || true
+      chmod -R g+rX /opt/station-archive/.venv || true
       /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
       systemctl restart station-archive.service >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
@@ -195,7 +206,10 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
 chown -R root:root /opt/station-archive
 chown root:www-data /opt/station-archive
-chmod 0750 /opt/station-archive
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod g+r {} +
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive.service
@@ -220,3 +234,4 @@ echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration
 echo "Backups: $BACKUP_DIR"
 echo "Application URL: https://$DOMAIN:$HTTPS_PORT"
 echo "Updater: sudo /usr/local/sbin/station-archive-update"
+
