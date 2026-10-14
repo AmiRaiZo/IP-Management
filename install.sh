@@ -219,6 +219,8 @@ ENV_FILE=/etc/station-archive/env
 set -a
 . "$ENV_FILE"
 set +a
+APP_PORT="${APP_INTERNAL_PORT:-${APP_PORT:-}}"
+[[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Configured internal application port is missing or invalid." >&2; exit 1; }
 UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
 [[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
 [[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
@@ -295,7 +297,7 @@ systemctl is-active --quiet station-archive
 HTTP_CODE=000
 for attempt in $(seq 1 30); do
   if systemctl is-active --quiet station-archive; then
-    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_INTERNAL_PORT:-443}/" 2>/dev/null || true)"
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
     if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
       break
     fi
