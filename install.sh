@@ -45,7 +45,7 @@ with zipfile.ZipFile(archive) as z:
             raise SystemExit("Unsafe path in release package.")
     z.extractall(destination)
 PY
-  for required in app.py requirements.txt VERSION templates static update.sh upgrade_existing.sh; do
+  for required in app.py requirements.txt VERSION templates static update.sh upgrade_existing.sh uninstall.sh; do
     [[ -e "$destination/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; return 1; }
   done
   echo "Downloaded IP Archive ${release_info[0]} from GitHub Releases."
