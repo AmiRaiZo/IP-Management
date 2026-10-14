@@ -7,65 +7,27 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
-# The previous installation may have been removed while the caller's shell
-# was still inside /opt/station-archive. Move to a stable directory before
-# launching any child processes (including systemd-run).
-cd /
-
 prompt() { local name="$1" label="$2" default="${3:-}" value=""; if [[ -n "$default" ]]; then read -r -p "$label [$default]: " value < /dev/tty; value="${value:-$default}"; else read -r -p "$label: " value < /dev/tty; fi; printf -v "$name" '%s' "$value"; }
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 
-# The raw installer is a small bootstrap; application code is always taken
-# from a published, versioned GitHub Release package (never from main).
+# If an installation already exists, route the same install command into the
+# dedicated in-place upgrader before asking for fresh-install credentials.
 REPO_URL="https://github.com/AmiRaiZo/IP-Management"
-RELEASE_API="https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
-fetch_latest_release() {
-  local destination="$1" metadata="$1/release.json" archive="$1/release.zip"
-  mkdir -p "$destination"
-  curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: IP-Archive-Installer' "$RELEASE_API" -o "$metadata"
-  mapfile -t release_info < <(python3 - "$metadata" <<'PY'
-import json, sys
-release=json.load(open(sys.argv[1], encoding="utf-8"))
-assets=[a for a in release.get("assets", []) if a.get("name", "").startswith("station-archive-v") and a.get("name", "").endswith(".zip")]
-if not release.get("tag_name") or not assets:
-    raise SystemExit("Latest GitHub Release does not contain an IP Archive ZIP package.")
-url=assets[0].get("browser_download_url", "")
-if not url.startswith("https://github.com/AmiRaiZo/IP-Management/releases/download/"):
-    raise SystemExit("Release package URL failed validation.")
-print(release["tag_name"])
-print(url)
-PY
-)
-  [[ ${#release_info[@]} -eq 2 ]] || { echo "Could not read latest GitHub Release metadata." >&2; return 1; }
-  curl -fsSL --retry 3 --retry-delay 1 "${release_info[1]}" -o "$archive"
-  python3 - "$archive" "$destination/source" <<'PY'
-import sys, zipfile
-archive, destination=sys.argv[1:]
-with zipfile.ZipFile(archive) as z:
-    bad=z.testzip()
-    if bad: raise SystemExit("Corrupt release package: "+bad)
-    for item in z.infolist():
-        name=item.filename.replace(chr(92), "/")
-        if name.startswith("/") or ".." in name.split("/"):
-            raise SystemExit("Unsafe path in release package.")
-    z.extractall(destination)
-PY
-  for required in app.py requirements.txt VERSION templates static update.sh upgrade_existing.sh uninstall.sh; do
-    [[ -e "$destination/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; return 1; }
-  done
-  echo "Downloaded IP Archive ${release_info[0]} from GitHub Releases."
-}
-
+UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh"
 if [[ -e /opt/station-archive ]]; then
   if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
     echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
     exit 1
   fi
-  echo "Existing IP Archive installation detected. Starting the in-place release upgrade..."
-  BOOTSTRAP_DIR="$(mktemp -d /tmp/station-archive-bootstrap.XXXXXX)"
-  trap 'rm -rf -- "$BOOTSTRAP_DIR"' EXIT
-  fetch_latest_release "$BOOTSTRAP_DIR"
-  bash "$BOOTSTRAP_DIR/source/upgrade_existing.sh"
+  command -v curl >/dev/null 2>&1 || { echo "curl is required to download the upgrade script." >&2; exit 1; }
+  UPGRADE_SCRIPT="$(mktemp /tmp/station-archive-upgrade.XXXXXX.sh)"
+  trap 'rm -f -- "$UPGRADE_SCRIPT"' EXIT
+  echo "Existing IP Archive installation detected. Starting the in-place upgrade workflow..."
+  if ! curl -fsSL "$UPGRADE_URL" -o "$UPGRADE_SCRIPT"; then
+    echo "Could not download the upgrade script. No existing files were changed." >&2
+    exit 1
+  fi
+  bash "$UPGRADE_SCRIPT"
   exit $?
 fi
 
@@ -95,12 +57,12 @@ read -r -p "Type YES to continue: " CONFIRM < /dev/tty
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl git rsync ca-certificates python3 python3-venv python3-pip nginx certbot openssl
+apt-get install -y git rsync ca-certificates python3 python3-venv python3-pip nginx certbot openssl
 
 WORK_DIR="$(mktemp -d /tmp/station-archive-install.XXXXXX)"
 cleanup() { rm -rf -- "$WORK_DIR"; [[ -z "${ADMIN_CREDENTIALS:-}" ]] || rm -f -- "$ADMIN_CREDENTIALS"; unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM; }
 trap cleanup EXIT
-fetch_latest_release "$WORK_DIR"
+git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
 SOURCE_DIR="$WORK_DIR/source"
 for required in app.py setup_admin.py requirements.txt templates static; do
   [[ -e "$SOURCE_DIR/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
@@ -110,11 +72,13 @@ install -d -o root -g root -m 0750 /opt/station-archive
 rsync -a --delete --exclude='.git/' "$SOURCE_DIR/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-python3 -m venv --clear /opt/station-archive/.venv
-/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
-/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod 0640 {} +
+python3 -m venv /opt/station-archive/.venv
+/opt/station-archive/.venv/bin/pip install --upgrade pip
+/opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+/opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
 
@@ -151,6 +115,9 @@ chmod 0750 /etc/station-archive
 chown -R www-data:www-data /var/lib/station-archive
 find /var/lib/station-archive -type d -exec chmod 0750 {} +
 find /var/lib/station-archive -type f -exec chmod 0640 {} +
+git -C "$SOURCE_DIR" rev-parse HEAD > /var/lib/station-archive/version
+chown www-data:www-data /var/lib/station-archive/version
+chmod 0640 /var/lib/station-archive/version
 
 cat > /etc/systemd/system/station-archive.service <<EOF
 [Unit]
@@ -191,6 +158,7 @@ server {
 }
 EOF
 ln -sfn "$NGINX_FILE" "/etc/nginx/sites-enabled/station-archive-$DOMAIN"
+(more lines follow — continue from line 161)
 nginx -t
 systemctl enable --now nginx
 if ! certbot certonly --webroot -w "$WEBROOT" --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN"; then
@@ -221,8 +189,81 @@ EOF
 cat > /usr/local/sbin/station-archive-update <<'UPDATER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 [[ ${EUID} -eq 0 ]] || { echo "This updater must run as root." >&2; exit 1; }
-exec /bin/bash /opt/station-archive/update.sh
+ENV_FILE=/etc/station-archive/env
+[[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
+set -a
+. "$ENV_FILE"
+set +a
+UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
+[[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
+[[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
+[[ "${APP_INTERNAL_PORT:-}" =~ ^[0-9]{1,5}$ ]] && (( APP_INTERNAL_PORT >= 1 && APP_INTERNAL_PORT <= 65535 )) || { echo "Configured application port is invalid." >&2; exit 1; }
+VERSION_FILE=/var/lib/station-archive/version
+TARGET_FILE=/var/lib/station-archive/update-target
+TARGET_SHA="$(cat "$TARGET_FILE" 2>/dev/null || true)"
+[[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Update failed: no verified target commit was provided. Check for updates in the web interface first." >&2; exit 1; }
+echo "PROGRESS:5:Preparing update"
+TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
+DEPLOYED=0
+SUCCESS=0
+cleanup() {
+  if (( DEPLOYED == 1 && SUCCESS == 0 )); then
+    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
+      chown -R root:www-data /opt/station-archive
+      chown root:www-data /opt/station-archive
+      find /opt/station-archive -type d -exec chmod 0750 {} +
+      find /opt/station-archive -type f -exec chmod 0640 {} +
+      chown -R root:www-data /opt/station-archive/.venv || true
+      chmod -R g+rX /opt/station-archive/.venv || true
+      /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
+      /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' >/dev/null 2>&1 || true
+      systemctl restart station-archive >/dev/null 2>&1 || true
+      echo "Update failed; previous application files were restored." >&2
+    else
+      echo "Update failed and automatic rollback could not restore the previous files. Inspect /opt/station-archive and the service logs." >&2
+    fi
+  fi
+  if (( SUCCESS == 0 && DEPLOYED == 0 )); then echo "Update process failed before deployment." >&2; fi
+  rm -rf -- "$TMP"
+}
+trap cleanup EXIT
+echo "PROGRESS:12:Downloading repository and checking target version"
+git clone --depth 1 "${UPDATE_REPO%/}" "$TMP/source"
+SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
+[[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: GitHub changed after the version check; please check again." >&2; exit 1; }
+for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+echo "PROGRESS:25:Backing up the current application"
+mkdir -p "$TMP/backup"
+rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
+DEPLOYED=1
+echo "PROGRESS:35:Stopping the application service"
+systemctl stop station-archive.service
+echo "PROGRESS:48:Installing application files"
+rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+chown -R root:www-data /opt/station-archive
+chown root:www-data /opt/station-archive
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod 0640 {} +
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
+echo "PROGRESS:62:Installing Python dependencies"
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+/opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
+echo "PROGRESS:80:Validating server configuration"
+nginx -t
+echo "PROGRESS:88:Restarting application and web server"
+systemctl restart station-archive
+systemctl reload nginx
+systemctl is-active --quiet station-archive
+printf '%s\n' "$SOURCE_SHA" > "$VERSION_FILE"
+chown www-data:www-data "$VERSION_FILE"
+chmod 0640 "$VERSION_FILE"
+SUCCESS=1
+echo "PROGRESS:100:Update completed successfully"
+echo "IP Archive updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
@@ -231,8 +272,6 @@ www-data ALL=(root) NOPASSWD: /usr/local/sbin/station-archive-update
 SUDOERS
 chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update
-
-systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p EnvironmentFile=/etc/station-archive/env -p WorkingDirectory=/opt/station-archive /opt/station-archive/.venv/bin/python -c 'import app; print("APP_IMPORT_OK")'
 
 systemctl daemon-reload
 systemctl enable --now station-archive
