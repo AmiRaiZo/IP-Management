@@ -145,3 +145,6 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 .reconfigure-progress-fill.is-complete{width:100%}
 .reconfigure-progress-fill.is-error{width:0}
 .login-card.verify-stage>h1{margin:0 0 6px!important;font-size:21px!important;letter-spacing:-.4px!important}
+
+/* Profile avatar and toast dismissal fixes */
+.profile-dot{position:relative;overflow:hidden;flex-shrink:0}.profile-avatar{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}.profile-initial[hidden]{display:none!important}.welcome-toast{cursor:pointer}.welcome-toast [hidden]{display:none!important}
