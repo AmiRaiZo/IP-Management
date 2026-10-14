@@ -29,11 +29,9 @@ cleanup() {
       find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + 2>/dev/null || true
       find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} + 2>/dev/null || true
       find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
-# Ensure the service account can traverse and read all installed Python packages.
-chmod -R g+rX "$APP_DIR/.venv"
-# Test imports as the actual systemd account using the same EnvironmentFile.
-systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p EnvironmentFile=$ENV_FILE -p WorkingDirectory=$APP_DIR "$APP_DIR/.venv/bin/python" -c 'import app; from flask import Flask; from cryptography.fernet import Fernet; print("APP_IMPORT_OK")' 2>/dev/null || true
       "$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt" >/dev/null 2>&1 || true
+      chown -R root:www-data "$APP_DIR/.venv" || true
+      chmod -R g+rX "$APP_DIR/.venv" || true
       systemctl restart station-archive.service || true
       echo "Rollback backup: $BACKUP" >&2
     else
