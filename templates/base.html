@@ -14,8 +14,8 @@
     <a class="brand" href="{{ url_for('index') }}">{% if app_settings.brand_logo|default("") %}<img class="brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
     <nav class="nav-links">
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon">▦</span>IP addresses</a>
-      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon">▤</span>Groups</a>
-      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit'] %}active{% endif %}"><span class="nav-icon">♙</span>Users & permissions</a>{% endif %}
+      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon">▤</span>{{ app_settings.group_label }}</a>
+      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit'] %}active{% endif %}"><span class="nav-icon">♙</span>{{ app_settings.user_label }}</a>{% endif %}
     </nav>
     {% if current_role == 'superadmin' %}<p class="nav-label nav-label-spaced">ADMINISTRATION</p><nav class="nav-links">
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}"><span class="nav-icon">⚙</span>Settings</a>
@@ -29,6 +29,7 @@
     <main class="container {% block main_class %}{% endblock %}">
       {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}{% endwith %}
       {% block content %}{% endblock %}
+      <footer>{{ app_settings.footer_text }}</footer>
     </main>
   </div>
 </div>
