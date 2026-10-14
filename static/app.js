@@ -105,6 +105,7 @@
   const updatePercent = document.getElementById('update-modal-percent');
   const updateState = document.getElementById('update-modal-state');
   const copyUpdateLog = document.getElementById('copy-update-log');
+  const closeUpdateModal = document.getElementById('close-update-modal');
   let updatePollHandle = null;
   let updatePollFailures = 0;
   function showUpdateModal() {
@@ -116,14 +117,24 @@
     updateFill.style.width = '0%';
     updatePercent.textContent = '0%';
     updateState.textContent = 'RUNNING';
+    if (closeUpdateModal) closeUpdateModal.hidden = true;
     document.documentElement.classList.add('updater-modal-open');
     document.getElementById('update-copy-status').textContent = '';
   }
   function finishUpdateModal(success) {
     updateState.textContent = success ? 'SUCCESS' : 'FAILED';
-    if (!success) updatePhase.textContent = 'Update failed';
+    if (!success) {
+      updatePhase.textContent = 'Update failed';
+      if (closeUpdateModal) closeUpdateModal.hidden = false;
+    }
     if (success) window.setTimeout(() => window.location.reload(), 1800);
   }
+  closeUpdateModal?.addEventListener('click', () => {
+    if (updateState.textContent !== 'FAILED') return;
+    updateModal.hidden = true;
+    document.body.style.overflow = '';
+    document.documentElement.classList.remove('updater-modal-open');
+  });
   document.addEventListener('keydown', event => {
     if (updateModal && !updateModal.hidden && event.key === 'Escape') {
       event.preventDefault();
@@ -191,7 +202,6 @@
       finishUpdateModal(false);
     }
   });
-  // The updater dialog intentionally has no close/dismiss control.
   copyUpdateLog?.addEventListener('click', async () => {
     const content = updateLog.value || '(empty output)';
     try {
