@@ -138,17 +138,18 @@ chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
 find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
 find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} +
-chown -R root:www-data "$APP_DIR/.venv"
-chmod -R g+rX "$APP_DIR/.venv"
-chown -R www-data:www-data "$DATA_DIR"
-find "$DATA_DIR" -type d -exec chmod 0750 {} +
-find "$DATA_DIR" -type f -exec chmod 0640 {} +
-if [[ ! -x "$APP_DIR/.venv/bin/python" || ! -x "$APP_DIR/.venv/bin/pip" ]]; then python3 -m venv --clear "$APP_DIR/.venv"; fi
+# Recreate the virtual environment on every in-place upgrade. This avoids stale
+# or damaged pip launchers and preserves all application data outside the venv.
+python3 -m venv --clear "$APP_DIR/.venv"
 chown -R root:www-data "$APP_DIR/.venv"
 find "$APP_DIR/.venv" -type d -exec chmod 0750 {} +
 find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} +
 find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
-"$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
+chown -R www-data:www-data "$DATA_DIR"
+find "$DATA_DIR" -type d -exec chmod 0750 {} +
+find "$DATA_DIR" -type f -exec chmod 0640 {} +
+"$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
+"$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
