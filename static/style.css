@@ -174,3 +174,7 @@ html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
 .permission-setting .permission-option input{flex:0 0 auto;margin-top:4px;width:17px;height:17px}
 .permission-setting .permission-option span{display:grid;gap:5px}
 .permission-setting .permission-option small{color:var(--muted);font-size:12px;line-height:1.6}
+
+
+/* Keep the update-complete check badge dark-theme friendly. */
+html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
