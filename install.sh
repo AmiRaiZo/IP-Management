@@ -72,9 +72,9 @@ install -d -o root -g root -m 0750 /opt/station-archive
 rsync -a --delete --exclude='.git/' "$SOURCE_DIR/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-find /opt/station-archive -type d -exec chmod 0750 {} +
-find /opt/station-archive -type f -exec chmod 0640 {} +
-python3 -m venv /opt/station-archive/.venv
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
+python3 -m venv --clear /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install --upgrade pip
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 chown -R root:www-data /opt/station-archive/.venv
@@ -202,8 +202,8 @@ cleanup() {
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
       chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
-      find /opt/station-archive -type d -exec chmod 0750 {} +
-      find /opt/station-archive -type f -exec chmod 0640 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
       chown -R www-data:www-data /var/lib/station-archive || true
@@ -228,8 +228,8 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-find /opt/station-archive -type d -exec chmod 0750 {} +
-find /opt/station-archive -type f -exec chmod 0640 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
 install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
