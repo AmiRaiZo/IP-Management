@@ -48,6 +48,7 @@ REMEMBER_2FA_COOKIE = "ip_archive_2fa"
 REMEMBER_2FA_SECONDS = 24 * 60 * 60
 VERSION_FILE = DATA_DIR / "version"
 UPDATE_TARGET_FILE = DATA_DIR / "update-target"
+UPDATE_TARGET_VERSION_FILE = DATA_DIR / "update-target-version"
 UPDATE_LOG_FILE = DATA_DIR / "update.log"
 
 
@@ -610,16 +611,15 @@ def update_page():
 
 
 def installed_version():
-    # The checked-in VERSION file is the human-facing release number.
+    # Runtime version is written only after an update has completed successfully.
     try:
-        value = (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip().lstrip("v")
+        value = VERSION_FILE.read_text(encoding="utf-8").strip().lstrip("v")
         if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
     except OSError:
         pass
-    # Older deployments stored a commit SHA here; don't expose internal IDs as versions.
     try:
-        value = VERSION_FILE.read_text(encoding="utf-8").strip().lstrip("v")
+        value = (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip().lstrip("v")
         if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
     except OSError:
@@ -714,6 +714,7 @@ def update_app():
             flash("No update is available. Your installation is already current.", "success")
             return redirect(url_for("update_page"))
         UPDATE_TARGET_FILE.write_text(target_sha + "\n", encoding="utf-8")
+        UPDATE_TARGET_VERSION_FILE.write_text(release["version"] + "\n", encoding="utf-8")
         UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
         with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
             subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=subprocess.STDOUT,
