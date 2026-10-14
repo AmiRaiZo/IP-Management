@@ -145,6 +145,9 @@ if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"
 # pip may consider Gunicorn installed even when its package files are missing.
 # Force-reinstall it and verify the exact module used by the systemd entrypoint.
 "$APP_DIR/.venv/bin/python" -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+# Make the entry point executable by the www-data service account.
+chown root:www-data "$APP_DIR/.venv/bin/gunicorn"
+chmod 0750 "$APP_DIR/.venv/bin/gunicorn"
 "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
