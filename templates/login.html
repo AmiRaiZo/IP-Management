@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Verify your identity' if stage == 'verify' else 'Sign in' }} | IP Archive{% endblock %}
+{% block title %}{{ 'Verification code' if stage == 'verify' else 'Sign in' }}{% endblock %}
 {% block main_class %}login-wrap{% endblock %}
 {% block content %}
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
