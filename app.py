@@ -375,7 +375,8 @@ def login():
             pending_user = db.execute("SELECT id,username,role,profile_image FROM users WHERE id=? AND enabled=1",
                                       (session["pending_2fa_user_id"],)).fetchone()
     return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password",
-                           login_user=dict(pending_user) if pending_user else None)
+                           login_user=dict(pending_user) if pending_user else None,
+                           login_username=request.form.get("username", "").strip()[:80] if request.method == "POST" and not session.get("pending_2fa_user_id") else "")
 
 
 def safe_login_target():
