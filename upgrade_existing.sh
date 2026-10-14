@@ -74,7 +74,7 @@ read -r -p "Type UPGRADE to continue: " CONFIRM < /dev/tty
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl git rsync python3-venv python3-pip
+apt-get install -y git rsync python3-venv python3-pip
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/station-archive-upgrade-$STAMP"
 install -d -o root -g root -m 0700 "$BACKUP_DIR"
@@ -92,8 +92,8 @@ fi
 rsync -a --exclude='.git/' --exclude='.venv/' "$APP_DIR/" "$BACKUP_DIR/app/"
 echo "Backup created at $BACKUP_DIR"
 
-# Source code remains root-owned and readable by the service group. Runtime
-# data belongs to www-data; avoid world-readable or world-writable permissions.
+# Runtime data is private to the application account; source code stays
+# root-owned and readable by the service's www-data group (never world-writable).
 install -d -o www-data -g www-data -m 0750 "$DATA_DIR"
 
 WORK_DIR="$(mktemp -d /tmp/station-archive-existing-upgrade.XXXXXX)"
@@ -106,20 +106,15 @@ cleanup() {
     cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
     chown -R root:www-data "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
-    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} + || true
-    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} + || true
+    find "$APP_DIR" -type d -exec chmod 0750 {} + || true
+    find "$APP_DIR" -type f -exec chmod 0640 {} + || true
+    if [[ -d "$APP_DIR/.venv" ]]; then
+      chown -R root:www-data "$APP_DIR/.venv" || true
+    chmod -R g+rX "$APP_DIR/.venv" || true
+    fi
     chown -R www-data:www-data "$DATA_DIR" || true
     find "$DATA_DIR" -type d -exec chmod 0750 {} + || true
     find "$DATA_DIR" -type f -exec chmod 0640 {} + || true
-    if [[ -d "$APP_DIR/.venv" ]]; then
-      if [[ ! -x "$APP_DIR/.venv/bin/python" || ! -x "$APP_DIR/.venv/bin/pip" ]]; then python3 -m venv --clear "$APP_DIR/.venv" || true; fi
-      chown -R root:www-data "$APP_DIR/.venv" || true
-      find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + || true
-      find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} + || true
-      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} + || true
-      chown -R root:www-data "$APP_DIR/.venv" || true
-      chmod -R g+rX "$APP_DIR/.venv" || true
-    fi
     chown root:www-data /etc/station-archive || true
     chmod 0750 /etc/station-archive || true
     systemctl restart station-archive.service || true
@@ -127,39 +122,10 @@ cleanup() {
   rm -rf -- "$WORK_DIR"
 }
 trap cleanup EXIT
-RELEASE_API="https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
-curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: IP-Archive-Upgrader' "$RELEASE_API" -o "$WORK_DIR/release.json"
-mapfile -t RELEASE_INFO < <(python3 - "$WORK_DIR/release.json" <<'PY'
-import json, sys
-release=json.load(open(sys.argv[1], encoding="utf-8"))
-assets=[a for a in release.get("assets", []) if a.get("name", "").startswith("station-archive-v") and a.get("name", "").endswith(".zip")]
-if not release.get("tag_name") or not assets:
-    raise SystemExit("Latest GitHub Release has no IP Archive ZIP package.")
-url=assets[0].get("browser_download_url", "")
-if not url.startswith("https://github.com/AmiRaiZo/IP-Management/releases/download/"):
-    raise SystemExit("Release package URL failed validation.")
-print(release["tag_name"])
-print(url)
-PY
-)
-[[ ${#RELEASE_INFO[@]} -eq 2 ]] || { echo "Could not read GitHub Release metadata." >&2; exit 1; }
-curl -fsSL --retry 3 --retry-delay 1 "${RELEASE_INFO[1]}" -o "$WORK_DIR/release.zip"
-python3 - "$WORK_DIR/release.zip" "$WORK_DIR/source" <<'PY'
-import sys, zipfile
-archive, destination=sys.argv[1:]
-with zipfile.ZipFile(archive) as z:
-    bad=z.testzip()
-    if bad: raise SystemExit("Corrupt release package: "+bad)
-    for item in z.infolist():
-        name=item.filename.replace(chr(92), "/")
-        if name.startswith("/") or ".." in name.split("/"):
-            raise SystemExit("Unsafe path in release package.")
-    z.extractall(destination)
-PY
-for required in app.py requirements.txt VERSION templates static update.sh uninstall.sh; do
-  [[ -e "$WORK_DIR/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; exit 1; }
+git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
+for required in app.py requirements.txt templates static; do
+  [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
-echo "Preparing in-place upgrade to ${RELEASE_INFO[0]} from GitHub Releases."
 
 # Keep the currently installed virtual environment and all data outside APP_DIR.
 DEPLOYED=1
@@ -167,25 +133,22 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
-find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
-find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} +
-# Recreate the virtual environment on every in-place upgrade. This avoids stale
-# or damaged pip launchers and preserves all application data outside the venv.
-python3 -m venv --clear "$APP_DIR/.venv"
+find "$APP_DIR" -type d -exec chmod 0750 {} +
+find "$APP_DIR" -type f -exec chmod 0640 {} +
 chown -R root:www-data "$APP_DIR/.venv"
-find "$APP_DIR/.venv" -type d -exec chmod 0750 {} +
-find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} +
-find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
+chmod -R g+rX "$APP_DIR/.venv"
 chown -R www-data:www-data "$DATA_DIR"
 find "$DATA_DIR" -type d -exec chmod 0750 {} +
 find "$DATA_DIR" -type f -exec chmod 0640 {} +
-"$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
+if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"; fi
 "$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
-chown -R root:www-data "$APP_DIR/.venv"
-chmod -R g+rX "$APP_DIR/.venv"
-systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p "EnvironmentFile=$ENV_FILE" -p "WorkingDirectory=$APP_DIR" "$APP_DIR/.venv/bin/python" -c 'import app; print("APP_IMPORT_OK")'
+# pip may consider Gunicorn installed even when its package files are missing.
+# Force-reinstall it and verify the exact module used by the systemd entrypoint.
+"$APP_DIR/.venv/bin/python" -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+"$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
+(more lines follow — continue from line 151)
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
 from pathlib import Path
 import re, sys
@@ -220,8 +183,76 @@ chmod 0750 /etc/station-archive
 cat > /usr/local/sbin/station-archive-update <<'UPDATER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 [[ ${EUID} -eq 0 ]] || { echo "This updater must run as root." >&2; exit 1; }
-exec /bin/bash /opt/station-archive/update.sh
+ENV_FILE=/etc/station-archive/env
+[[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
+set -a; . "$ENV_FILE"; set +a
+UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
+[[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
+[[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
+VERSION_FILE=/var/lib/station-archive/version
+TARGET_FILE=/var/lib/station-archive/update-target
+TARGET_SHA="$(cat "$TARGET_FILE" 2>/dev/null || true)"
+[[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Update failed: no verified target commit was provided. Check for updates in the web interface first." >&2; exit 1; }
+echo "PROGRESS:5:Preparing update"
+TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
+DEPLOYED=0; SUCCESS=0
+cleanup() {
+  if (( DEPLOYED == 1 && SUCCESS == 0 )); then
+    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
+      chown -R root:www-data /opt/station-archive
+      chown root:www-data /opt/station-archive
+      find /opt/station-archive -type d -exec chmod 0750 {} +
+      find /opt/station-archive -type f -exec chmod 0640 {} +
+      chown -R root:www-data /opt/station-archive/.venv || true
+      chmod -R g+rX /opt/station-archive/.venv || true
+      /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
+      /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' >/dev/null 2>&1 || true
+      systemctl restart station-archive.service >/dev/null 2>&1 || true
+      echo "Update failed; previous application files were restored." >&2
+    else
+      echo "Update failed and automatic rollback could not restore previous files." >&2
+    fi
+  fi
+  if (( SUCCESS == 0 && DEPLOYED == 0 )); then echo "Update process failed before deployment." >&2; fi
+  rm -rf -- "$TMP"
+}
+trap cleanup EXIT
+echo "PROGRESS:12:Downloading repository and checking target version"
+git clone --depth 1 "${UPDATE_REPO%/}" "$TMP/source"
+SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
+[[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: GitHub changed after the version check; please check again." >&2; exit 1; }
+for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+echo "PROGRESS:25:Backing up the current application"
+mkdir -p "$TMP/backup"
+rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
+DEPLOYED=1
+echo "PROGRESS:35:Stopping the application service"
+systemctl stop station-archive.service
+echo "PROGRESS:48:Installing application files"
+rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+chown -R root:www-data /opt/station-archive
+chown root:www-data /opt/station-archive
+find /opt/station-archive -type d -exec chmod 0750 {} +
+find /opt/station-archive -type f -exec chmod 0640 {} +
+chown -R root:www-data /opt/station-archive/.venv
+chmod -R g+rX /opt/station-archive/.venv
+echo "PROGRESS:62:Installing Python dependencies"
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+/opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
+echo "PROGRESS:80:Validating server configuration"
+nginx -t
+echo "PROGRESS:88:Restarting application and web server"
+systemctl restart station-archive.service
+systemctl is-active --quiet station-archive.service
+printf '%s\n' "$SOURCE_SHA" > "$VERSION_FILE"
+chown www-data:www-data "$VERSION_FILE"
+chmod 0640 "$VERSION_FILE"
+SUCCESS=1
+echo "PROGRESS:100:Update completed successfully"
+echo "IP Archive updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
@@ -235,6 +266,9 @@ nginx -t
 systemctl daemon-reload
 systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
+git -C "$WORK_DIR/source" rev-parse HEAD > "$DATA_DIR/version"
+chown www-data:www-data "$DATA_DIR/version"
+chmod 0640 "$DATA_DIR/version"
 SUCCESS=1
 echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration, SSL certificates, secrets, and database were preserved."
 echo "Backups: $BACKUP_DIR"
