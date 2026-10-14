@@ -10,6 +10,27 @@ fi
 prompt() { local name="$1" label="$2" default="${3:-}" value=""; if [[ -n "$default" ]]; then read -r -p "$label [$default]: " value < /dev/tty; value="${value:-$default}"; else read -r -p "$label: " value < /dev/tty; fi; printf -v "$name" '%s' "$value"; }
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 
+# If an installation already exists, route the same install command into the
+# dedicated in-place upgrader before asking for fresh-install credentials.
+REPO_URL="https://github.com/AmiRaiZo/IP-Management"
+UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh"
+if [[ -e /opt/station-archive ]]; then
+  if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
+    echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
+    exit 1
+  fi
+  command -v curl >/dev/null 2>&1 || { echo "curl is required to download the upgrade script." >&2; exit 1; }
+  UPGRADE_SCRIPT="$(mktemp /tmp/station-archive-upgrade.XXXXXX.sh)"
+  trap 'rm -f -- "$UPGRADE_SCRIPT"' EXIT
+  echo "Existing IP Archive installation detected. Starting the in-place upgrade workflow..."
+  if ! curl -fsSL "$UPGRADE_URL" -o "$UPGRADE_SCRIPT"; then
+    echo "Could not download the upgrade script. No existing files were changed." >&2
+    exit 1
+  fi
+  bash "$UPGRADE_SCRIPT"
+  exit $?
+fi
+
 prompt DOMAIN "Domain name (DNS must point to this server)"
 DOMAIN="${DOMAIN,,}"
 [[ "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || { echo "Invalid domain name." >&2; exit 1; }
@@ -22,8 +43,6 @@ HTTPS_PORT=$((10#$HTTPS_PORT))
 PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i ~ /src/) {print $(i+1); exit}}')"
 [[ "$PUBLIC_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { echo "Could not detect the server's outbound IPv4 address. A single shared port requires the public IPv4 address to be assigned directly to this VPS." >&2; exit 1; }
 ip -o -4 addr show | grep -Fq " $PUBLIC_IP/" || { echo "Detected IPv4 $PUBLIC_IP is not assigned to a local interface. This VPS may be behind NAT; same-number public and loopback ports cannot be used with this Nginx setup." >&2; exit 1; }
-# This project installs and updates from its canonical public repository.
-REPO_URL="https://github.com/AmiRaiZo/IP-Management"
 prompt ADMIN_USER "Superadmin username"
 [[ "$ADMIN_USER" =~ ^[A-Za-z0-9_.@-]{3,80}$ ]] || { echo "Username must be 3–80 characters using English letters, numbers, dot, underscore, @, and hyphen." >&2; exit 1; }
 read -r -s -p "Superadmin password: " ADMIN_PASSWORD < /dev/tty; printf '\n' > /dev/tty
@@ -31,10 +50,6 @@ read -r -s -p "Confirm superadmin password: " ADMIN_PASSWORD_CONFIRM < /dev/tty;
 [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]] || { echo "Passwords do not match." >&2; exit 1; }
 [[ -n "$ADMIN_PASSWORD" ]] || { echo "Password must not be empty." >&2; exit 1; }
 
-if [[ -e /opt/station-archive ]]; then
-  echo "/opt/station-archive already exists. Installer stopped to protect the existing deployment." >&2
-  exit 1
-fi
 echo "Install target: https://$DOMAIN:$HTTPS_PORT (single port $HTTPS_PORT; public bind $PUBLIC_IP, app bind 127.0.0.1)"
 echo "Make sure DNS points to this server and inbound TCP ports 80 and $HTTPS_PORT are allowed by both the VPS provider and the server firewall."
 read -r -p "Type YES to continue: " CONFIRM < /dev/tty
