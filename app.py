@@ -610,12 +610,15 @@ def update_page():
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
 
 
-def installed_version():
+def installed_version(release=None):
     # Runtime version is written only after an update has completed successfully.
     try:
         value = VERSION_FILE.read_text(encoding="utf-8").strip().lstrip("v")
         if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
+        # Older updater versions stored the commit SHA instead of a version.
+        if release and re.fullmatch(r"[0-9a-f]{40}", value) and value == release["sha"]:
+            return release["version"]
     except OSError:
         pass
     try:
@@ -655,9 +658,9 @@ def latest_release():
 @app.get("/update/check")
 @superadmin_required
 def check_update():
-    current = installed_version()
     try:
         release = latest_release()
+        current = installed_version(release)
     except (URLError, HTTPError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"ok": False, "error": f"Could not check GitHub: {exc}", "current": current}, 502
     available = current != release["version"]
@@ -706,7 +709,7 @@ def update_app():
         return redirect(url_for("update_page"))
     try:
         release = latest_release()
-        current = installed_version()
+        current = installed_version(release)
         if release["sha"] != target_sha:
             flash("GitHub changed since the check. Check for updates again before installing.", "error")
             return redirect(url_for("update_page"))
