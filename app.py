@@ -100,7 +100,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
+          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', two_factor_enabled INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
@@ -132,11 +132,18 @@ def init_db():
         """)
         # In-place migrations preserve the database created by the first release.
         user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)")}
-        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
+        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
             if name not in user_cols:
                 db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
         if "profile_image" not in user_cols:
             db.execute("ALTER TABLE users ADD COLUMN profile_image TEXT NOT NULL DEFAULT ''")
+        mode_row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
+        if not mode_row:
+            legacy = db.execute("SELECT value FROM app_settings WHERE key='two_factor_required'").fetchone()
+            legacy_required = bool(legacy and legacy["value"] == "1")
+            db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode',?)", ("per_user" if legacy_required else "off",))
+            if legacy_required:
+                db.execute("UPDATE users SET two_factor_enabled=1")
         ip_cols = {r[1] for r in db.execute("PRAGMA table_info(ips)")}
         if not ip_cols:
             # Fresh DB already created the ips table above.
@@ -184,10 +191,30 @@ def login_required(fn):
     return wrapped
 
 
-def two_factor_required():
+def two_factor_mode():
     with connect_db() as db:
-        row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_required'").fetchone()
-    return bool(row and row["value"] == "1")
+        row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
+    mode = row["value"] if row else "off"
+    return mode if mode in ("off", "shared", "per_user") else "off"
+
+
+def shared_two_factor_secret():
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()
+    return row["value"] if row else ""
+
+
+def user_requires_two_factor(user):
+    mode = two_factor_mode()
+    if mode == "shared":
+        return bool(shared_two_factor_secret())
+    if mode == "per_user":
+        return bool(user and user["two_factor_enabled"])
+    return False
+
+
+def two_factor_required():
+    return two_factor_mode() == "shared"
 
 
 def remembered_two_factor(user_id):
