@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}My profile | {{ app_settings.brand_name }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ACCOUNT SETTINGS</p><h1>My profile</h1><p class="muted">Update your profile photo and change your own password.</p></div></div>
+<form class="panel form-panel profile-form" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="panel-heading"><div><h2>Profile information</h2><p>Signed in as {{ user.username }}</p></div></div>
+<div class="profile-preview">{% if current_avatar %}<img src="{{ url_for('media_file', filename=current_avatar) }}" alt="Profile photo">{% else %}<span>{{ user.username[:1]|upper }}</span>{% endif %}</div>
+<div class="field"><label for="avatar">Profile photo (PNG/JPG/WEBP)</label><input id="avatar" name="avatar" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"></div>
+<div class="panel-heading"><div><h2>Change password</h2><p>Leave the password fields empty if you only want to change your photo.</p></div></div>
+<div class="form-grid"><div class="field full-field"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password"></div><div class="field"><label for="new_password">New password (minimum 10 characters)</label><input id="new_password" name="new_password" type="password" minlength="10" autocomplete="new-password"></div><div class="field"><label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" minlength="10" autocomplete="new-password"></div></div>
+<div class="form-footer"><span class="muted">Your password is stored as a secure hash.</span><button class="btn btn-primary" type="submit">Save profile</button></div></form>
+{% endblock %}
