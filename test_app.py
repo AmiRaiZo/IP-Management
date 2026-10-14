@@ -143,6 +143,22 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
         })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("setup-2fa", response.location)
+        response = self.client.get("/setup-2fa")
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/setup-2fa", data={
+            "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            enrolled = db.execute("SELECT two_factor_enrolled FROM users WHERE username='shared-admin'").fetchone()
+        self.assertEqual(enrolled["two_factor_enrolled"], 1)
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
+        })
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Authenticator code", response.data)
         response = self.client.post("/login", data={
