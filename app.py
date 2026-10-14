@@ -616,7 +616,7 @@ def users():
         else:
             try:
                 with connect_db() as db:
-                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,0,1)", (username, password_hash(password), now(), role, "")
+                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,0,1)", (username, password_hash(password), now(), role, ""))
                 audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
                 flash("User created. Configure this account’s two-factor policy in user settings if per-user authentication is selected.", "success")
                 return redirect(url_for("users"))
