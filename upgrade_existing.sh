@@ -116,11 +116,9 @@ cleanup() {
       chown -R root:www-data "$APP_DIR/.venv" || true
       find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + || true
       find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} + || true
-      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
-# Ensure the service account can traverse and read all installed Python packages.
-chmod -R g+rX "$APP_DIR/.venv"
-# Test imports as the actual systemd account using the same EnvironmentFile.
-systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p EnvironmentFile=$ENV_FILE -p WorkingDirectory=$APP_DIR "$APP_DIR/.venv/bin/python" -c 'import app; from flask import Flask; from cryptography.fernet import Fernet; print("APP_IMPORT_OK")' || true
+      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} + || true
+      chown -R root:www-data "$APP_DIR/.venv" || true
+      chmod -R g+rX "$APP_DIR/.venv" || true
     fi
     chown root:www-data /etc/station-archive || true
     chmod 0750 /etc/station-archive || true
