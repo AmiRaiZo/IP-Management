@@ -10,24 +10,57 @@ fi
 prompt() { local name="$1" label="$2" default="${3:-}" value=""; if [[ -n "$default" ]]; then read -r -p "$label [$default]: " value < /dev/tty; value="${value:-$default}"; else read -r -p "$label: " value < /dev/tty; fi; printf -v "$name" '%s' "$value"; }
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 
-# If an installation already exists, route the same install command into the
-# dedicated in-place upgrader before asking for fresh-install credentials.
+# The raw installer is a small bootstrap; application code is always taken
+# from a published, versioned GitHub Release package (never from main).
 REPO_URL="https://github.com/AmiRaiZo/IP-Management"
-UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh?cachebust=20261014-pip-fix-v2"
+RELEASE_API="https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
+fetch_latest_release() {
+  local destination="$1" metadata="$1/release.json" archive="$1/release.zip"
+  mkdir -p "$destination"
+  curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: IP-Archive-Installer' "$RELEASE_API" -o "$metadata"
+  mapfile -t release_info < <(python3 - "$metadata" <<'PY'
+import json, sys
+release=json.load(open(sys.argv[1], encoding="utf-8"))
+assets=[a for a in release.get("assets", []) if a.get("name", "").startswith("station-archive-v") and a.get("name", "").endswith(".zip")]
+if not release.get("tag_name") or not assets:
+    raise SystemExit("Latest GitHub Release does not contain an IP Archive ZIP package.")
+url=assets[0].get("browser_download_url", "")
+if not url.startswith("https://github.com/AmiRaiZo/IP-Management/releases/download/"):
+    raise SystemExit("Release package URL failed validation.")
+print(release["tag_name"])
+print(url)
+PY
+)
+  [[ ${#release_info[@]} -eq 2 ]] || { echo "Could not read latest GitHub Release metadata." >&2; return 1; }
+  curl -fsSL --retry 3 --retry-delay 1 "${release_info[1]}" -o "$archive"
+  python3 - "$archive" "$destination/source" <<'PY'
+import sys, zipfile
+archive, destination=sys.argv[1:]
+with zipfile.ZipFile(archive) as z:
+    bad=z.testzip()
+    if bad: raise SystemExit("Corrupt release package: "+bad)
+    for item in z.infolist():
+        name=item.filename.replace("\\\\", "/")
+        if name.startswith("/") or ".." in name.split("/"):
+            raise SystemExit("Unsafe path in release package.")
+    z.extractall(destination)
+PY
+  for required in app.py requirements.txt VERSION templates static update.sh upgrade_existing.sh; do
+    [[ -e "$destination/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; return 1; }
+  done
+  echo "Downloaded IP Archive ${release_info[0]} from GitHub Releases."
+}
+
 if [[ -e /opt/station-archive ]]; then
   if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
     echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
     exit 1
   fi
-  command -v curl >/dev/null 2>&1 || { echo "curl is required to download the upgrade script." >&2; exit 1; }
-  UPGRADE_SCRIPT="$(mktemp /tmp/station-archive-upgrade.XXXXXX.sh)"
-  trap 'rm -f -- "$UPGRADE_SCRIPT"' EXIT
-  echo "Existing IP Archive installation detected. Starting the in-place upgrade workflow..."
-  if ! curl -fsSL "$UPGRADE_URL" -o "$UPGRADE_SCRIPT"; then
-    echo "Could not download the upgrade script. No existing files were changed." >&2
-    exit 1
-  fi
-  bash "$UPGRADE_SCRIPT"
+  echo "Existing IP Archive installation detected. Starting the in-place release upgrade..."
+  BOOTSTRAP_DIR="$(mktemp -d /tmp/station-archive-bootstrap.XXXXXX)"
+  trap 'rm -rf -- "$BOOTSTRAP_DIR"' EXIT
+  fetch_latest_release "$BOOTSTRAP_DIR"
+  bash "$BOOTSTRAP_DIR/source/upgrade_existing.sh"
   exit $?
 fi
 
@@ -57,12 +90,12 @@ read -r -p "Type YES to continue: " CONFIRM < /dev/tty
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y git rsync ca-certificates python3 python3-venv python3-pip nginx certbot openssl
+apt-get install -y curl git rsync ca-certificates python3 python3-venv python3-pip nginx certbot openssl
 
 WORK_DIR="$(mktemp -d /tmp/station-archive-install.XXXXXX)"
 cleanup() { rm -rf -- "$WORK_DIR"; [[ -z "${ADMIN_CREDENTIALS:-}" ]] || rm -f -- "$ADMIN_CREDENTIALS"; unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM; }
 trap cleanup EXIT
-git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
+fetch_latest_release "$WORK_DIR"
 SOURCE_DIR="$WORK_DIR/source"
 for required in app.py setup_admin.py requirements.txt templates static; do
   [[ -e "$SOURCE_DIR/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
