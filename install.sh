@@ -16,13 +16,13 @@ REPO_URL="https://github.com/AmiRaiZo/IP-Management"
 UPGRADE_URL="https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh"
 if [[ -e /opt/station-archive ]]; then
   if [[ ! -d /opt/station-archive || ! -f /opt/station-archive/app.py ]]; then
-    echo "/opt/station-archive exists but does not look like an IP Archive installation. Refusing to overwrite it." >&2
+    echo "/opt/station-archive exists but does not look like an IP Management installation. Refusing to overwrite it." >&2
     exit 1
   fi
   command -v curl >/dev/null 2>&1 || { echo "curl is required to download the upgrade script." >&2; exit 1; }
   UPGRADE_SCRIPT="$(mktemp /tmp/station-archive-upgrade.XXXXXX.sh)"
   trap 'rm -f -- "$UPGRADE_SCRIPT"' EXIT
-  echo "Existing IP Archive installation detected. Starting the in-place upgrade workflow..."
+  echo "Existing IP Management installation detected. Starting the in-place upgrade workflow..."
   if ! curl -fsSL "$UPGRADE_URL" -o "$UPGRADE_SCRIPT"; then
     echo "Could not download the upgrade script. No existing files were changed." >&2
     exit 1
@@ -144,7 +144,7 @@ chmod 0640 /var/lib/station-archive/version
 
 cat > /etc/systemd/system/station-archive.service <<EOF
 [Unit]
-Description=IP Archive Web Application
+Description=IP Management Web Application
 After=network.target
 
 [Service]
@@ -315,13 +315,13 @@ chown www-data:www-data "$VERSION_FILE"
 chmod 0640 "$VERSION_FILE"
 SUCCESS=1
 echo "PROGRESS:100:Update completed successfully"
-echo "IP Archive updated successfully."
+echo "IP Management updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
 cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'
 [Unit]
-Description=IP Archive privileged updater
+Description=IP Management privileged updater
 After=network-online.target
 Wants=network-online.target
 
@@ -380,7 +380,7 @@ rm -f -- "$ADMIN_CREDENTIALS"
 
 unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM
 echo
-echo "IP Archive installation completed. Sign in at https://$DOMAIN:$HTTPS_PORT"
+echo "IP Management installation completed. Sign in at https://$DOMAIN:$HTTPS_PORT"
 echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
