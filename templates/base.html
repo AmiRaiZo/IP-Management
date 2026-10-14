@@ -11,7 +11,9 @@
 <div class="app-shell">
   <button type="button" class="theme-toggle global-theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button>
   {% if current_user %}
-  <aside class="sidebar">
+  <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-controls="app-sidebar" aria-expanded="true" aria-label="Close navigation" title="Close navigation"><span aria-hidden="true">☰</span></button>
+  <button type="button" class="sidebar-backdrop" id="sidebar-backdrop" aria-label="Close navigation"></button>
+  <aside class="sidebar" id="app-sidebar">
     <a class="brand" href="{{ url_for('index') }}"><span class="brand-symbol">IP</span><span>IP Archive<small>NETWORK DIRECTORY</small></span></a>
     <nav class="nav-links">
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon">▦</span>IP addresses</a>
