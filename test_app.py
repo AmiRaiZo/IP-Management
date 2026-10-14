@@ -25,7 +25,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM ips")
             db.execute("DELETE FROM groups")
             db.execute("DELETE FROM users")
-            db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required','1') ON CONFLICT(key) DO UPDATE SET value='1'")
+            db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode','per_user') ON CONFLICT(key) DO UPDATE SET value='per_user'")
 
     def csrf(self):
         with self.client.session_transaction() as sess:
@@ -35,7 +35,7 @@ class ArchiveTests(unittest.TestCase):
         secret = secret if secret is not None else pyotp.random_base32()
         with archive.connect_db() as db:
             cur = db.execute(
-                "INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)",
+                "INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)",
                 (username, archive.password_hash("test-pass"), archive.now(), role, secret),
             )
             return cur.lastrowid, secret
@@ -58,7 +58,7 @@ class ArchiveTests(unittest.TestCase):
 
     def test_first_login_requires_enrollment_and_enables_totp(self):
         with archive.connect_db() as db:
-            db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,enabled) VALUES(?,?,?,?,?,1)",
+            db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)",
                        ("firstadmin", archive.password_hash("pw"), archive.now(), "superadmin", ""))
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "firstadmin", "password": "pw"})
@@ -86,7 +86,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn(b'name="password"', response.data)
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
         self.assertEqual(response.status_code, 302)
-        self.assertIsNotNone(self.client.get_cookie("ip_management_2fa"))
+        self.assertIsNone(self.client.get_cookie("ip_management_2fa"))
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
@@ -98,12 +98,12 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.login("policyadmin", secret).status_code, 302)
         response = self.client.get("/settings")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"name=\"two_factor_required\"", response.data)
+        self.assertIn(b"name=\"two_factor_mode\"", response.data)
         response = self.client.post("/settings/security", data={
-            "csrf_token": self.csrf(), "two_factor_required": "0",
+            "csrf_token": self.csrf(), "two_factor_mode": "off",
         })
         self.assertEqual(response.status_code, 302)
-        self.assertFalse(archive.two_factor_required())
+        self.assertEqual(archive.two_factor_mode(), "off")
 
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
@@ -120,7 +120,7 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.get("/setup-2fa")
         self.assertEqual(response.status_code, 403)
         response = self.client.post("/settings/security", data={
-            "csrf_token": self.csrf(), "two_factor_required": "0",
+            "csrf_token": self.csrf(), "two_factor_mode": "off",
         })
         self.assertEqual(response.status_code, 403)
 
