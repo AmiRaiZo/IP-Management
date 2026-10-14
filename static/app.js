@@ -35,6 +35,8 @@
       const response = await fetch('/update/check', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'GitHub could not be reached.');
+      const currentLine = document.getElementById("current-version");
+      if (currentLine) currentLine.textContent = result.current;
       if (status) status.textContent = result.message;
       if (latestLine) {
         latestLine.hidden = false;
