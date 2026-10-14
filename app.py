@@ -386,7 +386,7 @@ def setup_2fa():
         return redirect(url_for("login"))
     with connect_db() as db:
         user = db.execute("SELECT id,username,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
-    if (not user or not user["two_factor_enabled"]
+    if (not user or (mode == "per_user" and not user["two_factor_enabled"])
             or (mode == "shared" and (secret != shared_two_factor_secret() or user["two_factor_enrolled"]))):
         session.clear()
         return redirect(url_for("login"))
