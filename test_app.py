@@ -243,6 +243,11 @@ class ArchiveTests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
+                if path == "/settings":
+                    self.assertIn(b'data-settings-tab="security">Two-factor authentication</a>', response.data)
+                    self.assertEqual(response.data.count(b'id="security" data-settings-section="security"'), 1)
+                    self.assertNotIn(b'data-settings-tab="two-factor"', response.data)
+                    self.assertNotIn(b'<h2>Security</h2>', response.data)
 
     def test_login_copy_is_minimal_and_password_toggle_is_present(self):
         response = self.client.get("/login")

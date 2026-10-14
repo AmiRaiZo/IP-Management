@@ -7,8 +7,7 @@
     <a class="active" href="#branding" data-settings-tab="branding" aria-current="page">Branding</a>
     <a href="#text" data-settings-tab="text">Text & labels</a>
     <a href="#general" data-settings-tab="general">Public address</a>
-    <a href="#security" data-settings-tab="security">Security</a>
-    <a href="#two-factor" data-settings-tab="two-factor">Two-factor authentication</a>
+    <a href="#security" data-settings-tab="security">Two-factor authentication</a>
   </nav>
   <div class="settings-content">
     <form class="panel form-panel settings-section is-active" id="branding" data-settings-section="branding" method="post" enctype="multipart/form-data">
@@ -66,13 +65,7 @@
     </section>
 
     <section class="panel form-panel settings-section" id="security" data-settings-section="security">
-      <div class="panel-heading"><div><h2>Security</h2><p>Review the active server address.</p></div></div>
-      <div class="setting-row"><div><strong>Public HTTPS port</strong><p class="muted">Port currently configured for the application.</p></div><code>{{ deployment.public_port }}</code></div>
-      <div class="setting-row"><div><strong>Public domain</strong><p class="muted">Domain currently configured for the application.</p></div><code>{{ deployment.public_domain }}</code></div>
-    </section>
-
-    <section class="panel form-panel settings-section" id="two-factor" data-settings-section="two-factor">
-      <div class="panel-heading"><div><h2>Two-factor authentication</h2><p>Control authentication policy for every account.</p></div></div>
+      <div class="panel-heading"><div><h2>Two-factor authentication</h2><p>Manage sign-in verification and authenticator enrollment for user accounts.</p></div></div>
       <form method="post" action="{{ url_for('update_security_settings') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="setting-row"><div><strong>Two-factor policy</strong><p class="muted">Only the super administrator can choose how Authenticator is used. Regular users cannot turn it on or off for themselves.</p></div><div class="field"><select name="two_factor_mode" aria-label="Two-factor policy"><option value="off" {% if two_factor_mode == 'off' %}selected{% endif %}>Disabled for everyone</option><option value="shared" {% if two_factor_mode == 'shared' %}selected{% endif %}>One shared site Authenticator for all users</option><option value="per_user" {% if two_factor_mode == 'per_user' %}selected{% endif %}>Individual 2FA selected per user</option></select></div></div>
