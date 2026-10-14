@@ -610,28 +610,46 @@ def update_page():
 
 
 def installed_version():
+    # The checked-in VERSION file is the human-facing release number.
     try:
-        value = VERSION_FILE.read_text(encoding="utf-8").strip()
-        if re.fullmatch(r"[0-9a-f]{40}", value):
+        value = (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip().lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
     except OSError:
         pass
-    return "Legacy install (untracked)"
+    # Older deployments stored a commit SHA here; don't expose internal IDs as versions.
+    try:
+        value = VERSION_FILE.read_text(encoding="utf-8").strip().lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
+            return value
+    except OSError:
+        pass
+    return "Legacy / unversioned"
 
 
-def latest_repository_commit():
+def latest_release():
     repo_url = os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")).rstrip("/")
     match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", repo_url)
     if not match:
         raise ValueError("Configured GitHub repository URL is invalid.")
-    api_url = f"https://api.github.com/repos/{match.group(1)}/{match.group(2)}/commits/main"
-    req = Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive-Updater"})
+    base = f"https://api.github.com/repos/{match.group(1)}/{match.group(2)}"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive-Updater"}
+    req = Request(f"{base}/releases/latest", headers=headers)
     with urlopen(req, timeout=8) as response:
         payload = json.loads(response.read(256_000).decode("utf-8"))
-    sha = payload.get("sha", "")
+    tag = str(payload.get("tag_name", "")).strip()
+    version = tag.lstrip("v")
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+        raise ValueError("Latest GitHub release has no valid semantic version tag.")
+    sha = str(payload.get("target_commitish", "")).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise ValueError("GitHub did not return a valid commit SHA.")
-    return sha
+        req = Request(f"{base}/commits/{tag}", headers=headers)
+        with urlopen(req, timeout=8) as response:
+            commit = json.loads(response.read(256_000).decode("utf-8"))
+        sha = str(commit.get("sha", "")).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("GitHub did not return a valid release commit SHA.")
+    return {"version": version, "sha": sha, "tag": tag}
 
 
 @app.get("/update/check")
@@ -639,11 +657,14 @@ def latest_repository_commit():
 def check_update():
     current = installed_version()
     try:
-        latest = latest_repository_commit()
+        release = latest_release()
     except (URLError, HTTPError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"ok": False, "error": f"Could not check GitHub: {exc}", "current": current}, 502
-    return {"ok": True, "current": current, "latest": latest,
-            "update_available": latest != current, "message": "A new version is available." if latest != current else "You already have the latest version."}
+    available = current != release["version"]
+    return {"ok": True, "current": current, "latest": release["version"],
+            "latest_sha": release["sha"], "tag": release["tag"],
+            "update_available": available,
+            "message": f"Version {release['version']} is available." if available else "You already have the latest version."}
 
 
 @app.get("/update/status")
@@ -684,12 +705,12 @@ def update_app():
         flash("Check for updates first, then select the available version.", "error")
         return redirect(url_for("update_page"))
     try:
-        latest = latest_repository_commit()
+        release = latest_release()
         current = installed_version()
-        if latest != target_sha:
+        if release["sha"] != target_sha:
             flash("GitHub changed since the check. Check for updates again before installing.", "error")
             return redirect(url_for("update_page"))
-        if latest == current:
+        if release["version"] == current:
             flash("No update is available. Your installation is already current.", "success")
             return redirect(url_for("update_page"))
         UPDATE_TARGET_FILE.write_text(target_sha + "\n", encoding="utf-8")
