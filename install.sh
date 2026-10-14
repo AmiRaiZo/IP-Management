@@ -216,75 +216,8 @@ EOF
 cat > /usr/local/sbin/station-archive-update <<'UPDATER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-umask 077
 [[ ${EUID} -eq 0 ]] || { echo "This updater must run as root." >&2; exit 1; }
-ENV_FILE=/etc/station-archive/env
-[[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
-set -a
-. "$ENV_FILE"
-set +a
-UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
-[[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
-[[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
-[[ "${APP_INTERNAL_PORT:-}" =~ ^[0-9]{1,5}$ ]] && (( APP_INTERNAL_PORT >= 1 && APP_INTERNAL_PORT <= 65535 )) || { echo "Configured application port is invalid." >&2; exit 1; }
-TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
-DEPLOYED=0
-SUCCESS=0
-cleanup() {
-  if (( DEPLOYED == 1 && SUCCESS == 0 )); then
-    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
-      chown -R root:www-data /opt/station-archive
-      chown root:www-data /opt/station-archive
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-      if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv || true; fi
-      chown -R root:www-data /opt/station-archive/.venv || true
-      find /opt/station-archive/.venv -type d -exec chmod 0750 {} + || true
-      find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} + || true
-      find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} + || true
-      chown -R www-data:www-data /var/lib/station-archive || true
-      find /var/lib/station-archive -type d -exec chmod 0750 {} + || true
-      find /var/lib/station-archive -type f -exec chmod 0640 {} + || true
-      systemctl restart station-archive >/dev/null 2>&1 || true
-      echo "Update failed; previous application files were restored." >&2
-    else
-      echo "Update failed and automatic rollback could not restore the previous files. Inspect /opt/station-archive and the service logs." >&2
-    fi
-  fi
-  rm -rf -- "$TMP"
-}
-trap cleanup EXIT
-git clone --depth 1 "${UPDATE_REPO%/}" "$TMP/source"
-for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
-mkdir -p "$TMP/backup"
-rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
-DEPLOYED=1
-systemctl stop station-archive.service
-rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
-chown -R root:www-data /opt/station-archive
-chown root:www-data /opt/station-archive
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv; fi
-# Always recreate the disposable venv during an upgrade so a damaged pip
-# launcher cannot block deployment. Persistent database/uploads live in DATA_DIR.
-python3 -m venv --clear /opt/station-archive/.venv
-chown -R root:www-data /opt/station-archive/.venv
-find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
-find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
-find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} +
-install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
-chown -R www-data:www-data /var/lib/station-archive
-find /var/lib/station-archive -type d -exec chmod 0750 {} +
-find /var/lib/station-archive -type f -exec chmod 0640 {} +
-/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
-/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-nginx -t
-systemctl restart station-archive
-systemctl reload nginx
-systemctl is-active --quiet station-archive
-SUCCESS=1
-echo "IP Archive updated successfully."
+exec /bin/bash /opt/station-archive/update.sh
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
