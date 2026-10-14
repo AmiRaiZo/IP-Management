@@ -25,7 +25,7 @@ fi
 DOMAIN=""
 for conf in /etc/nginx/sites-available/station-archive-*; do
   [[ -f "$conf" ]] || continue
-  found="$(grep -E "^[[:space:]]*server_name[[:space:]]+" "$conf" | head -n1 | sed -E "s/^[[:space:]]*server_name[[:space:]]+([^;]+);.*/\1/" | awk "{print $1}")"
+  found="$(grep -E "^[[:space:]]*server_name[[:space:]]+" "$conf" | head -n1 | sed -E "s/^[[:space:]]*server_name[[:space:]]+([^;]+);.*/\1/" | awk '{print $1}')"
   if [[ -n "$found" && "$found" != "_" ]]; then DOMAIN="$found"; break; fi
 done
 
@@ -53,7 +53,20 @@ rm -f -- "$UPDATER" "$SUDOERS_FILE"
 for conf in /etc/nginx/sites-available/station-archive-*; do [[ -e "$conf" || -L "$conf" ]] || continue; rm -f -- "$conf"; done
 for conf in /etc/nginx/sites-enabled/station-archive-*; do [[ -e "$conf" || -L "$conf" ]] || continue; rm -f -- "$conf"; done
 if command -v nginx >/dev/null 2>&1; then nginx -t && systemctl reload nginx || echo "Warning: Nginx validation/reload failed; unrelated site configuration may need attention." >&2; fi
-if [[ -n "$DOMAIN" ]] && command -v certbot >/dev/null 2>&1; then certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null || true; fi
+if [[ -n "$DOMAIN" ]] && command -v certbot >/dev/null 2>&1; then
+  CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
+  CERT_USED_ELSEWHERE=0
+  for other in /etc/nginx/sites-enabled/*; do
+    [[ -f "$other" || -L "$other" ]] || continue
+    [[ "$(basename "$other")" == station-archive-* ]] && continue
+    if grep -Fq "$CERT_PATH" "$other" 2>/dev/null; then CERT_USED_ELSEWHERE=1; break; fi
+  done
+  if (( CERT_USED_ELSEWHERE == 0 )); then
+    certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null || true
+  else
+    echo "Keeping the $DOMAIN certificate because another Nginx site references it."
+  fi
+fi
 
 rm -rf -- "$APP_DIR" "$DATA_DIR" "$CONFIG_DIR" "$ACME_WEBROOT"
 for backup in "$BACKUP_ROOT"/station-archive-upgrade-* "$BACKUP_ROOT"/station-archive-release-*; do [[ -e "$backup" ]] || continue; rm -rf -- "$backup"; done
