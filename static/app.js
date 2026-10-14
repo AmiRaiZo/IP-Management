@@ -18,7 +18,38 @@
   button?.addEventListener('click', () => {
     root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
     try { localStorage.setItem('ip-archive-theme', root.dataset.theme); } catch (_) {}
+    document.cookie = `ip-archive-theme=${root.dataset.theme}; Max-Age=31536000; Path=/; SameSite=Lax`;
     paintTheme();
+  });
+  const checkUpdate = document.getElementById('check-update');
+  checkUpdate?.addEventListener('click', async () => {
+    const status = document.getElementById('update-status-text');
+    const latestLine = document.getElementById('latest-version');
+    const form = document.getElementById('apply-update-form');
+    checkUpdate.disabled = true;
+    checkUpdate.textContent = 'Checking…';
+    if (status) status.textContent = 'Contacting GitHub and comparing versions…';
+    if (form) form.hidden = true;
+    if (latestLine) latestLine.hidden = true;
+    try {
+      const response = await fetch('/update/check', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'GitHub could not be reached.');
+      if (status) status.textContent = result.message;
+      if (latestLine) {
+        latestLine.hidden = false;
+        latestLine.innerHTML = `LATEST VERSION <strong>${result.latest.slice(0, 12)}</strong>`;
+      }
+      if (form && result.update_available) {
+        form.hidden = false;
+        document.getElementById('target-sha').value = result.latest;
+      }
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Could not check for updates.';
+    } finally {
+      checkUpdate.disabled = false;
+      checkUpdate.textContent = 'Check again';
+    }
   });
   const search = document.querySelector('[data-live-search]');
   const group = document.querySelector('[data-group-filter]');
