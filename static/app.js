@@ -1,16 +1,18 @@
 (() => {
   document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
     let dismissed = false;
+    const dismissOnClick = () => dismiss();
     const dismiss = () => {
       if (dismissed) return;
       dismissed = true;
+      document.removeEventListener('click', dismissOnClick, true);
       toast.classList.add('toast-leaving');
       window.setTimeout(() => toast.remove(), 220);
     };
-    window.setTimeout(dismiss, Number(toast.dataset.autoDismiss) || 8000);
     if (toast.classList.contains('welcome-toast')) {
-      document.addEventListener('click', dismiss, {once: true});
+      document.addEventListener('click', dismissOnClick, true);
     }
+    window.setTimeout(dismiss, Number(toast.dataset.autoDismiss) || 2600);
   });
   const settingsNav = document.querySelector('.settings-nav[data-settings-tabs], .settings-nav[aria-label="Settings sections"]');
   if (settingsNav) {
@@ -258,7 +260,35 @@
   }
   search?.addEventListener('input', filterRows);
   group?.addEventListener('change', filterRows);
-  document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (_) {
+      const field = document.createElement('textarea');
+      field.value = value;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed'; field.style.opacity = '0';
+      document.body.appendChild(field); field.select();
+      const copied = document.execCommand('copy'); field.remove();
+      return copied;
+    }
+  }
+  document.querySelectorAll('[data-copy-value]').forEach(button => button.addEventListener('click', async () => {
+    const value = button.dataset.copyValue || '';
+    if (!value) return;
+    const originalTitle = button.dataset.originalTitle || button.title;
+    button.dataset.originalTitle = originalTitle;
+    if (await copyText(value)) {
+      button.classList.add('is-copied');
+      button.title = 'Copied!';
+      button.setAttribute('aria-label', 'Copied');
+      window.setTimeout(() => {
+        button.classList.remove('is-copied'); button.title = originalTitle;
+        button.setAttribute('aria-label', originalTitle.replace(/^Click to copy /, 'Copy '));
+      }, 1200);
+    }
+  }));  document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copyTarget);
     if (!target) return;
     try { await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; }

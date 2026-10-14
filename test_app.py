@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from unittest.mock import patch
 from datetime import datetime, timezone
 
@@ -25,6 +26,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM user_group_access")
             db.execute("DELETE FROM ips")
             db.execute("DELETE FROM groups")
+            db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
             db.execute("DELETE FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")
             db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode','per_user') ON CONFLICT(key) DO UPDATE SET value='per_user'")
@@ -107,6 +109,10 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.get("/settings")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"name=\"two_factor_mode\"", response.data)
+        self.assertIn(b'data-settings-tab="security">Two-factor authentication</a>', response.data)
+        self.assertEqual(response.data.count(b'id="security" data-settings-section="security"'), 1)
+        self.assertNotIn(b'data-settings-tab="two-factor"', response.data)
+        self.assertNotIn(b'<h2>Security</h2>', response.data)
         response = self.client.post("/settings/security", data={
             "csrf_token": self.csrf(), "two_factor_mode": "off",
         })
@@ -221,6 +227,57 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"192.0.2.10", response.data)
         self.assertNotIn(b"device-secret", response.data)
 
+    def test_default_group_is_selected_and_password_column_is_opt_in(self):
+        _, secret = self.create_user("passwordarchive")
+        self.assertEqual(self.login("passwordarchive", secret).status_code, 302)
+        form = self.client.get("/ips/new").get_data(as_text=True)
+        self.assertIn('data-toggle-password="password"', form)
+        self.assertRegex(form, r'<option value="\d+" selected>Default</option>')
+        response = self.client.post("/ips/new", data={
+            "csrf_token": self.csrf(), "name": "Archive entry", "ip_address": "192.0.2.55",
+            "username": "vault-user", "password": "super-secret", "port": "22",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT group_id,password_enc FROM ips WHERE ip_address='192.0.2.55'").fetchone()
+            default_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+        self.assertEqual(row["group_id"], default_id)
+        self.assertNotEqual(row["password_enc"], "super-secret")
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertNotIn("super-secret", page)
+        self.assertNotIn("<th>Password</th>", page)
+        response = self.client.post("/settings/directory", data={
+            "csrf_token": self.csrf(), "show_ip_passwords": "1",
+        })
+        self.assertEqual(response.status_code, 302)
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertIn("<th>Password</th>", page)
+        self.assertIn("super-secret", page)
+        response = self.client.post("/settings/directory", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertNotIn("super-secret", page)
+        self.assertNotIn("<th>Password</th>", page)
+
+    def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
+        _, secret = self.create_user("grouporder")
+        self.assertEqual(self.login("grouporder", secret).status_code, 302)
+        for name in ("Alpha", "Bravo", "Charlie"):
+            self.client.post("/groups", data={"csrf_token": self.csrf(), "name": name})
+        with archive.connect_db() as db:
+            before = [row["name"] for row in db.execute("SELECT name FROM groups ORDER BY sort_order, id")]
+            bravo_id = db.execute("SELECT id FROM groups WHERE name='Bravo'").fetchone()["id"]
+        self.assertEqual(before, ["Default", "Alpha", "Bravo", "Charlie"])
+        response = self.client.post(f"/groups/{bravo_id}/move", data={
+            "csrf_token": self.csrf(), "direction": "up",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            after = [row["name"] for row in db.execute("SELECT name FROM groups ORDER BY sort_order, id")]
+        self.assertEqual(after, ["Default", "Bravo", "Alpha", "Charlie"])
+        response = self.client.get("/groups")
+        self.assertLess(response.data.index(b"Bravo"), response.data.index(b"Alpha"))
+
     def test_group_access_and_explicit_ip_deny(self):
         user_id, secret = self.create_user("limited", "admin")
         with archive.connect_db() as db:
@@ -243,11 +300,6 @@ class ArchiveTests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
-                if path == "/settings":
-                    self.assertIn(b'data-settings-tab="security">Two-factor authentication</a>', response.data)
-                    self.assertEqual(response.data.count(b'id="security" data-settings-section="security"'), 1)
-                    self.assertNotIn(b'data-settings-tab="two-factor"', response.data)
-                    self.assertNotIn(b'<h2>Security</h2>', response.data)
 
     def test_login_copy_is_minimal_and_password_toggle_is_present(self):
         response = self.client.get("/login")
@@ -312,6 +364,26 @@ class ArchiveTests(unittest.TestCase):
             user = db.execute("SELECT password_hash FROM users WHERE username='profile-secure'").fetchone()
         self.assertTrue(archive.password_matches("long-new-password", user["password_hash"]))
 
+    def test_profile_avatar_upload_renders_in_sidebar_and_is_served(self):
+        user_id, secret = self.create_user("avatar-user", role="admin")
+        self.assertEqual(self.login("avatar-user", secret).status_code, 302)
+        response = self.client.post("/profile", data={
+            "csrf_token": self.csrf(),
+            "avatar": (BytesIO(b"test-image-bytes"), "avatar.png"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            user = db.execute("SELECT profile_image FROM users WHERE id=?", (user_id,)).fetchone()
+        self.assertEqual(user["profile_image"], f"avatars/user-{user_id}.png")
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertIn('src="/media/avatars/user-', page)
+        self.assertIn('class="profile-dot"', page)
+        profile_page = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn('id="avatar"', profile_page)
+        image_response = self.client.get("/media/" + user["profile_image"])
+        self.assertEqual(image_response.status_code, 200)
+        self.assertEqual(image_response.data, b"test-image-bytes")
+
     def test_legacy_database_migrates_records_and_promotes_first_user(self):
         with archive.connect_db() as db:
             db.execute("CREATE TABLE stations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, ip_address TEXT NOT NULL, port INTEGER, username TEXT NOT NULL, password_enc TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
@@ -347,7 +419,7 @@ class ArchiveTests(unittest.TestCase):
     def test_update_status_marks_python_traceback_as_failure(self):
         user_id, _ = self.create_user("status-traceback-admin")
         with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
-            log_file.read_text.return_value = "\\n".join([
+            log_file.read_text.return_value = "\n".join([
                 "Starting update…",
                 "PROGRESS:80:Verifying Gunicorn as the actual service user",
                 "Traceback (most recent call last):",

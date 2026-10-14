@@ -346,8 +346,7 @@ chmod -R g+rX /opt/station-archive/.venv
 	  chown root:www-data /opt/station-archive/.venv/bin/gunicorn
 	  chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 	  runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
-	fi
-	echo "PROGRESS:84:Validating Nginx configuration"
+	fi	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
 	echo "PROGRESS:88:Restarting application with the verified environment"
 	systemctl restart station-archive

@@ -120,7 +120,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: station-archive-${{ steps.package.outputs.tag }}.zip
-      - name: Keep only the 10 newest releases
+      - name: Keep only the newest release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -156,8 +156,8 @@ jobs:
                   break
               page += 1
           releases.sort(key=lambda item: item.get("published_at") or item.get("created_at") or "", reverse=True)
-          stale = releases[10:]
-          print(f"Found {len(releases)} releases; keeping the 10 newest and deleting {len(stale)} older releases.")
+          stale = releases[1:]
+          print(f"Found {len(releases)} releases; keeping the newest release and deleting {len(stale)} older releases.")
           for release in stale:
               rid = release["id"]
               tag = release.get("tag_name", "")
