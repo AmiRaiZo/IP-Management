@@ -64,6 +64,110 @@
       checkUpdate.textContent = 'Check again';
     }
   });
+  const updateModal = document.getElementById('update-modal');
+  const applyUpdateForm = document.getElementById('apply-update-form');
+  const updateLog = document.getElementById('update-modal-log');
+  const updatePhase = document.getElementById('update-modal-phase');
+  const updateFill = document.getElementById('update-modal-progress');
+  const updatePercent = document.getElementById('update-modal-percent');
+  const updateState = document.getElementById('update-modal-state');
+  const updateSpinner = document.getElementById('update-spinner');
+  const closeUpdateModal = document.getElementById('close-update-modal');
+  const copyUpdateLog = document.getElementById('copy-update-log');
+  let updatePollHandle = null;
+  function showUpdateModal() {
+    if (!updateModal) return;
+    updateModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    updatePhase.textContent = 'Starting update…';
+    updateLog.value = 'Waiting for server output…';
+    updateFill.style.width = '0%';
+    updatePercent.textContent = '0%';
+    updateState.textContent = 'RUNNING';
+    updateSpinner.className = 'update-modal-spinner';
+    closeUpdateModal.disabled = true;
+    closeUpdateModal.textContent = 'Update running…';
+    document.getElementById('update-copy-status').textContent = '';
+  }
+  function finishUpdateModal(success) {
+    closeUpdateModal.disabled = false;
+    closeUpdateModal.textContent = 'Close';
+    updateState.textContent = success ? 'SUCCESS' : 'FAILED';
+    updateSpinner.className = 'update-modal-spinner ' + (success ? 'is-done' : 'is-failed');
+    if (!success) updatePhase.textContent = 'Update failed. Copy the output below to share the exact error.';
+  }
+  async function pollUpdateStatus() {
+    try {
+      const response = await fetch('/update/status', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not read updater status.');
+      updateLog.value = result.log || '(No output received yet.)';
+      updateLog.scrollTop = updateLog.scrollHeight;
+      updatePhase.textContent = result.phase || 'Working…';
+      const percent = Math.max(0, Math.min(100, Number(result.progress) || 0));
+      updateFill.style.width = percent + '%';
+      updatePercent.textContent = percent + '%';
+      if (result.done) {
+        if (updatePollHandle) clearInterval(updatePollHandle);
+        updatePollHandle = null;
+        if (result.success) {
+          updateFill.style.width = '100%'; updatePercent.textContent = '100%';
+          updatePhase.textContent = 'Update completed successfully.';
+          finishUpdateModal(true);
+          const currentLine = document.getElementById('current-version');
+          if (currentLine && result.current) currentLine.textContent = result.current;
+          const status = document.getElementById('update-status-text');
+          if (status) status.textContent = 'Update completed successfully.';
+        } else finishUpdateModal(false);
+      }
+    } catch (error) {
+      updateLog.value += '\n' + (error.message || 'Unable to poll updater status.');
+      updatePhase.textContent = 'Could not read updater status.';
+      if (updatePollHandle) clearInterval(updatePollHandle);
+      updatePollHandle = null;
+      finishUpdateModal(false);
+    }
+  }
+  applyUpdateForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    showUpdateModal();
+    try {
+      const response = await fetch(applyUpdateForm.action, {
+        method: 'POST', body: new FormData(applyUpdateForm),
+        headers: {'Accept': 'text/html'}, cache: 'no-store'
+      });
+      const html = await response.text();
+      if (!response.ok || /Update could not start|Check for updates first|GitHub changed since the check/.test(html)) {
+        updateLog.value = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || ('HTTP ' + response.status);
+        throw new Error('The updater did not start. Copy the diagnostic output below.');
+      }
+      updatePollHandle = setInterval(pollUpdateStatus, 1200);
+      await pollUpdateStatus();
+    } catch (error) {
+      if (updatePollHandle) clearInterval(updatePollHandle);
+      updatePollHandle = null;
+      updateLog.value = (updateLog.value || '') + '\n' + (error.message || String(error));
+      finishUpdateModal(false);
+    }
+  });
+  closeUpdateModal?.addEventListener('click', () => {
+    if (closeUpdateModal.disabled) return;
+    updateModal.hidden = true;
+    document.body.style.overflow = '';
+    if (updateState.textContent === 'SUCCESS') window.location.reload();
+  });
+  copyUpdateLog?.addEventListener('click', async () => {
+    const content = 'IP Management updater diagnostic\nStatus: ' + updateState.textContent +
+      '\nPhase: ' + updatePhase.textContent + '\n\n' + (updateLog.value || '(empty output)');
+    try {
+      await navigator.clipboard.writeText(content);
+      document.getElementById('update-copy-status').textContent = 'Output copied to clipboard.';
+    } catch (_) {
+      updateLog.focus(); updateLog.select();
+      const copied = document.execCommand('copy');
+      document.getElementById('update-copy-status').textContent = copied ? 'Output copied to clipboard.' : 'Select and copy the output manually.';
+    }
+  });
   const ipModal = document.getElementById('ip-modal');
   const openIpModal = document.getElementById('open-ip-modal');
   const closeIpModal = () => ipModal?.close();
