@@ -183,6 +183,7 @@ find "$DATA_DIR" -type d -exec chmod 0750 {} +
 find "$DATA_DIR" -type f -exec chmod 0640 {} +
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
 "$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
+chown -R root:www-data "$APP_DIR/.venv"
 chmod -R g+rX "$APP_DIR/.venv"
 systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p "EnvironmentFile=$ENV_FILE" -p "WorkingDirectory=$APP_DIR" "$APP_DIR/.venv/bin/python" -c 'import app; print("APP_IMPORT_OK")'
 
