@@ -20,6 +20,16 @@ The public `install.sh` URL is only a small bootstrap. It fetches the latest pub
 
 The installer asks for the domain, HTTPS port (default `443`), superadmin username, and password. Password entry is hidden and confirmed; empty passwords are rejected. It installs Python, Nginx, Git, Certbot and dependencies, obtains a Let's Encrypt certificate through port `80`, configures HTTPS, and creates the initial superadmin. Open `https://your-domain` for port `443`, or `https://your-domain:PORT` for a custom port.
 
+### Completely remove the installation before reinstalling
+
+> **Destructive:** this permanently deletes the database, runtime data, and environment secrets. Existing encrypted device credentials may become unrecoverable. Do not run it unless you intend to erase the installation.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/uninstall.sh | sudo bash
+```
+
+The script requires typing `DELETE IP ARCHIVE DATA` before it proceeds. It removes IP Archive's application, database, environment file, service, updater, site-specific Nginx configuration, ACME webroot, and IP Archive-named backups. It attempts to remove the detected domain's Certbot certificate. Shared system packages and unrelated Nginx sites are kept. After it finishes, run the fresh installation command above.
+
 ### Upgrade an existing installation
 
 Run the same stable installer command. It detects an existing installation and offers the in-place upgrade. The upgrader downloads the latest published release package and preserves the current domain, public HTTPS port, Nginx configuration, SSL certificates, secret values and database. It creates a timestamped backup before changing application files.
