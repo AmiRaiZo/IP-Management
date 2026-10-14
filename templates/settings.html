@@ -45,12 +45,8 @@
     </form>
 
     <section class="panel form-panel settings-section" id="directory" data-settings-section="directory">
-      <div class="panel-heading"><div><h2>IP Directory display</h2><p>Choose whether saved connection passwords appear in the IP table.</p></div></div>
-      <form method="post" action="{{ url_for('update_directory_settings') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="setting-row"><div><strong>Show saved passwords in IP Directory</strong><p class="muted">When enabled, a Password column appears next to Username for the super administrator. Passwords remain encrypted in the database. Keep this disabled when you do not need to see them.</p></div><label class="permission-option"><input type="checkbox" name="show_ip_passwords" value="1" {% if show_ip_passwords %}checked{% endif %}> Show passwords</label></div>
-        <div class="form-footer"><span class="muted">Default: hidden.</span><button class="btn btn-primary" type="submit">Save directory settings</button></div>
-      </form>
+      <div class="panel-heading"><div><h2>IP Directory display</h2><p>Password visibility and copying.</p></div></div>
+      <div class="setting-row"><div><strong>Saved connection passwords</strong><p class="muted">The Password column is shown to the super administrator beside Username. Click a password to copy it. Passwords remain encrypted in the database and are not shown to regular users.</p></div></div>
     </section>
 
     <section class="panel form-panel settings-section" id="general" data-settings-section="general">

@@ -225,9 +225,9 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"192.0.2.10", response.data)
-        self.assertNotIn(b"device-secret", response.data)
+        self.assertIn(b"device-secret", response.data)
 
-    def test_default_group_is_selected_and_password_column_is_opt_in(self):
+    def test_default_group_and_password_visibility_and_copy_are_available(self):
         _, secret = self.create_user("passwordarchive")
         self.assertEqual(self.login("passwordarchive", secret).status_code, 302)
         form = self.client.get("/ips/new").get_data(as_text=True)
@@ -244,8 +244,13 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(row["group_id"], default_id)
         self.assertNotEqual(row["password_enc"], "super-secret")
         page = self.client.get("/").get_data(as_text=True)
-        self.assertNotIn("super-secret", page)
-        self.assertNotIn("<th>Password</th>", page)
+        self.assertIn("super-secret", page)
+        self.assertIn("<th>Password</th>", page)
+        self.assertIn('data-copy-value="super-secret"', page)
+        edit_page = self.client.get("/ips/1/edit").get_data(as_text=True)
+        self.assertIn('id="password" name="password" type="password"', edit_page)
+        self.assertIn('value="super-secret"', edit_page)
+        self.assertIn('data-copy-value="super-secret"', edit_page)
         response = self.client.post("/settings/directory", data={
             "csrf_token": self.csrf(), "show_ip_passwords": "1",
         })
@@ -256,8 +261,26 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.post("/settings/directory", data={"csrf_token": self.csrf()})
         self.assertEqual(response.status_code, 302)
         page = self.client.get("/").get_data(as_text=True)
-        self.assertNotIn("super-secret", page)
-        self.assertNotIn("<th>Password</th>", page)
+        self.assertIn("super-secret", page)
+        self.assertIn("<th>Password</th>", page)
+
+    def test_non_superadmin_never_receives_saved_ip_passwords(self):
+        user_id, secret = self.create_user("limited-password-view", role="admin")
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            ip_id = db.execute(
+                "INSERT INTO ips(name,ip_address,username,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                ("Restricted router", "192.0.2.99", "operator", archive.vault.encrypt(b"hidden-device-secret").decode(), group_id, "root", archive.now(), archive.now()),
+            ).lastrowid
+            db.execute("INSERT INTO user_group_access(user_id,group_id) VALUES(?,?)", (user_id, group_id))
+        self.assertEqual(self.login("limited-password-view", secret).status_code, 302)
+        directory = self.client.get("/")
+        self.assertEqual(directory.status_code, 200)
+        self.assertNotIn(b"hidden-device-secret", directory.data)
+        self.assertNotIn(b"<th>Password</th>", directory.data)
+        edit = self.client.get(f"/ips/{ip_id}/edit")
+        self.assertEqual(edit.status_code, 403)
+        self.assertNotIn(b"hidden-device-secret", edit.data)
 
     def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
         _, secret = self.create_user("grouporder")

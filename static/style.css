@@ -164,3 +164,4 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 
 /* Keep HTML hidden controls hidden even when component styles set display. */
 [hidden]{display:none!important}
+.password-copy-button{margin-top:8px}

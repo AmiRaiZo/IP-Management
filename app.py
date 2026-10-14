@@ -482,8 +482,7 @@ def index():
         lower = term.casefold()
         rows = [r for r in rows if lower in (r["ip_address"] or "").casefold() or lower in (r["name"] or "").casefold() or lower in (r["username"] or "").casefold() or lower in (r["notes"] or "").casefold()]
     with connect_db() as db:
-        show_ip_passwords = db.execute("SELECT value FROM app_settings WHERE key='show_ip_passwords'").fetchone()
-        show_ip_passwords = bool(show_ip_passwords and show_ip_passwords["value"] == "1")
+        show_ip_passwords = request.user["role"] == "superadmin"
         if request.user["role"] == "superadmin":
             groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
         else:
@@ -496,7 +495,7 @@ def index():
                 AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
               ORDER BY groups.sort_order, groups.id
             """, (request.user["id"], request.user["id"], request.user["id"])).fetchall()
-    if show_ip_passwords and request.user["role"] == "superadmin":
+    if show_ip_passwords:
         prepared_rows = []
         for row in rows:
             item = dict(row)
@@ -606,7 +605,12 @@ def ip_edit(ip_id):
             audit("ip_updated", f"id={ip_id}; ip={data['ip']}")
             flash("IP record updated.", "success")
             return redirect(url_for("index"))
-    return render_template("ip_form.html", ip=ip, groups=groups, default_group_id=None)
+    ip_data = dict(ip)
+    try:
+        ip_data["password_plain"] = vault.decrypt((ip["password_enc"] or "").encode()).decode() if ip["password_enc"] else ""
+    except (InvalidToken, ValueError, TypeError):
+        ip_data["password_plain"] = ""
+    return render_template("ip_form.html", ip=ip_data, groups=groups, default_group_id=None)
 
 
 @app.post("/ips/<int:ip_id>/delete")
