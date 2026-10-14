@@ -70,25 +70,8 @@ html[data-theme="light"] .field select,html[data-theme="light"] .stack-form sele
 @media(max-width:720px){.app-modal{padding:16px}.app-shell:has(#deployment-lock) .container{width:calc(100% - 20px);margin:15px auto}.app-shell:has(#deployment-lock) #deploy-log{min-height:240px}}
 
 .password-field{position:relative;display:flex;align-items:center}.login-card .password-field .login-input{padding-right:48px}.password-toggle{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;border-radius:8px;display:grid;place-items:center;background:transparent;color:#71849a;padding:7px}.password-toggle:hover,.password-toggle.is-visible{background:#ffffff0b;color:#59dccc}.password-toggle svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.login-card .login-submit span{display:none}.login-card .login-submit{letter-spacing:.1px}.login-card h1{margin-bottom:25px}.login-card .back-to-password{margin-top:15px;text-align:center}.login-card .back-to-password button{border:0;background:transparent;font-size:11px;padding:7px;color:#70dfd4}.sidebar-bottom{gap:8px}.profile-account{min-width:0;flex:1;display:flex;align-items:center;gap:10px;border-radius:9px;padding:4px;text-decoration:none}.profile-account:hover{background:var(--surface-2)}.profile-account:focus-visible{outline:3px solid #7893ff80;outline-offset:2px}.profile-dot img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
-.auth-theme-toggle{position:fixed;top:20px;right:22px;z-index:10;box-shadow:var(--shadow)}
+.global-theme-toggle{position:fixed;top:20px;right:22px;z-index:1001;box-shadow:var(--shadow)}
 html[data-theme="dark"] .login-orb{opacity:.25}html[data-theme="dark"] .login-user-card{background:linear-gradient(120deg,#152b38,#191d32);border-color:#31515c}html[data-theme="dark"] .login-user-copy h1,html[data-theme="dark"] .login-user-copy h2,html[data-theme="dark"] .verify-title{color:var(--text)!important}html[data-theme="dark"] .login-user-meta{color:var(--muted)}
-
-/* In-place updater modal with a blurred full-page backdrop. */
-.update-modal-backdrop{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(10,16,30,.42);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.update-modal-backdrop[hidden]{display:none}
-.update-modal-panel{width:min(820px,100%);max-height:min(88vh,900px);overflow:auto;background:var(--surface,#fff);color:var(--text,#172033);border:1px solid var(--border,#dce2ed);border-radius:22px;box-shadow:0 28px 100px rgba(0,0,0,.28);padding:clamp(20px,4vw,34px)}
-.update-modal-head{display:flex;align-items:center;justify-content:flex-start;gap:20px}.update-modal-head h2{margin:4px 0 0}
-.update-progress-track{height:10px;background:rgba(120,130,150,.2);border-radius:999px;overflow:hidden;margin:20px 0 8px}.update-progress-fill{height:100%;width:0;background:var(--primary,#4569e8);border-radius:inherit;transition:width .25s ease}.update-progress-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;letter-spacing:.06em;margin-bottom:16px}.update-modal-panel>label{display:block;font-weight:650;margin-bottom:8px}.update-modal-log{display:block;width:100%;min-height:190px;max-height:38vh;resize:vertical;box-sizing:border-box;padding:14px;border-radius:12px;border:1px solid var(--border,#dce2ed);background:var(--input,#f5f7fb);color:var(--text,#172033);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}.update-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:16px}.update-copy-status{min-height:1em;margin:8px 0 0;text-align:right}@media(max-width:600px){.update-modal-backdrop{padding:10px}.update-modal-panel{border-radius:16px;padding:18px}.update-modal-log{min-height:150px}.update-modal-actions .btn{flex:1}}
-html[data-theme="dark"] .update-modal-panel{background:var(--surface);color:var(--text);border-color:var(--border)}
-html[data-theme="dark"] .update-modal-log{background:var(--input);color:var(--text);border-color:var(--border)}
-.updater-modal-open,body:has(.update-modal-backdrop:not([hidden])){overflow:hidden!important}
-
-/* Settings use a single active section instead of a long stacked page. */
-.settings-content{min-width:0}.settings-content .settings-section{display:none}.settings-content .settings-section.is-active{display:block}.settings-content .settings-section[hidden]{display:none!important}.settings-nav{align-self:start;position:sticky;top:24px;display:grid;gap:7px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:13px}.settings-nav a{display:flex;align-items:center;min-height:42px;padding:10px 12px;border-radius:8px;color:var(--muted);font-size:12px;font-weight:650;transition:background .15s,color .15s}.settings-nav a:hover{background:var(--surface-2);color:var(--text)}.settings-nav a.active{background:var(--primary);color:#fff;box-shadow:0 5px 14px #4569e82b}.settings-content .settings-section .panel-heading:first-child{margin-top:0}@media(max-width:720px){.settings-nav{position:static;display:flex;gap:5px;overflow-x:auto;padding:6px}.settings-nav a{flex:0 0 auto;min-height:38px;padding:8px 11px}}
-
-
-/* Welcome-back identity cards and the brief sign-in toast. */
-.login-user-card{display:flex;align-items:center;gap:15px;margin:0 0 25px;padding:15px;border:1px solid #56dfd32e;border-radius:15px;background:linear-gradient(120deg,#102b36b8,#171a31b8)}.login-user-avatar,.login-user-avatar-image,.welcome-toast-avatar{width:54px;height:54px;flex:0 0 auto;display:grid;place-items:center;border-radius:17px;background:linear-gradient(145deg,#55e6d2,#368dc4 65%,#7565e8);color:#07141b;font-size:22px;font-weight:800;object-fit:cover;box-shadow:0 8px 22px #24c8c22b}.login-user-copy{min-width:0}.login-user-copy .login-eyebrow{margin:0 0 5px;font-size:9px;letter-spacing:1.8px;color:#61e0d4}.login-user-copy h1,.login-user-copy h2{margin:0!important;font-size:clamp(20px,4vw,27px)!important;line-height:1.2;color:#f1f6ff!important;overflow-wrap:anywhere}.login-user-meta{margin:7px 0 0;color:#8ca5b7;font-size:11px;overflow-wrap:anywhere}.login-user-meta span{padding:0 5px;color:#4fd8ce}.verify-title{margin:0 0 6px!important;font-size:21px!important;letter-spacing:-.4px!important;color:#eff6ff!important}.verify-description{margin:0;max-width:none!important}.setup-user-card{max-width:520px;margin-bottom:22px}.welcome-toast{position:fixed;z-index:1000;top:22px;right:22px;display:flex;align-items:center;gap:13px;width:min(390px,calc(100vw - 28px));padding:14px 15px;border:1px solid #56dfd359;border-radius:15px;background:linear-gradient(135deg,#122b35f5,#171a30f7);box-shadow:0 20px 60px #0007,0 0 28px #37d7ce16;color:#eefaff;animation:welcome-toast-in .28s ease-out both;backdrop-filter:blur(18px)}.welcome-toast-avatar{width:43px;height:43px;border-radius:14px;font-size:17px;overflow:hidden}.welcome-toast-avatar img{width:100%;height:100%;object-fit:cover;border-radius:inherit}.welcome-toast-copy{display:grid;gap:5px;min-width:0;flex:1}.welcome-toast strong{font-size:12px;line-height:1.5;overflow-wrap:anywhere}.welcome-toast small{font-size:10px;color:#83a3b2}.welcome-toast-close{align-self:flex-start;border:0;background:transparent;color:#89a5b4;font-size:22px;line-height:1;cursor:pointer;padding:0 2px}.welcome-toast.toast-leaving{opacity:0;transform:translateY(-7px);transition:opacity .2s ease,transform .2s ease}@keyframes welcome-toast-in{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:translateY(0)}}@media(max-width:520px){.welcome-toast{top:10px;right:10px}.login-user-card{padding:12px;gap:12px}.login-user-avatar,.login-user-avatar-image{width:47px;height:47px;border-radius:14px}}@media(prefers-reduced-motion:reduce){.welcome-toast{animation:none}.welcome-toast.toast-leaving{transition:none}}
 
 /* Login screen must follow the selected theme; legacy glass styles above are intentionally overridden here. */
 html[data-theme="light"] body:has(.login-wrap){background:#f3f6fc!important;background-image:radial-gradient(ellipse at 15% 12%,#7a91ff1c,transparent 34%),radial-gradient(ellipse at 88% 83%,#9b82ff1b,transparent 37%),linear-gradient(140deg,#f8faff 0%,#eef2fa 55%,#f7f5ff 100%)!important;color:#202b3d!important}
@@ -112,39 +95,53 @@ html[data-theme="dark"] .auth-theme-toggle{background:#121d2a!important;color:#d
 html[data-theme="dark"] .login-card .notice.error{background:#3a1c27!important;color:#ffb5c5!important;border-color:#6a2c40!important}
 html[data-theme="dark"] .login-card .notice.success{background:#13372f!important;color:#91efd0!important;border-color:#245e50!important}
 
-#close-update-modal[hidden]{display:none!important}
+/* In-place updater modal with a blurred full-page backdrop. */
+.update-modal-backdrop{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(10,16,30,.42);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.update-modal-backdrop[hidden]{display:none}
+.update-modal-panel{width:min(820px,100%);max-height:min(88vh,900px);overflow:auto;background:var(--surface,#fff);color:var(--text,#172033);border:1px solid var(--border,#dce2ed);border-radius:22px;box-shadow:0 28px 100px rgba(0,0,0,.28);padding:clamp(20px,4vw,34px)}
+.update-modal-head{display:flex;align-items:center;justify-content:flex-start;gap:20px}.update-modal-head h2{margin:4px 0 0}
+.update-progress-track{height:10px;background:rgba(120,130,150,.2);border-radius:999px;overflow:hidden;margin:20px 0 8px}.update-progress-fill{height:100%;width:0;background:var(--primary,#4569e8);border-radius:inherit;transition:width .25s ease}.update-progress-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;letter-spacing:.06em;margin-bottom:16px}.update-modal-panel>label{display:block;font-weight:650;margin-bottom:8px}.update-modal-log{display:block;width:100%;min-height:190px;max-height:38vh;resize:vertical;box-sizing:border-box;padding:14px;border-radius:12px;border:1px solid var(--border,#dce2ed);background:var(--input,#f5f7fb);color:var(--text,#172033);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}.update-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:16px}.update-copy-status{min-height:1em;margin:8px 0 0;text-align:right}@media(max-width:600px){.update-modal-backdrop{padding:10px}.update-modal-panel{border-radius:16px;padding:18px}.update-modal-log{min-height:150px}.update-modal-actions .btn{flex:1}}
+html[data-theme="dark"] .update-modal-panel{background:var(--surface);color:var(--text);border-color:var(--border)}
+html[data-theme="dark"] .update-modal-log{background:var(--input);color:var(--text);border-color:var(--border)}
+.updater-modal-open,body:has(.update-modal-backdrop:not([hidden])){overflow:hidden!important}
+
+/* Settings use a single active section instead of a long stacked page. */
+.settings-content{min-width:0}.settings-content .settings-section{display:none}.settings-content .settings-section.is-active{display:block}.settings-content .settings-section[hidden]{display:none!important}.settings-nav{align-self:start;position:sticky;top:24px;display:grid;gap:7px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:13px}.settings-nav a{display:flex;align-items:center;min-height:42px;padding:10px 12px;border-radius:8px;color:var(--muted);font-size:12px;font-weight:650;transition:background .15s,color .15s}.settings-nav a:hover{background:var(--surface-2);color:var(--text)}.settings-nav a.active{background:var(--primary);color:#fff;box-shadow:0 5px 14px #4569e82b}.settings-content .settings-section .panel-heading:first-child{margin-top:0}@media(max-width:720px){.settings-nav{position:static;display:flex;gap:5px;overflow-x:auto;padding:6px}.settings-nav a{flex:0 0 auto;min-height:38px;padding:8px 11px}}
 
 
-/* Shared global theme control and theme-aware sign-in notifications on every page. */
+/* Welcome-back identity cards and the brief sign-in toast. */
+.login-user-card{display:flex;align-items:center;gap:15px;margin:0 0 25px;padding:15px;border:1px solid #56dfd32e;border-radius:15px;background:linear-gradient(120deg,#102b36b8,#171a31b8)}.login-user-avatar,.login-user-avatar-image,.welcome-toast-avatar{width:54px;height:54px;flex:0 0 auto;display:grid;place-items:center;border-radius:17px;background:linear-gradient(145deg,#55e6d2,#368dc4 65%,#7565e8);color:#07141b;font-size:22px;font-weight:800;object-fit:cover;box-shadow:0 8px 22px #24c8c22b}.login-user-copy{min-width:0}.login-user-copy .login-eyebrow{margin:0 0 5px;font-size:9px;letter-spacing:1.8px;color:#61e0d4}.login-user-copy h1,.login-user-copy h2{margin:0!important;font-size:clamp(20px,4vw,27px)!important;line-height:1.2;color:#f1f6ff!important;overflow-wrap:anywhere}.login-user-meta{margin:7px 0 0;color:#8ca5b7;font-size:11px;overflow-wrap:anywhere}.login-user-meta span{padding:0 5px;color:#4fd8ce}.verify-title{margin:0 0 6px!important;font-size:21px!important;letter-spacing:-.4px!important;color:#eff6ff!important}.verify-description{margin:0;max-width:none!important}.setup-user-card{max-width:520px;margin-bottom:22px}.welcome-toast{position:fixed;z-index:1000;top:22px;right:22px;display:flex;align-items:center;gap:13px;width:min(390px,calc(100vw - 28px));padding:14px 15px;border:1px solid #56dfd359;border-radius:15px;background:linear-gradient(135deg,#122b35f5,#171a30f7);box-shadow:0 20px 60px #0007,0 0 28px #37d7ce16;color:#eefaff;animation:welcome-toast-in .28s ease-out both;backdrop-filter:blur(18px)}.welcome-toast-avatar{width:43px;height:43px;border-radius:14px;font-size:17px;overflow:hidden}.welcome-toast-avatar img{width:100%;height:100%;object-fit:cover;border-radius:inherit}.welcome-toast-copy{display:grid;gap:5px;min-width:0;flex:1}.welcome-toast strong{font-size:12px;line-height:1.5;overflow-wrap:anywhere}.welcome-toast small{font-size:10px;color:#83a3b2}.welcome-toast-close{align-self:flex-start;border:0;background:transparent;color:#89a5b4;font-size:22px;line-height:1;cursor:pointer;padding:0 2px}.welcome-toast.toast-leaving{opacity:0;transform:translateY(-7px);transition:opacity .2s ease,transform .2s ease}@keyframes welcome-toast-in{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:translateY(0)}}@media(max-width:520px){.welcome-toast{top:10px;right:10px}.login-user-card{padding:12px;gap:12px}.login-user-avatar,.login-user-avatar-image{width:47px;height:47px;border-radius:14px}}@media(prefers-reduced-motion:reduce){.welcome-toast{animation:none}.welcome-toast.toast-leaving{transition:none}}
+
+/* One shared theme control and theme-aware sign-in notifications on every page. */
 .global-theme-toggle{position:fixed;top:20px;right:22px;z-index:1001;box-shadow:var(--shadow)}
-html[data-theme="light"] .welcome-toast{top:76px;background:linear-gradient(135deg,#fffffffa,#f0f5fffa);border-color:#d9e2f4;color:#202b3d;box-shadow:0 18px 50px #253d651c}
+html[data-theme="light"] .welcome-toast{background:linear-gradient(135deg,#fffffffa,#f0f5fffa);border-color:#d9e2f4;color:#202b3d;box-shadow:0 18px 50px #253d651c}
 html[data-theme="light"] .welcome-toast small{color:#718096}
 html[data-theme="light"] .welcome-toast-close{color:#65738a}
-html[data-theme="dark"] .welcome-toast{top:76px;background:linear-gradient(135deg,#122b35f5,#171a30f7);border-color:#56dfd359;color:#eefaff;box-shadow:0 20px 60px #0007,0 0 28px #37d7ce16}
+html[data-theme="dark"] .welcome-toast{background:linear-gradient(135deg,#122b35f5,#171a30f7);border-color:#56dfd359;color:#eefaff;box-shadow:0 20px 60px #0007,0 0 28px #37d7ce16}
 html[data-theme="dark"] .welcome-toast small{color:#83a3b2}
 html[data-theme="dark"] .welcome-toast-close{color:#89a5b4}
 html[data-theme="light"] .notice.error{background:#fff0ef;color:#ad3434;border-color:#f4d6d4}
 html[data-theme="light"] .notice.success{background:#eaf8f0;color:#19764e;border-color:#cdeedb}
+html[data-theme="light"] .welcome-toast{top:76px}
+html[data-theme="dark"] .welcome-toast{top:76px}
 @media(max-width:720px){.global-theme-toggle{top:12px;right:12px;padding:7px 9px}.global-theme-toggle .theme-text{display:none}html[data-theme="light"] .welcome-toast,html[data-theme="dark"] .welcome-toast{top:56px;right:10px}}
 
+/* Branded scrollbars throughout the app, including tables, dialogs and text fields. */
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) var(--scroll-track)}
+:root{--scroll-track:#edf1fa;--scroll-thumb:#aab9e8;--scroll-thumb-hover:#7188dc}
+html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-thumb-hover:#8298ed}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-track{background:var(--scroll-track);border-radius:999px}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--primary),var(--scroll-thumb));border:3px solid var(--scroll-track);border-radius:999px;min-height:34px}
+::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,var(--primary-hover),var(--scroll-thumb-hover))}
+::-webkit-scrollbar-corner{background:var(--scroll-track)}
+.table-scroll,.settings-nav,.update-modal-panel,.update-modal-log,.field textarea,.stack-form textarea{scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin}
 
-/* Centered, dismissible sign-in success card. */
-.welcome-toast{top:50%!important;left:50%!important;right:auto!important;transform:translate(-50%,-50%);width:min(430px,calc(100vw - 32px));padding:20px;border-radius:18px;gap:15px;z-index:1002}
-.welcome-toast.toast-leaving{opacity:0;transform:translate(-50%,-50%) scale(.97);transition:opacity .2s ease,transform .2s ease}
-.welcome-toast-copy{display:grid;gap:6px;min-width:0;flex:1}
-.welcome-toast strong{font-size:14px;line-height:1.5}
-.welcome-toast small{font-size:11px}
-@media(max-width:520px){.welcome-toast{top:50%!important;left:50%!important;right:auto!important;padding:16px;width:calc(100vw - 28px)}.welcome-toast-avatar{width:43px;height:43px}}
-@media(prefers-reduced-motion:reduce){.welcome-toast.toast-leaving{transition:none}}
-
-
-/* Minimal centered sign-in success card: no decorative avatar or status icon. */
-.welcome-toast{align-items:center;gap:12px;padding:22px 24px;border-radius:16px;background:var(--surface)!important;border:1px solid var(--border)!important;color:var(--text)!important;box-shadow:0 24px 80px #10182826!important;backdrop-filter:blur(16px)}
-.welcome-toast-avatar{display:none!important}
-.welcome-toast-copy{gap:5px;padding-right:4px}
-.welcome-toast strong{font-size:15px;font-weight:750;letter-spacing:-.2px;color:var(--text)!important}
-.welcome-toast small{font-size:12px;color:var(--muted)!important}
-.welcome-toast-close{align-self:center;width:28px;height:28px;display:grid;place-items:center;border-radius:8px;color:var(--muted)!important;font-size:21px;transition:background .15s,color .15s}
-.welcome-toast-close:hover{background:var(--surface-2);color:var(--text)!important}
-.welcome-toast.toast-leaving{opacity:0;transform:translate(-50%,-50%) scale(.98)}
-@media(max-width:520px){.welcome-toast{padding:18px;width:calc(100vw - 28px)}}
+.reconfigure-wait{max-width:760px;margin:8vh auto;text-align:center}
+.reconfigure-icon{width:58px;height:58px;margin:0 auto 18px;font-size:24px}
+.reconfigure-progress-track{height:8px;margin:24px 0;overflow:hidden;border-radius:999px;background:var(--scroll-track)}
+.reconfigure-progress-fill{height:100%;width:12%;border-radius:inherit;background:linear-gradient(90deg,var(--primary),var(--primary-hover));transition:width .35s ease}
+.reconfigure-progress-fill.is-running{width:58%}
+.reconfigure-progress-fill.is-complete{width:100%}
+.reconfigure-progress-fill.is-error{width:0}
+.login-card.verify-stage>h1{margin:0 0 6px!important;font-size:21px!important;letter-spacing:-.4px!important}

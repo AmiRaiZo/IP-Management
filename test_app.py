@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
@@ -25,6 +26,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM ips")
             db.execute("DELETE FROM groups")
             db.execute("DELETE FROM users")
+            db.execute("DELETE FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")
             db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode','per_user') ON CONFLICT(key) DO UPDATE SET value='per_user'")
 
     def csrf(self):
@@ -321,14 +323,73 @@ class ArchiveTests(unittest.TestCase):
 
 
     def test_update_status_ignores_sudo_audit_warning_until_real_failure(self):
-        log = "\n".join([
-            "Starting update…",
-            "sudo: unable to send audit message: Operation not permitted",
-            "PROGRESS:12:Downloading repository and checking target version",
-        ])
-        payload = archive.parse_update_status_log(log)
-        self.assertFalse(payload["done"])
-        self.assertEqual(payload["progress"], 12)
+        user_id, _ = self.create_user("status-admin")
+        with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
+            log_file.read_text.return_value = "\n".join([
+                "Starting update…",
+                "sudo: unable to send audit message: Operation not permitted",
+                "PROGRESS:12:Downloading repository and checking target version",
+            ])
+            with self.client.session_transaction() as sess:
+                sess["user_id"] = user_id
+                sess["two_factor_verified"] = True
+            response = self.client.get("/update/status")
+            self.assertEqual(response.status_code, 200)
+            payload = response.get_json()
+            self.assertFalse(payload["done"])
+            self.assertEqual(payload["progress"], 12)
+
+    def test_superadmin_can_save_public_domain_and_port_settings(self):
+        _, secret = self.create_user("deployment-settings")
+        self.assertEqual(self.login("deployment-settings", secret).status_code, 302)
+        with patch.object(archive.subprocess, "run", return_value=archive.subprocess.CompletedProcess([], 0, "", "")) as run:
+            response = self.client.post("/settings/deployment", data={
+                "csrf_token": self.csrf(), "action": "public",
+                "public_domain": "archive.example.com", "public_port": "8443",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Applying your new address", response.data)
+        self.assertIn("--no-block", run.call_args.args[0])
+        with archive.connect_db() as db:
+            settings = {r["key"]: r["value"] for r in db.execute(
+                "SELECT key,value FROM app_settings WHERE key IN ('public_domain','public_port')")}
+        self.assertNotEqual(settings.get("public_domain"), "archive.example.com", "the privileged reconfiguration service persists settings only after the new endpoint passes health checks")
+
+    def test_failed_server_reconfiguration_does_not_save_new_address(self):
+        _, secret = self.create_user("failed-reconfigure")
+        self.assertEqual(self.login("failed-reconfigure", secret).status_code, 302)
+        with archive.connect_db() as db:
+            db.execute("INSERT INTO app_settings(key,value) VALUES('public_domain','old.example.com') ON CONFLICT(key) DO UPDATE SET value='old.example.com'")
+            db.execute("INSERT INTO app_settings(key,value) VALUES('public_port','443') ON CONFLICT(key) DO UPDATE SET value='443'")
+        with patch.object(archive.subprocess, "run", return_value=archive.subprocess.CompletedProcess([], 1, "", "DNS is not pointing here")):
+            response = self.client.post("/settings/deployment", data={
+                "csrf_token": self.csrf(), "action": "public",
+                "public_domain": "new.example.com", "public_port": "8443",
+            })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            settings = {r["key"]: r["value"] for r in db.execute(
+                "SELECT key,value FROM app_settings WHERE key IN ('public_domain','public_port')")}
+        self.assertEqual(settings, {"public_domain": "old.example.com", "public_port": "443"})
+
+    def test_update_repository_requires_current_password(self):
+        _, secret = self.create_user("repository-settings")
+        self.assertEqual(self.login("repository-settings", secret).status_code, 302)
+        payload = {
+            "csrf_token": self.csrf(), "action": "repository",
+            "update_repository": "https://github.com/example/private-archive",
+        }
+        payload["current_password"] = "wrong-password"
+        response = self.client.post("/settings/deployment", data=payload)
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone())
+        payload["current_password"] = "test-pass"
+        response = self.client.post("/settings/deployment", data=payload)
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            saved = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
+        self.assertEqual(saved["value"], "https://github.com/example/private-archive")
 
 if __name__ == "__main__":
     unittest.main()

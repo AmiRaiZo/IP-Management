@@ -1,13 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Verification code' if stage == 'verify' else 'Sign in' }}{% endblock %}
+{% block title %}{{ 'Verify your identity' if stage == 'verify' else 'Sign in' }}{% endblock %}
 {% block main_class %}login-wrap{% endblock %}
 {% block content %}
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
-
   {% if stage == 'verify' %}
-  {% if login_user %}<div class="login-user-card">{% if login_user.profile_image %}<img class="login-user-avatar-image" src="{{ url_for('media_file', filename=login_user.profile_image) }}" alt="{{ login_user.username }} profile">{% else %}<div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div>{% endif %}<div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h1>{{ login_user.username }}</h1><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
-  <h2 class="verify-title">Verification code</h2>
+  {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
+  <h1>Verification code</h1>
   <p class="login-description verify-description">Enter the 6-digit code from your authenticator to continue.</p>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -19,7 +18,7 @@
   <h1>Welcome back</h1>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username" value="{{ login_username|default('') }}">
+    <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
     <label for="password">Password</label><div class="password-field"><input class="login-input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button class="password-toggle" type="button" data-toggle-password="password" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
     <button class="btn btn-primary full login-submit" type="submit">Login</button>
   </form>

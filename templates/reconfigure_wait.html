@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Updating server address | IP Management{% endblock %}
+{% block content %}
+<section class="panel form-panel reconfigure-wait" data-status-url="{{ url_for('deployment_reconfiguration_status') }}" data-target-url="{{ target_url }}">
+  <div class="stat-icon blue reconfigure-icon">↻</div>
+  <p class="eyebrow">SERVER RECONFIGURATION</p>
+  <h1>Applying your new address</h1>
+  <p class="muted">The server is requesting the SSL certificate, updating Nginx and moving the application to the new port. Keep this page open for a moment.</p>
+  <p><strong id="reconfigure-phase">Preparing the new domain, SSL certificate and server port…</strong></p>
+  <div class="reconfigure-progress-track"><div id="reconfigure-progress" class="reconfigure-progress-fill"></div></div>
+  <p class="muted">Target: <code>https://{{ target_domain }}:{{ target_port }}</code></p>
+  <div id="reconfigure-error" hidden role="alert" class="notice error"></div>
+  <p id="reconfigure-actions" hidden><a class="btn btn-secondary" href="{{ url_for('settings') }}#general">Return to the current settings</a></p>
+</section>
+<script src="{{ url_for('static', filename='reconfigure.js') }}" defer></script>
+{% endblock %}

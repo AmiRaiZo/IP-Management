@@ -123,7 +123,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static; do
+for required in app.py requirements.txt templates static reconfigure_server.sh; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
@@ -200,6 +200,9 @@ set -a; . "$ENV_FILE"; set +a
 APP_PORT="${APP_INTERNAL_PORT:-${APP_PORT:-}}"
 [[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Configured internal application port is missing or invalid." >&2; exit 1; }
 UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
+if [[ -f /var/lib/station-archive/update-repository ]]; then
+  UPDATE_REPO="$(cat /var/lib/station-archive/update-repository)"
+fi
 [[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
 [[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
 VERSION_FILE=/var/lib/station-archive/version
@@ -219,7 +222,15 @@ cleanup() {
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
       /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
-      /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' >/dev/null 2>&1 || true
+	      /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' >/dev/null 2>&1 || true
+	      if ! (cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run') >/dev/null 2>&1; then
+	        mv /opt/station-archive/.venv "$TMP/venv-rollback-broken" || true
+	        python3 -m venv /opt/station-archive/.venv || true
+	        /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt || true
+	        /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' || true
+	        chown -R root:www-data /opt/station-archive/.venv || true
+	        chmod -R g+rX /opt/station-archive/.venv || true
+	      fi
       systemctl restart station-archive.service >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
     else
@@ -237,32 +248,72 @@ git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
 git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+for required in app.py requirements.txt templates static reconfigure_server.sh; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup"
 rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
 DEPLOYED=1
-echo "PROGRESS:35:Stopping the application service"
-systemctl stop station-archive.service
-echo "PROGRESS:48:Installing application files"
-rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+	echo "PROGRESS:32:Preparing the application backup"
+	echo "PROGRESS:35:Installing application files while the current worker stays online"
+	rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+	echo "PROGRESS:50:Installing privileged helper and server service configuration"
+install -o root -g root -m 0750 "$TMP/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
+cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service, /usr/bin/systemctl --no-block start station-archive-reconfigure.service
+SUDOERS
+chmod 0440 /etc/sudoers.d/station-archive-update
+visudo -cf /etc/sudoers.d/station-archive-update
+cat > /etc/systemd/system/station-archive-reconfigure.service <<'RECONFIGUNIT'
+[Unit]
+Description=IP Management server address reconfiguration
+After=network-online.target nginx.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-reconfigure
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=false
+ReadWritePaths=/etc/nginx /etc/letsencrypt /etc/systemd/system /etc/station-archive /var/lib/station-archive /var/backups /usr/local/sbin -/etc/ufw
+TimeoutStartSec=300
+UMask=0077
+RECONFIGUNIT
+chmod 0644 /etc/systemd/system/station-archive-reconfigure.service
+systemctl daemon-reload
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
-echo "PROGRESS:62:Installing Python dependencies"
-/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
-chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-/opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
-echo "PROGRESS:80:Validating server configuration"
-nginx -t
-echo "PROGRESS:88:Restarting application and web server"
-systemctl restart station-archive.service
+	echo "PROGRESS:58:Checking the Python virtual environment from the application directory"
+	# Check from the exact working directory used by systemd; the updater itself runs from /.
+	if ! (cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import path:", gunicorn.__file__)') >/dev/null 2>&1; then
+	  echo "PROGRESS:60:Rebuilding the damaged Python virtual environment"
+	  mv /opt/station-archive/.venv "$TMP/venv-before-rebuild"
+	  python3 -m venv /opt/station-archive/.venv
+	fi
+	echo "PROGRESS:62:Installing Python dependencies"
+	/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+	echo "PROGRESS:70:Repairing Gunicorn installation"
+	/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+	echo "PROGRESS:77:Fixing application dependency permissions"
+	# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
+	chown root:www-data /opt/station-archive/.venv/bin/gunicorn
+	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
+	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
+	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
+	runuser -u www-data -- /bin/sh -c "cd /opt/station-archive && exec /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print(\"Gunicorn service-account check OK:\", gunicorn.__version__, gunicorn.__file__)'"
+	echo "PROGRESS:84:Validating Nginx configuration"
+	nginx -t
+	echo "PROGRESS:88:Restarting application with the verified environment"
+	systemctl restart station-archive.service
+	echo "PROGRESS:91:Waiting for the application health check"
 # Wait for Gunicorn readiness; systemd may become active before its socket is bound.
 HTTP_CODE=000
 for attempt in $(seq 1 30); do
@@ -279,7 +330,8 @@ if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 50
   journalctl -u station-archive.service -n 60 --no-pager >&2 || true
   exit 1
 fi
-TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
+	echo "PROGRESS:97:Recording the installed version"
+	TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
 [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
 printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
 printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
@@ -291,6 +343,7 @@ echo "IP Management updated successfully."
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
+install -o root -g root -m 0750 "$WORK_DIR/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
 # Permit only the fixed systemd start action from the web process. The actual
 # updater runs as a separate root-owned systemd unit outside the web sandbox.
 install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
@@ -317,13 +370,33 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 NoNewPrivileges=false
-ReadWritePaths=/opt/station-archive /var/lib/station-archive
+ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system
 UMask=0077
 UPDATEUNIT
+cat > /etc/systemd/system/station-archive-reconfigure.service <<'RECONFIGUNIT'
+[Unit]
+Description=IP Management server address reconfiguration
+After=network-online.target nginx.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-reconfigure
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=false
+ReadWritePaths=/etc/nginx /etc/letsencrypt /etc/systemd/system /etc/station-archive /var/lib/station-archive /var/backups /usr/local/sbin -/etc/ufw
+TimeoutStartSec=300
+UMask=0077
+RECONFIGUNIT
 chown root:root /etc/systemd/system/station-archive-update.service /etc/systemd/system/station-archive.service.d/update-privileges.conf
 chmod 0644 /etc/systemd/system/station-archive-update.service /etc/systemd/system/station-archive.service.d/update-privileges.conf
 cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'
-www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service, /usr/bin/systemctl --no-block start station-archive-reconfigure.service
 SUDOERS
 chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update

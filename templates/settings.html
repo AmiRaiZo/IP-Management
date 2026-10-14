@@ -1,15 +1,85 @@
 {% extends 'base.html' %}
 {% block title %}Settings | {{ app_settings.brand_name }}{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">APPLICATION CONFIGURATION</p><h1>Settings</h1><p class="muted">Customize the application identity, labels, colors and login screen.</p></div></div>
-<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a class="active" href="#branding" data-settings-tab="branding" aria-current="page">Branding</a><a href="#text" data-settings-tab="text">Text & labels</a><a href="#security" data-settings-tab="security">Security</a><a href="#two-factor" data-settings-tab="two-factor">Two-factor authentication</a></nav>
-<div class="settings-content"><form class="panel form-panel settings-section is-active" id="branding" data-settings-section="branding" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<div class="panel-heading"><div><h2>Branding & appearance</h2><p>Changes are applied throughout the application.</p></div></div>
-<div class="form-grid"><div class="field"><label for="brand_name">Application name</label><input id="brand_name" name="brand_name" maxlength="100" required value="IP Management" readonly></div><div class="field"><label for="brand_subtitle">Header subtitle</label><input id="brand_subtitle" name="brand_subtitle" maxlength="100" value="{{ app_values.brand_subtitle }}"></div><div class="field"><label for="brand_logo_text">Logo initials/text</label><input id="brand_logo_text" name="brand_logo_text" maxlength="8" value="{{ app_values.brand_logo_text }}"></div><div class="field"><label for="brand_logo">Logo image (PNG/JPG/WEBP)</label><input id="brand_logo" name="brand_logo" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"></div><div class="field"><label for="accent_color">Accent color</label><input id="accent_color" name="accent_color" type="color" value="{{ app_values.accent_color }}"></div><div class="field"><label for="footer_text">Footer text</label><input id="footer_text" name="footer_text" maxlength="200" value="{{ app_values.footer_text }}"></div></div><div class="form-footer"><span class="muted">Changes apply throughout the application.</span><button class="btn btn-primary" type="submit">Save branding</button></div>
-</form><form class="panel form-panel settings-section" id="text" data-settings-section="text" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="panel-heading"><div><h2>Text & labels</h2><p>Personalize the login screen and visible directory labels.</p></div></div><div class="panel-heading"><div><h2>Login screen</h2><p>Personalize the welcome message shown before sign-in.</p></div></div>
-<div class="form-grid"><div class="field full-field"><label for="login_title">Login heading</label><input id="login_title" name="login_title" maxlength="180" value="{{ app_values.login_title }}"></div><div class="field full-field"><label for="login_subtitle">Login description</label><textarea id="login_subtitle" name="login_subtitle" rows="2" maxlength="400">{{ app_values.login_subtitle }}</textarea></div></div>
-<div class="panel-heading"><div><h2>Directory text</h2><p>Control the most visible page labels.</p></div></div>
-<div class="form-grid"><div class="field"><label for="inventory_title">Inventory page title</label><input id="inventory_title" name="inventory_title" value="{{ app_values.inventory_title }}" maxlength="100"></div><div class="field"><label for="group_label">Groups menu label</label><input id="group_label" name="group_label" value="{{ app_values.group_label }}" maxlength="80"></div><div class="field"><label for="user_label">Users menu label</label><input id="user_label" name="user_label" value="{{ app_values.user_label }}" maxlength="80"></div><div class="field full-field"><label for="inventory_description">Inventory description</label><textarea id="inventory_description" name="inventory_description" rows="2" maxlength="400">{{ app_values.inventory_description }}</textarea></div><div class="field full-field"><label for="app_description">Application description</label><textarea id="app_description" name="app_description" rows="2" maxlength="400">{{ app_values.app_description }}</textarea></div></div>
-<div class="form-footer"><span class="muted">Updates are saved to the application database.</span><button class="btn btn-primary" type="submit">Save settings</button></div></form>
-<section class="panel form-panel settings-section" id="security" data-settings-section="security"><div class="panel-heading"><div><h2>Security</h2><p>Review server and update configuration.</p></div></div><div class="setting-row"><div><strong>Public HTTPS port</strong><p class="muted">Configured by the server administrator.</p></div><code>{{ public_port }}</code></div><div class="setting-row"><div><strong>Update repository</strong><p class="muted">Repository used by the deployment updater.</p></div><code>{{ github_repo }}</code></div></section><section class="panel form-panel settings-section" id="two-factor" data-settings-section="two-factor"><div class="panel-heading"><div><h2>Two-factor authentication</h2><p>Control authentication policy for every account.</p></div></div><form method="post" action="{{ url_for('update_security_settings') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="setting-row"><div><strong>Two-factor policy</strong><p class="muted">Only the super administrator can choose how Authenticator is used. Regular users cannot turn it on or off for themselves.</p></div><div class="field"><select name="two_factor_mode" aria-label="Two-factor policy"><option value="off" {% if two_factor_mode == 'off' %}selected{% endif %}>Disabled for everyone</option><option value="shared" {% if two_factor_mode == 'shared' %}selected{% endif %}>One shared site Authenticator for all users</option><option value="per_user" {% if two_factor_mode == 'per_user' %}selected{% endif %}>Individual 2FA selected per user</option></select></div></div><div class="setting-row"><div><strong>Shared Authenticator</strong><p class="muted">Generate one shared secret here, enroll the site Authenticator, then provide the setup secret or QR to users who need the shared code. Keep it private.</p>{% if shared_two_factor_secret %}<p><strong>Setup secret:</strong> <code>{{ shared_two_factor_secret }}</code></p><p class="muted">Provisioning URI: <code>{{ shared_two_factor_uri }}</code></p>{% endif %}</div><div>{% if shared_two_factor_qr %}<img src="{{ shared_two_factor_qr }}" alt="Shared Authenticator QR code" width="180" height="180">{% endif %}<button class="btn btn-secondary" type="submit" name="action" value="generate_shared_secret" formnovalidate>Generate / rotate shared secret</button></div></div><div class="form-footer"><span class="muted">Super administrator only. Rotating the secret requires re-enrolling every user who uses shared mode.</span><button class="btn btn-primary" type="submit">Save security policy</button></div></form></section></div></div>
+<div class="page-heading"><div><p class="eyebrow">APPLICATION CONFIGURATION</p><h1>Settings</h1><p class="muted">Customize the application identity, labels, public address and security.</p></div></div>
+<div class="settings-layout">
+  <nav class="settings-nav" aria-label="Settings sections">
+    <a class="active" href="#branding" data-settings-tab="branding" aria-current="page">Branding</a>
+    <a href="#text" data-settings-tab="text">Text & labels</a>
+    <a href="#general" data-settings-tab="general">Public address</a>
+    <a href="#security" data-settings-tab="security">Security</a>
+    <a href="#two-factor" data-settings-tab="two-factor">Two-factor authentication</a>
+  </nav>
+  <div class="settings-content">
+    <form class="panel form-panel settings-section is-active" id="branding" data-settings-section="branding" method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="panel-heading"><div><h2>Branding & appearance</h2><p>Changes are applied throughout the application.</p></div></div>
+      <div class="form-grid">
+        <div class="field"><label for="brand_name">Application name</label><input id="brand_name" name="brand_name" maxlength="100" required value="IP Management" readonly></div>
+        <div class="field"><label for="brand_subtitle">Header subtitle</label><input id="brand_subtitle" name="brand_subtitle" maxlength="100" value="{{ app_values.brand_subtitle }}"></div>
+        <div class="field"><label for="brand_logo_text">Logo initials/text</label><input id="brand_logo_text" name="brand_logo_text" maxlength="8" value="{{ app_values.brand_logo_text }}"></div>
+        <div class="field"><label for="brand_logo">Logo image (PNG/JPG/WEBP)</label><input id="brand_logo" name="brand_logo" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"></div>
+        <div class="field"><label for="accent_color">Accent color</label><input id="accent_color" name="accent_color" type="color" value="{{ app_values.accent_color }}"></div>
+        <div class="field"><label for="footer_text">Footer text</label><input id="footer_text" name="footer_text" maxlength="200" value="{{ app_values.footer_text }}"></div>
+      </div>
+      <div class="form-footer"><span class="muted">Changes apply throughout the application.</span><button class="btn btn-primary" type="submit">Save branding</button></div>
+    </form>
+
+    <form class="panel form-panel settings-section" id="text" data-settings-section="text" method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="panel-heading"><div><h2>Text & labels</h2><p>Personalize the login screen and visible directory labels.</p></div></div>
+      <div class="panel-heading"><div><h2>Login screen</h2><p>Personalize the welcome message shown before sign-in.</p></div></div>
+      <div class="form-grid">
+        <div class="field full-field"><label for="login_title">Login heading</label><input id="login_title" name="login_title" maxlength="180" value="{{ app_values.login_title }}"></div>
+        <div class="field full-field"><label for="login_subtitle">Login description</label><textarea id="login_subtitle" name="login_subtitle" rows="2" maxlength="400">{{ app_values.login_subtitle }}</textarea></div>
+      </div>
+      <div class="panel-heading"><div><h2>Directory text</h2><p>Control the most visible page labels.</p></div></div>
+      <div class="form-grid">
+        <div class="field"><label for="inventory_title">Inventory page title</label><input id="inventory_title" name="inventory_title" value="{{ app_values.inventory_title }}" maxlength="100"></div>
+        <div class="field"><label for="group_label">Groups menu label</label><input id="group_label" name="group_label" value="{{ app_values.group_label }}" maxlength="80"></div>
+        <div class="field"><label for="user_label">Users menu label</label><input id="user_label" name="user_label" value="{{ app_values.user_label }}" maxlength="80"></div>
+        <div class="field full-field"><label for="inventory_description">Inventory description</label><textarea id="inventory_description" name="inventory_description" rows="2" maxlength="400">{{ app_values.inventory_description }}</textarea></div>
+        <div class="field full-field"><label for="app_description">Application description</label><textarea id="app_description" name="app_description" rows="2" maxlength="400">{{ app_values.app_description }}</textarea></div>
+      </div>
+      <div class="form-footer"><span class="muted">Updates are saved to the application database.</span><button class="btn btn-primary" type="submit">Save settings</button></div>
+    </form>
+
+    <section class="panel form-panel settings-section" id="general" data-settings-section="general">
+      <div class="panel-heading"><div><h2>Public domain and port</h2><p>Apply changes to the live server configuration.</p></div></div>
+      <form method="post" action="{{ url_for('update_deployment_settings') }}" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="public">
+        <label for="public_domain">Public domain</label><input id="public_domain" name="public_domain" type="text" value="{{ deployment.public_domain }}" placeholder="archive.example.com" required autocomplete="url">
+        <p class="muted">Enter only the hostname, without https:// or a path.</p>
+        <label for="public_port">Public HTTPS port</label><input id="public_port" name="public_port" type="number" min="1" max="65535" value="{{ deployment.public_port }}" required>
+        <button class="btn btn-primary" type="submit">Apply domain and port to server</button>
+      </form>
+      <p class="helper-note">Saving updates Nginx, the SSL certificate, the Gunicorn listener and HTTP-to-HTTPS redirect. The new domain must resolve to this server or a correctly configured proxy. If UFW is active, the new TCP port is opened automatically; your VPS provider firewall may also need a rule. The old site's Nginx configuration and certificate are removed after the new HTTPS endpoint passes its health check. A failed change triggers rollback.</p>
+      <div class="panel-heading"><div><h2>Update source</h2><p>Changing the update repository requires your current account password.</p></div></div>
+      <form method="post" action="{{ url_for('update_deployment_settings') }}" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="repository">
+        <label for="update_repository">GitHub repository URL</label><input id="update_repository" name="update_repository" type="url" value="{{ deployment.update_repository }}" placeholder="https://github.com/owner/repository" required>
+        <label for="current_password">Confirm your current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+        <p class="muted">The new repository is used to check for and install updates.</p>
+        <button class="btn btn-primary" type="submit">Confirm password and save repository</button>
+      </form>
+      <div class="setting-row"><div><strong>Check and install updates</strong><p class="muted">Check the configured repository for a newer release.</p></div><a class="btn btn-secondary" href="{{ url_for('update_page') }}">Open updates →</a></div>
+    </section>
+
+    <section class="panel form-panel settings-section" id="security" data-settings-section="security">
+      <div class="panel-heading"><div><h2>Security</h2><p>Review the active server address.</p></div></div>
+      <div class="setting-row"><div><strong>Public HTTPS port</strong><p class="muted">Port currently configured for the application.</p></div><code>{{ deployment.public_port }}</code></div>
+      <div class="setting-row"><div><strong>Public domain</strong><p class="muted">Domain currently configured for the application.</p></div><code>{{ deployment.public_domain }}</code></div>
+    </section>
+
+    <section class="panel form-panel settings-section" id="two-factor" data-settings-section="two-factor">
+      <div class="panel-heading"><div><h2>Two-factor authentication</h2><p>Control authentication policy for every account.</p></div></div>
+      <form method="post" action="{{ url_for('update_security_settings') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="setting-row"><div><strong>Two-factor policy</strong><p class="muted">Only the super administrator can choose how Authenticator is used. Regular users cannot turn it on or off for themselves.</p></div><div class="field"><select name="two_factor_mode" aria-label="Two-factor policy"><option value="off" {% if two_factor_mode == 'off' %}selected{% endif %}>Disabled for everyone</option><option value="shared" {% if two_factor_mode == 'shared' %}selected{% endif %}>One shared site Authenticator for all users</option><option value="per_user" {% if two_factor_mode == 'per_user' %}selected{% endif %}>Individual 2FA selected per user</option></select></div></div>
+        <div class="setting-row"><div><strong>Shared Authenticator</strong><p class="muted">Generate one shared secret here, enroll the site Authenticator, then provide the setup secret or QR to users who need the shared code. Keep it private.</p>{% if shared_two_factor_secret %}<p><strong>Setup secret:</strong> <code>{{ shared_two_factor_secret }}</code></p><p class="muted">Provisioning URI: <code>{{ shared_two_factor_uri }}</code></p>{% endif %}</div><div>{% if shared_two_factor_qr %}<img src="{{ shared_two_factor_qr }}" alt="Shared Authenticator QR code" width="180" height="180">{% endif %}<button class="btn btn-secondary" type="submit" name="action" value="generate_shared_secret" formnovalidate>Generate / rotate shared secret</button></div></div>
+        <div class="form-footer"><span class="muted">Super administrator only. Rotating the secret requires re-enrolling every user who uses shared mode.</span><button class="btn btn-primary" type="submit">Save security policy</button></div>
+      </form>
+    </section>
+  </div>
+</div>
 {% endblock %}

@@ -51,6 +51,8 @@ REMEMBER_2FA_SECONDS = 24 * 60 * 60
 VERSION_FILE = DATA_DIR / "version"
 UPDATE_TARGET_FILE = DATA_DIR / "update-target"
 UPDATE_TARGET_VERSION_FILE = DATA_DIR / "update-target-version"
+UPDATE_REPOSITORY_FILE = DATA_DIR / "update-repository"
+RECONFIGURE_STATUS_FILE = DATA_DIR / "reconfigure-status.json"
 UPDATE_LOG_FILE = DATA_DIR / "update.log"
 UPLOAD_DIR = DATA_DIR / "uploads"
 AVATAR_DIR = UPLOAD_DIR / "avatars"
@@ -309,6 +311,8 @@ def security_headers(response):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "GET" and request.args.get("server_reconfigured") == "1":
+        flash("The server address was changed successfully. Please sign in again at this new address.", "success")
     if session.get("user_id"):
         return redirect(url_for("index"))
     if request.method == "GET" and request.args.get("reset") == "1":
@@ -375,8 +379,7 @@ def login():
             pending_user = db.execute("SELECT id,username,role,profile_image FROM users WHERE id=? AND enabled=1",
                                       (session["pending_2fa_user_id"],)).fetchone()
     return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password",
-                           login_user=dict(pending_user) if pending_user else None,
-                           login_username=request.form.get("username", "").strip()[:80] if request.method == "POST" and not session.get("pending_2fa_user_id") else "")
+                           login_user=dict(pending_user) if pending_user else None)
 
 
 def safe_login_target():
@@ -666,7 +669,9 @@ def user_edit(user_id):
     if request.method == "POST":
         role = request.form.get("role", "admin")
         enabled = 1 if request.form.get("enabled") == "1" else 0
-        two_factor_enabled = 1 if request.form.get("two_factor_enabled") == "1" else 0
+        two_factor_setting_submitted = "two_factor_enabled" in request.form
+        two_factor_enabled = (1 if request.form.get("two_factor_enabled") == "1" else 0
+                              if two_factor_setting_submitted else int(user["two_factor_enabled"]))
         password = request.form.get("password", "")
         if user_id == request.user["id"] and (role != "superadmin" or not enabled):
             flash("You cannot remove your own superadmin role or disable your own account.", "error")
@@ -676,7 +681,7 @@ def user_edit(user_id):
             selected_groups = {int(x) for x in request.form.getlist("groups") if x.isdigit()}
             with connect_db() as db:
                 db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=? WHERE id=?", (role, enabled, two_factor_enabled, user_id))
-                if not two_factor_enabled:
+                if two_factor_setting_submitted and not two_factor_enabled:
                     db.execute("UPDATE users SET totp_secret='',two_factor_enrolled=0 WHERE id=?", (user_id,))
                 if password:
                     db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password), user_id))
@@ -724,6 +729,8 @@ def update_security_settings():
 @app.route("/settings", methods=["GET", "POST"])
 @superadmin_required
 def settings():
+    if request.method == "GET" and request.args.get("reconfigured") == "1":
+        flash("Server address updated successfully. Nginx, the HTTPS certificate and application listener are using the new address.", "success")
     defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
                 "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
                 "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
@@ -768,11 +775,94 @@ def settings():
         qr_buffer = BytesIO()
         qrcode.make(shared_uri).save(qr_buffer, format="PNG")
         shared_qr = "data:image/png;base64," + base64.b64encode(qr_buffer.getvalue()).decode("ascii")
-    return render_template("settings.html", app_values=values,
+    with connect_db() as db:
+        deployment = {row["key"]: row["value"] for row in db.execute(
+            "SELECT key,value FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")}
+    deployment.setdefault("public_domain", os.environ.get("APP_DOMAIN", ""))
+    deployment.setdefault("public_port", os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
+    deployment.setdefault("update_repository", os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")))
+    return render_template("settings.html", app_values=values, deployment=deployment,
                            two_factor_mode=two_factor_mode(), shared_two_factor_secret=shared_secret,
                            shared_two_factor_uri=shared_uri, shared_two_factor_qr=shared_qr,
-                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
-                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
+                           github_repo=deployment["update_repository"],
+                           public_port=deployment["public_port"])
+
+
+@app.post("/settings/deployment")
+@superadmin_required
+def update_deployment_settings():
+    action = request.form.get("action", "public")
+    if action == "repository":
+        repo_url = request.form.get("update_repository", "").strip().rstrip("/")
+        password = request.form.get("current_password", "")
+        user = current_user_row()
+        if not user or not password_matches(password, user["password_hash"]):
+            flash("Password confirmation failed. The update repository was not changed.", "error")
+            return redirect(url_for("settings") + "#updates")
+        if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?", repo_url):
+            flash("Enter a valid HTTPS GitHub repository URL.", "error")
+            return redirect(url_for("settings") + "#updates")
+        with connect_db() as db:
+            db.execute("INSERT INTO app_settings(key,value) VALUES('update_repository',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (repo_url,))
+        audit("update_repository_changed", repo_url)
+        flash("Update repository saved after password confirmation.", "success")
+        return redirect(url_for("settings") + "#updates")
+
+    domain = request.form.get("public_domain", "").strip().lower().rstrip(".")
+    port_text = request.form.get("public_port", "").strip()
+    if not re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*", domain):
+        flash("Enter a valid public domain name without https:// or a path.", "error")
+        return redirect(url_for("settings") + "#general")
+    if not re.fullmatch(r"\d{1,5}", port_text) or not 1 <= int(port_text) <= 65535:
+        flash("Public port must be a number from 1 to 65535.", "error")
+        return redirect(url_for("settings") + "#general")
+    if int(port_text) == 80:
+        flash("Port 80 is reserved for HTTP and certificate verification. Choose another HTTPS port.", "error")
+        return redirect(url_for("settings") + "#general")
+    request_path = DATA_DIR / "reconfigure-request.json"
+    request_path.write_text(json.dumps({"domain": domain, "port": int(port_text)}, separators=(",", ":")), encoding="utf-8")
+    try:
+        RECONFIGURE_STATUS_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+    RECONFIGURE_STATUS_FILE.write_text(json.dumps({"state": "running", "message": "Preparing the new domain, SSL certificate and server port…", "domain": domain, "port": int(port_text)}, separators=(",", ":")), encoding="utf-8")
+    try:
+        result = subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "--no-block", "start", "station-archive-reconfigure.service"],
+                                capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        request_path.unlink(missing_ok=True)
+        RECONFIGURE_STATUS_FILE.write_text(json.dumps({"state": "error", "message": str(exc)}, separators=(",", ":")), encoding="utf-8")
+        flash(f"Server reconfiguration could not be completed: {exc}. The previous address was kept.", "error")
+        return redirect(url_for("settings") + "#general")
+    if result.returncode != 0:
+        request_path.unlink(missing_ok=True)
+        details = (result.stderr or result.stdout or "No details returned.").strip()[-700:]
+        RECONFIGURE_STATUS_FILE.write_text(json.dumps({"state": "error", "message": details}, separators=(",", ":")), encoding="utf-8")
+        flash(f"Server reconfiguration failed; the old configuration was preserved where possible. {details}", "error")
+        return redirect(url_for("settings") + "#general")
+    target_url = (f"https://{domain}:{int(port_text)}/login?server_reconfigured=1"
+                  if domain != os.environ.get("APP_DOMAIN", "").lower()
+                  else f"https://{domain}:{int(port_text)}" + url_for("settings") + "?reconfigured=1#general")
+    return render_template("reconfigure_wait.html", target_url=target_url, target_domain=domain, target_port=int(port_text))
+
+
+@app.get("/settings/deployment/status")
+@superadmin_required
+def deployment_reconfiguration_status():
+    try:
+        status = json.loads(RECONFIGURE_STATUS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        status = {"state": "running", "message": "Waiting for the server reconfiguration service…"}
+    if status.get("state") == "running":
+        try:
+            active = subprocess.run(["/usr/bin/systemctl", "show", "-p", "ActiveState", "--value", "station-archive-reconfigure.service"],
+                                    capture_output=True, text=True, timeout=2, check=False).stdout.strip()
+            age = time.time() - RECONFIGURE_STATUS_FILE.stat().st_mtime
+            if active == "failed" or (active == "inactive" and age > 30):
+                status = {**status, "state": "error", "message": "The reconfiguration service stopped before reporting success. The previous address should remain active; check the server journal."}
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return status
 
 
 @app.route("/profile", methods=["GET", "POST"])
@@ -832,9 +922,12 @@ def media_file(filename):
 @superadmin_required
 def update_page():
     current = installed_version()
+    with connect_db() as db:
+        deployment = {row["key"]: row["value"] for row in db.execute(
+            "SELECT key,value FROM app_settings WHERE key IN ('public_port','update_repository')")}
     return render_template("update_app.html", current_version=current,
-                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")),
-                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
+                           github_repo=deployment.get("update_repository", os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))),
+                           public_port=deployment.get("public_port", os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443"))))
 
 
 def installed_version(release=None):
@@ -858,7 +951,9 @@ def installed_version(release=None):
 
 
 def latest_release():
-    repo_url = os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")).rstrip("/")
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
+    repo_url = (row["value"] if row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))).rstrip("/")
     match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", repo_url)
     if not match:
         raise ValueError("Configured GitHub repository URL is invalid.")
@@ -898,7 +993,13 @@ def check_update():
             "message": f"Version {release['version']} is available." if available else "You already have the latest version."}
 
 
-def parse_update_status_log(log):
+@app.get("/update/status")
+@superadmin_required
+def update_status():
+    try:
+        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log = ""
     progress = 0
     phase = "Waiting for update process…"
     done = False
@@ -917,18 +1018,16 @@ def parse_update_status_log(log):
             done, success, phase = True, False, "Update failed"
     if not done and log and "Starting update" not in log and progress == 0:
         phase = "Running server update commands…"
-    return {"log": log, "progress": progress, "phase": phase, "done": done, "success": success,
-            "current": installed_version()}
-
-
-@app.get("/update/status")
-@superadmin_required
-def update_status():
     try:
-        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")[-30000:]
-    except OSError:
-        log = ""
-    return parse_update_status_log(log)
+        offset = max(0, int(request.args.get("offset", "0")))
+    except ValueError:
+        offset = 0
+    log_reset = offset > len(log)
+    if log_reset:
+        offset = 0
+    return {"log": log[offset:], "log_offset": len(log), "log_reset": log_reset,
+            "progress": progress, "phase": phase, "done": done, "success": success,
+            "current": installed_version()}
 
 
 @app.post("/update")
@@ -953,6 +1052,10 @@ def update_app():
             return redirect(url_for("update_page"))
         UPDATE_TARGET_FILE.write_text(target_sha + "\n", encoding="utf-8")
         UPDATE_TARGET_VERSION_FILE.write_text(release["version"] + "\n", encoding="utf-8")
+        with connect_db() as db:
+            repo_row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
+        configured_repo = repo_row["value"] if repo_row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))
+        UPDATE_REPOSITORY_FILE.write_text(configured_repo.rstrip("/") + "\n", encoding="utf-8")
         UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
         with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
             subprocess.Popen(["sudo", "-n", "/usr/bin/systemctl", "start", "station-archive-update.service"], stdout=log, stderr=subprocess.STDOUT,
