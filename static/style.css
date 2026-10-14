@@ -182,9 +182,10 @@ html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 
 /* Center each directory value directly under its column heading. */
 .inventory-panel .table-scroll table th,.inventory-panel .table-scroll table td{text-align:center;vertical-align:middle}
-.inventory-panel .table-scroll .record-name{justify-content:center}
-.inventory-panel .table-scroll .actions{justify-content:center}
-/* Keep each IP's profile avatar in its own narrow column to the left of the name. */
-.inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:56px;min-width:56px;padding-left:12px;padding-right:12px}
+/* Keep the profile/avatar separate but snug against the Name column. */
+.inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:48px;min-width:48px;padding-left:10px;padding-right:6px}
 .inventory-panel .table-scroll td.avatar-cell .record-avatar{margin:0 auto}
+.inventory-panel .table-scroll th:nth-child(2),.inventory-panel .table-scroll td:nth-child(2){text-align:left;padding-left:8px}
+.inventory-panel .table-scroll .record-name{justify-content:flex-start}
+.inventory-panel .table-scroll .actions{justify-content:center}
 
