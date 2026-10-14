@@ -227,6 +227,8 @@ SUDOERS
 chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update
 
+systemd-run --wait --pipe --collect -p User=www-data -p Group=www-data -p EnvironmentFile=/etc/station-archive/env -p WorkingDirectory=/opt/station-archive /opt/station-archive/.venv/bin/python -c 'import app; print("APP_IMPORT_OK")'
+
 systemctl daemon-reload
 systemctl enable --now station-archive
 if ! systemctl is-active --quiet station-archive; then
