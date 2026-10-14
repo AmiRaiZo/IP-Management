@@ -307,9 +307,23 @@ visudo -cf /etc/sudoers.d/station-archive-update
 nginx -t
 systemctl daemon-reload
 systemctl restart station-archive.service
-systemctl is-active --quiet station-archive.service
-HTTP_CODE="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" || true)"
-[[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]] || { echo "Application health check failed (HTTP $HTTP_CODE)." >&2; exit 1; }
+# systemd can report the service active before Gunicorn has bound its socket.
+# Retry readiness instead of rolling back on a transient connection-refused.
+HTTP_CODE=000
+for attempt in $(seq 1 30); do
+  if systemctl is-active --quiet station-archive.service; then
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
+    if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+      break
+    fi
+  fi
+  sleep 1
+done
+if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+  echo "Application health check failed after 30 seconds (HTTP $HTTP_CODE)." >&2
+  journalctl -u station-archive.service -n 60 --no-pager >&2 || true
+  exit 1
+fi
 SOURCE_SHA="$(git -C "$WORK_DIR/source" rev-parse HEAD)"
 printf '%s\n' "$SOURCE_SHA" > "$DATA_DIR/commit"
 python3 - "$SOURCE_SHA" "$DATA_DIR/version" "$WORK_DIR/source/VERSION" <<'PY'
