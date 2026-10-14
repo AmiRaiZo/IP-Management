@@ -153,7 +153,7 @@ chmod -R g+rX "$APP_DIR/.venv"
 chown root:www-data "$APP_DIR/.venv/bin/gunicorn"
 chmod 0750 "$APP_DIR/.venv/bin/gunicorn"
 "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
-sudo -u www-data "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn service-account check OK:", gunicorn.__version__)'
+sudo -u www-data "$APP_DIR/.venv/bin/gunicorn" --version
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
@@ -308,7 +308,7 @@ chmod -R g+rX /opt/station-archive/.venv
 	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
 	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	runuser -u www-data -- /bin/sh -c "cd /opt/station-archive && exec /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print(\"Gunicorn service-account check OK:\", gunicorn.__version__, gunicorn.__file__)'"
+	runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
 	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
 	echo "PROGRESS:88:Restarting application with the verified environment"
