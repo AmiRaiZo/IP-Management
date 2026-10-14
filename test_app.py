@@ -322,16 +322,14 @@ class ArchiveTests(unittest.TestCase):
 
 
     def test_update_status_ignores_sudo_audit_warning_until_real_failure(self):
-        with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
-            log_file.read_text.return_value = "\n".join([
-                "Starting update…",
-                "sudo: unable to send audit message: Operation not permitted",
-                "PROGRESS:12:Downloading repository and checking target version",
-            ])
-            with archive.app.test_request_context("/update/status"):
-                payload = archive.update_status.__wrapped__.__wrapped__()
-            self.assertFalse(payload["done"])
-            self.assertEqual(payload["progress"], 12)
+        log = "\n".join([
+            "Starting update…",
+            "sudo: unable to send audit message: Operation not permitted",
+            "PROGRESS:12:Downloading repository and checking target version",
+        ])
+        payload = archive.parse_update_status_log(log)
+        self.assertFalse(payload["done"])
+        self.assertEqual(payload["progress"], 12)
 
 if __name__ == "__main__":
     unittest.main()
