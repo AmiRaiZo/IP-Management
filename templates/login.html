@@ -4,7 +4,7 @@
 {% block content %}
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
-  <a class="login-brand" href="{{ url_for('login') }}"><span class="brand-symbol login-logo">IP</span><span>IP Archive<small>NETWORK MANAGEMENT</small></span></a>
+  <a class="login-brand" href="{{ url_for('login') }}">{% if app_settings.brand_logo|default("") %}<img class="brand-symbol login-logo brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol login-logo">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
   <div class="login-emblem" aria-hidden="true">{% if stage == 'verify' %}⌁{% else %}↗{% endif %}</div>
   {% if stage == 'verify' %}
   <p class="eyebrow login-eyebrow">STEP 02 · SECURITY CHECK</p><h1>One last step.</h1>
@@ -16,8 +16,8 @@
   </form>
   <form class="back-to-password" method="get" action="{{ url_for('login') }}"><input type="hidden" name="reset" value="1"><button type="submit">← Use a different account</button></form>
   {% else %}
-  <p class="eyebrow login-eyebrow">WELCOME BACK</p><h1>Your network. <span>Your command.</span></h1>
-  <p class="muted login-description">Sign in to securely manage your IP inventory.</p>
+  <p class="eyebrow login-eyebrow">WELCOME BACK</p><h1>{{ app_settings.login_title }}</h1>
+  <p class="muted login-description">{{ app_settings.login_subtitle }}</p>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
