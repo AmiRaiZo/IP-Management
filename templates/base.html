@@ -25,13 +25,13 @@
     <div class="sidebar-bottom"><div class="profile-dot">{{ (current_user|string)[:1]|upper }}</div><div class="profile-info"><strong>{{ current_user }}</strong><span>{{ current_role|replace('superadmin','Superadmin')|title }}</span></div><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-button" type="submit" title="Sign out" aria-label="Sign out">↗</button></form></div>
   </aside>
   {% endif %}
-  <div class="main-column">
-    <header class="topbar"><div class="topbar-title">{% block breadcrumb %}<span>Workspace</span><span class="crumb-sep">/</span><strong>IP Archive</strong>{% endblock %}</div><div class="topbar-actions"><span class="status-pill"><i></i>Private workspace</span><button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button></div></header>
+  <div class="main-column {% if not current_user %}auth-column{% endif %}">
+    {% if request.endpoint != 'login' %}<header class="topbar"><div class="topbar-title">{% block breadcrumb %}<span>Workspace</span><span class="crumb-sep">/</span><strong>IP Archive</strong>{% endblock %}</div><div class="topbar-actions"><span class="status-pill"><i></i>Private workspace</span><button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button></div></header>{% endif %}
     <main class="container {% block main_class %}{% endblock %}">
       {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}{% endwith %}
       {% block content %}{% endblock %}
     </main>
-    <footer>IP Archive <span>·</span> Private network inventory</footer>
+    {% if request.endpoint != 'login' %}<footer>IP Archive <span>·</span> Private network inventory</footer>{% endif %}
   </div>
 </div>
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>
