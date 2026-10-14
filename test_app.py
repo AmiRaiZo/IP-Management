@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
@@ -321,14 +322,15 @@ class ArchiveTests(unittest.TestCase):
 
 
     def test_update_status_ignores_sudo_audit_warning_until_real_failure(self):
+        user_id, _ = self.create_user("status-admin")
         with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
-            log_file.read_text.return_value = (
-                "Starting update…\\n"
-                "sudo: unable to send audit message: Operation not permitted\\n"
-                "PROGRESS:12:Downloading repository and checking target version\\n"
-            )
+            log_file.read_text.return_value = "\n".join([
+                "Starting update…",
+                "sudo: unable to send audit message: Operation not permitted",
+                "PROGRESS:12:Downloading repository and checking target version",
+            ])
             with self.client.session_transaction() as sess:
-                sess["user_id"] = self.superadmin_id
+                sess["user_id"] = user_id
             response = self.client.get("/update/status")
             self.assertEqual(response.status_code, 200)
             payload = response.get_json()
