@@ -467,6 +467,8 @@ def ip_new():
     if request.method == "POST":
         data, error = validate_ip(request.form)
         if error:
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return {"ok": False, "error": error}, 400
             flash(error, "error")
         else:
             with connect_db() as db:
