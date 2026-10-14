@@ -315,7 +315,11 @@ def setup_2fa():
                 flash("Two-factor authentication settings updated.", "success")
                 return redirect(url_for("settings"))
             session.clear()
-            session.permanent = True
+            # Authentication must remain a browser-session cookie. Only the
+            # separate signed 2FA-remember cookie is persistent (24 hours).
+            # A permanent Flask session would keep the login alive after the
+            # browser is closed and reopened.
+            session.permanent = False
             session["user_id"] = user_id
             session["username"] = user["username"]
             session["csrf_token"] = secrets.token_urlsafe(32)
