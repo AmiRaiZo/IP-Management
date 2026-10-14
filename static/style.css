@@ -197,7 +197,7 @@ html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 
 /* Collapsible navigation and responsive layout across desktop, tablet, and phones. */
 .sidebar{transition:transform .28s ease,width .28s ease;will-change:transform}
-.sidebar-toggle{position:fixed;top:16px;left:198px;z-index:1100;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:20px;line-height:1;transition:left .28s ease,background .15s}
+.sidebar-toggle{position:fixed;top:16px;left:12px;z-index:1300;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:20px;line-height:1;transition:background .15s}
 .sidebar-toggle:hover{background:var(--surface-2)}
 .sidebar-backdrop{display:none}
 .main-column{transition:margin-left .28s ease;min-width:0}
@@ -218,10 +218,10 @@ body.sidebar-collapsed .sidebar-toggle{left:12px}
   body.sidebar-open .sidebar{transform:translateX(0)}
   body.sidebar-open{overflow:hidden}
   .sidebar-toggle{top:11px;left:12px;width:36px;height:36px}
-  body.sidebar-open .sidebar-toggle{left:min(258px,calc(86vw - 42px));z-index:1300}
+  body.sidebar-open .sidebar-toggle{left:12px;z-index:1300}
   .sidebar-backdrop{position:fixed;inset:0;z-index:1150;background:#11182770;border:0;padding:0}
   body.sidebar-open .sidebar-backdrop{display:block}
-  .sidebar .brand{padding:0 2px 28px}
+  .sidebar .brand{padding:44px 2px 28px}
   .sidebar .nav-label,.sidebar .sidebar-bottom{display:flex}
   .sidebar .nav-label{display:block}
   .sidebar .nav-links{display:grid;overflow:visible}
