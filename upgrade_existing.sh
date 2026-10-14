@@ -106,8 +106,8 @@ cleanup() {
     cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
     chown -R root:www-data "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
-    find "$APP_DIR" -type d -exec chmod 0750 {} + || true
-    find "$APP_DIR" -type f -exec chmod 0640 {} + || true
+    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} + || true
+    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} + || true
     if [[ -d "$APP_DIR/.venv" ]]; then
       chown -R root:www-data "$APP_DIR/.venv" || true
     chmod -R g+rX "$APP_DIR/.venv" || true
@@ -133,8 +133,8 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
-find "$APP_DIR" -type d -exec chmod 0750 {} +
-find "$APP_DIR" -type f -exec chmod 0640 {} +
+find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
+find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} +
 chown -R root:www-data "$APP_DIR/.venv"
 chmod -R g+rX "$APP_DIR/.venv"
 chown -R www-data:www-data "$DATA_DIR"
@@ -202,8 +202,8 @@ cleanup() {
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
       chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
-      find /opt/station-archive -type d -exec chmod 0750 {} +
-      find /opt/station-archive -type f -exec chmod 0640 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
       /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
@@ -233,8 +233,8 @@ echo "PROGRESS:48:Installing application files"
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-find /opt/station-archive -type d -exec chmod 0750 {} +
-find /opt/station-archive -type f -exec chmod 0640 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
 echo "PROGRESS:62:Installing Python dependencies"
