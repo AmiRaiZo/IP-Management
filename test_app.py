@@ -157,6 +157,52 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('class="profile-account" href="/profile"', page)
         self.assertNotIn(">My profile</a>", page)
 
+    def test_login_and_two_factor_pages_have_only_minimal_copy(self):
+        response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"<h1>Welcome back</h1>", response.data)
+        self.assertNotIn(b"IP Archive", response.data)
+        _, secret = self.create_user("minimalverify")
+        self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "minimalverify", "password": "test-pass",
+        })
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "minimalverify", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"<h1>Verification code</h1>", response.data)
+        self.assertNotIn(b"IP Archive", response.data)
+        for removed in (b"Encrypted access", b"STEP 02", b"One last step.",
+                        b"Your network. Your command.", b"Secure network inventory"):
+            self.assertNotIn(removed, response.data)
+
+    def test_profile_requires_login_and_password_change_is_secure(self):
+        response = self.client.get("/profile")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+
+        _, secret = self.create_user("profile-secure", role="admin")
+        self.assertEqual(self.login("profile-secure", secret).status_code, 302)
+        response = self.client.get("/profile")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Change password", response.data)
+        response = self.client.post("/profile", data={
+            "csrf_token": self.csrf(), "current_password": "wrong-password",
+            "new_password": "long-new-password", "confirm_password": "long-new-password",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            user = db.execute("SELECT password_hash FROM users WHERE username='profile-secure'").fetchone()
+        self.assertTrue(archive.password_matches("test-pass", user["password_hash"]))
+        response = self.client.post("/profile", data={
+            "csrf_token": self.csrf(), "current_password": "test-pass",
+            "new_password": "long-new-password", "confirm_password": "long-new-password",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            user = db.execute("SELECT password_hash FROM users WHERE username='profile-secure'").fetchone()
+        self.assertTrue(archive.password_matches("long-new-password", user["password_hash"]))
+
     def test_legacy_database_migrates_records_and_promotes_first_user(self):
         with archive.connect_db() as db:
             db.execute("CREATE TABLE stations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, ip_address TEXT NOT NULL, port INTEGER, username TEXT NOT NULL, password_enc TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
