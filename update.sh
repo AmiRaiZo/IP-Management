@@ -98,7 +98,7 @@ for required in app.py requirements.txt VERSION templates static update.sh; do
   [[ -e "$SOURCE/$required" ]] || { echo "Release archive is missing required path: $required" >&2; exit 1; }
 done
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-install -d -o root -g root -m 0700 "$BACKUP_ROOT"
+install -d -o root -g root -m 0755 "$BACKUP_ROOT"
 BACKUP="$BACKUP_ROOT/station-archive-release-$STAMP"
 install -d -o root -g root -m 0700 "$BACKUP/app" "$BACKUP/data"
 rsync -a --exclude='.venv/' "$APP_DIR/" "$BACKUP/app/"
