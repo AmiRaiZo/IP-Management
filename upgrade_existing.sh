@@ -256,7 +256,22 @@ echo "PROGRESS:80:Validating server configuration"
 nginx -t
 echo "PROGRESS:88:Restarting application and web server"
 systemctl restart station-archive.service
-systemctl is-active --quiet station-archive.service
+# Wait for Gunicorn readiness; systemd may become active before its socket is bound.
+HTTP_CODE=000
+for attempt in $(seq 1 30); do
+  if systemctl is-active --quiet station-archive.service; then
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_INTERNAL_PORT:-443}/" 2>/dev/null || true)"
+    if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+      break
+    fi
+  fi
+  sleep 1
+done
+if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+  echo "Application health check failed after 30 seconds (HTTP $HTTP_CODE)." >&2
+  journalctl -u station-archive.service -n 60 --no-pager >&2 || true
+  exit 1
+fi
 TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
 [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
 printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
