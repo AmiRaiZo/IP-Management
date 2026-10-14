@@ -2,3 +2,4 @@ Flask>=3.1,<4
 gunicorn>=23,<24
 cryptography>=45,<46
 pyotp>=2.9,<3
+qrcode[pil]>=8,<9
