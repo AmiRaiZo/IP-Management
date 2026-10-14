@@ -312,6 +312,22 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"allowed-secret", directory.data)
         self.assertIn(b'data-copy-value="allowed-secret"', directory.data)
 
+    def test_ip_directory_values_are_boxed_and_columns_centered(self):
+        _, secret = self.create_user("directory-layout")
+        self.assertEqual(self.login("directory-layout", secret).status_code, 302)
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            db.execute(
+                "INSERT INTO ips(name,ip_address,port,username,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                ("Layout router", "192.0.2.55", 8291, "netadmin", archive.vault.encrypt(b"layout-secret").decode(), group_id, "root", archive.now(), archive.now()),
+            )
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
+        self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
+        self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
+
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
         self.assertEqual(self.login("update-success-user", secret).status_code, 302)
