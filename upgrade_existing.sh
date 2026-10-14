@@ -281,8 +281,27 @@ systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
 HTTP_CODE="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" || true)"
 [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]] || { echo "Application health check failed (HTTP $HTTP_CODE)." >&2; exit 1; }
-tr -d '[:space:]' < "$WORK_DIR/source/VERSION" > "$DATA_DIR/version"
-git -C "$WORK_DIR/source" rev-parse HEAD > "$DATA_DIR/commit"
+SOURCE_SHA="$(git -C "$WORK_DIR/source" rev-parse HEAD)"
+printf '%s\n' "$SOURCE_SHA" > "$DATA_DIR/commit"
+python3 - "$SOURCE_SHA" "$DATA_DIR/version" "$WORK_DIR/source/VERSION" <<'PY'
+import json, re, sys
+from pathlib import Path
+from urllib.request import Request, urlopen
+source_sha, output, version_path = sys.argv[1:]
+version = Path(version_path).read_text(encoding="utf-8").strip()
+try:
+    req = Request("https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest",
+                  headers={"Accept":"application/vnd.github+json", "User-Agent":"IP-Archive-Upgrader"})
+    with urlopen(req, timeout=8) as response:
+        release = json.loads(response.read(256_000).decode("utf-8"))
+    if release.get("target_commitish") == source_sha:
+        candidate = str(release.get("tag_name", "")).strip().lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+", candidate):
+            version = candidate
+except Exception:
+    pass
+Path(output).write_text(version + "\n", encoding="utf-8")
+PY
 chown www-data:www-data "$DATA_DIR/version"
 chmod 0640 "$DATA_DIR/version"
 SUCCESS=1
