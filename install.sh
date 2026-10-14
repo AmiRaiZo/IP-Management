@@ -204,8 +204,11 @@ cleanup() {
       chown root:www-data /opt/station-archive
       find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
       find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
+      if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv || true; fi
       chown -R root:www-data /opt/station-archive/.venv || true
-      chmod -R g+rX /opt/station-archive/.venv || true
+      find /opt/station-archive/.venv -type d -exec chmod 0750 {} + || true
+      find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} + || true
+      find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} + || true
       chown -R www-data:www-data /var/lib/station-archive || true
       find /var/lib/station-archive -type d -exec chmod 0750 {} + || true
       find /var/lib/station-archive -type f -exec chmod 0640 {} + || true
@@ -230,8 +233,11 @@ chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
+if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv; fi
 chown -R root:www-data /opt/station-archive/.venv
-chmod -R g+rX /opt/station-archive/.venv
+find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
+find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
+find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} +
 install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
 chown -R www-data:www-data /var/lib/station-archive
 find /var/lib/station-archive -type d -exec chmod 0750 {} +
