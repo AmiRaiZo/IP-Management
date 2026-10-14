@@ -104,8 +104,6 @@
   const updateFill = document.getElementById('update-modal-progress');
   const updatePercent = document.getElementById('update-modal-percent');
   const updateState = document.getElementById('update-modal-state');
-  const updateSpinner = document.getElementById('update-spinner');
-  const closeUpdateModal = document.getElementById('close-update-modal');
   const copyUpdateLog = document.getElementById('copy-update-log');
   let updatePollHandle = null;
   function showUpdateModal() {
@@ -117,18 +115,20 @@
     updateFill.style.width = '0%';
     updatePercent.textContent = '0%';
     updateState.textContent = 'RUNNING';
-    updateSpinner.className = 'update-modal-spinner';
-    closeUpdateModal.disabled = true;
-    closeUpdateModal.textContent = 'Update running…';
+    document.documentElement.classList.add('updater-modal-open');
     document.getElementById('update-copy-status').textContent = '';
   }
   function finishUpdateModal(success) {
-    closeUpdateModal.disabled = false;
-    closeUpdateModal.textContent = 'Close';
     updateState.textContent = success ? 'SUCCESS' : 'FAILED';
-    updateSpinner.className = 'update-modal-spinner ' + (success ? 'is-done' : 'is-failed');
-    if (!success) updatePhase.textContent = 'Update failed. Copy the output below to share the exact error.';
+    if (!success) updatePhase.textContent = 'Update failed';
+    if (success) window.setTimeout(() => window.location.reload(), 1800);
   }
+  document.addEventListener('keydown', event => {
+    if (updateModal && !updateModal.hidden && event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
   async function pollUpdateStatus() {
     try {
       const response = await fetch('/update/status', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
@@ -183,15 +183,9 @@
       finishUpdateModal(false);
     }
   });
-  closeUpdateModal?.addEventListener('click', () => {
-    if (closeUpdateModal.disabled) return;
-    updateModal.hidden = true;
-    document.body.style.overflow = '';
-    if (updateState.textContent === 'SUCCESS') window.location.reload();
-  });
+  // The updater dialog intentionally has no close/dismiss control.
   copyUpdateLog?.addEventListener('click', async () => {
-    const content = 'IP Management updater diagnostic\nStatus: ' + updateState.textContent +
-      '\nPhase: ' + updatePhase.textContent + '\n\n' + (updateLog.value || '(empty output)');
+    const content = updateLog.value || '(empty output)';
     try {
       await navigator.clipboard.writeText(content);
       document.getElementById('update-copy-status').textContent = 'Output copied to clipboard.';
