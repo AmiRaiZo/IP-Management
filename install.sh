@@ -83,8 +83,8 @@ PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if 
 ip -o -4 addr show | grep -Fq " $PUBLIC_IP/" || { echo "Detected IPv4 $PUBLIC_IP is not assigned to a local interface. This VPS may be behind NAT; same-number public and loopback ports cannot be used with this Nginx setup." >&2; exit 1; }
 prompt ADMIN_USER "Superadmin username"
 [[ "$ADMIN_USER" =~ ^[A-Za-z0-9_.@-]{3,80}$ ]] || { echo "Username must be 3–80 characters using English letters, numbers, dot, underscore, @, and hyphen." >&2; exit 1; }
-read -r -s -p "Superadmin password: " ADMIN_PASSWORD < /dev/tty; printf '\\n' > /dev/tty
-read -r -s -p "Confirm superadmin password: " ADMIN_PASSWORD_CONFIRM < /dev/tty; printf '\\n' > /dev/tty
+read -r -s -p "Superadmin password: " ADMIN_PASSWORD < /dev/tty; printf '\n' > /dev/tty
+read -r -s -p "Confirm superadmin password: " ADMIN_PASSWORD_CONFIRM < /dev/tty; printf '\n' > /dev/tty
 [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]] || { echo "Passwords do not match." >&2; exit 1; }
 [[ -n "$ADMIN_PASSWORD" ]] || { echo "Password must not be empty." >&2; exit 1; }
 
@@ -141,7 +141,7 @@ fi
 for setting in "APP_REPO_URL=$REPO_URL" "GITHUB_REPO=$REPO_URL" "APP_DOMAIN=$DOMAIN" "APP_HTTPS_PORT=$HTTPS_PORT" "PUBLIC_PORT=$HTTPS_PORT" "APP_INTERNAL_PORT=$HTTPS_PORT"; do
   key="${setting%%=*}"
   if ! grep -qE "^${key}=" /etc/station-archive/env; then
-    printf '%s\\n' "$setting" >> /etc/station-archive/env
+    printf '%s\n' "$setting" >> /etc/station-archive/env
   fi
 done
 chown root:www-data /etc/station-archive/env
@@ -187,7 +187,7 @@ server {
     listen [::]:80;
     server_name $DOMAIN;
     location ^~ /.well-known/acme-challenge/ { root $WEBROOT; default_type "text/plain"; }
-    location / { return 301 https://\\$host:$HTTPS_PORT\\$request_uri; }
+    location / { return 301 https://\$host:$HTTPS_PORT\$request_uri; }
 }
 EOF
 ln -sfn "$NGINX_FILE" "/etc/nginx/sites-enabled/station-archive-$DOMAIN"
@@ -208,9 +208,9 @@ server {
     client_max_body_size 2m;
     location / {
         proxy_pass http://127.0.0.1:$HTTPS_PORT;
-        proxy_set_header Host \\$host;
-        proxy_set_header X-Real-IP \\$remote_addr;
-        proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_http_version 1.1;
         proxy_read_timeout 60s;
@@ -246,7 +246,7 @@ systemctl reload nginx
 
 ADMIN_CREDENTIALS="/run/station-archive-admin-credentials.$$"
 install -o www-data -g www-data -m 0600 /dev/null "$ADMIN_CREDENTIALS"
-printf '%s\\n%s\\n' "$ADMIN_USER" "$ADMIN_PASSWORD" > "$ADMIN_CREDENTIALS"
+printf '%s\n%s\n' "$ADMIN_USER" "$ADMIN_PASSWORD" > "$ADMIN_CREDENTIALS"
 chmod 0600 "$ADMIN_CREDENTIALS"
 cd /opt/station-archive
 sudo -u www-data bash -c 'set -a; . /etc/station-archive/env; set +a; exec /opt/station-archive/.venv/bin/python - "$1"' _ "$ADMIN_CREDENTIALS" <<'PY'
@@ -254,8 +254,8 @@ import sys, sqlite3
 from datetime import datetime, timezone
 from app import DB_PATH, password_hash
 with open(sys.argv[1], encoding="utf-8") as credentials:
-    username = credentials.readline().rstrip("\\n")
-    password = credentials.readline().rstrip("\\n")
+    username = credentials.readline().rstrip("\n")
+    password = credentials.readline().rstrip("\n")
 with sqlite3.connect(DB_PATH) as db:
     existing = db.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
     if existing:
