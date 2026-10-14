@@ -111,3 +111,5 @@ html[data-theme="dark"] body:has(.login-wrap){background:#070b13!important;backg
 html[data-theme="dark"] .auth-theme-toggle{background:#121d2a!important;color:#d9e8f5!important;border-color:#2c4052!important}
 html[data-theme="dark"] .login-card .notice.error{background:#3a1c27!important;color:#ffb5c5!important;border-color:#6a2c40!important}
 html[data-theme="dark"] .login-card .notice.success{background:#13372f!important;color:#91efd0!important;border-color:#245e50!important}
+
+#close-update-modal[hidden]{display:none!important}
