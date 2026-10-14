@@ -118,7 +118,27 @@ chmod 0750 /etc/station-archive
 chown -R www-data:www-data /var/lib/station-archive
 find /var/lib/station-archive -type d -exec chmod 0750 {} +
 find /var/lib/station-archive -type f -exec chmod 0640 {} +
-git -C "$SOURCE_DIR" rev-parse HEAD > /var/lib/station-archive/version
+SOURCE_SHA="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
+printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
+python3 - "$SOURCE_SHA" /var/lib/station-archive/version "$SOURCE_DIR/VERSION" <<'PY'
+import json, re, sys
+from pathlib import Path
+from urllib.request import Request, urlopen
+source_sha, output, version_path = sys.argv[1:]
+version = Path(version_path).read_text(encoding="utf-8").strip()
+try:
+    req = Request("https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest",
+                  headers={"Accept":"application/vnd.github+json", "User-Agent":"IP-Archive-Installer"})
+    with urlopen(req, timeout=8) as response:
+        release = json.loads(response.read(256_000).decode("utf-8"))
+    if release.get("target_commitish") == source_sha:
+        candidate = str(release.get("tag_name", "")).strip().lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+", candidate):
+            version = candidate
+except Exception:
+    pass
+Path(output).write_text(version + "\n", encoding="utf-8")
+PY
 chown www-data:www-data /var/lib/station-archive/version
 chmod 0640 /var/lib/station-archive/version
 
