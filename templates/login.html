@@ -5,7 +5,7 @@
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
   {% if stage == 'verify' %}
-  {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
+  {% if login_user %}<div class="login-user-card"><div class="login-user-avatar login-user-avatar-wrap">{% if login_user.profile_image %}<img class="login-user-avatar-image" src="{{ url_for('media_file', filename=login_user.profile_image) }}" alt="{{ login_user.username }}'s profile photo" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span hidden>{{ login_user.username[:1]|upper }}</span>{% else %}{{ login_user.username[:1]|upper }}{% endif %}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
   <h1>Verification code</h1>
   <p class="login-description verify-description">Enter the 6-digit code from your authenticator to continue.</p>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
