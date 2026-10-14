@@ -205,7 +205,6 @@ cleanup() {
       find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
-      /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
       systemctl restart station-archive.service >/dev/null 2>&1 || true
       echo "Update failed; previous application files were restored." >&2
     else
@@ -226,12 +225,14 @@ chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv; fi
+# Always recreate the disposable venv to avoid damaged/stale pip launchers.
+python3 -m venv --clear /opt/station-archive/.venv
 chown -R root:www-data /opt/station-archive/.venv
 find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
 find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
 find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} +
-/opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
