@@ -27,7 +27,7 @@
   <div class="main-column {% if not current_user %}auth-column{% endif %}">
     {% if request.endpoint != 'login' %}<header class="topbar"><div class="topbar-title">{% block breadcrumb %}{% endblock %}</div></header>{% endif %}
     <main class="container {% block main_class %}{% endblock %}">
-      {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}{% if category == 'welcome' %}<div class="welcome-toast" role="status" aria-live="polite" data-auto-dismiss="2600"><span class="welcome-toast-avatar">{% if current_avatar %}<img src="{{ url_for('media_file', filename=current_avatar) }}" alt="">{% else %}{{ current_user[:1]|upper if current_user else '✓' }}{% endif %}</span><span class="welcome-toast-copy"><strong>{{ message }}</strong><small>Signed in successfully</small></span><button type="button" class="welcome-toast-close" aria-label="Dismiss notification">×</button></div>{% else %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endif %}{% endfor %}{% endwith %}
+      {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}{% if category == 'welcome' %}<div class="welcome-toast" role="status" aria-live="polite" data-auto-dismiss="2600"><span class="welcome-toast-copy"><strong>{{ message }}</strong><small>Signed in successfully</small></span><button type="button" class="welcome-toast-close" aria-label="Dismiss notification">×</button></div>{% else %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endif %}{% endfor %}{% endwith %}
       {% block content %}{% endblock %}
       {% if request.endpoint != 'login' %}<footer>{{ app_settings.footer_text }}</footer>{% endif %}
     </main>
