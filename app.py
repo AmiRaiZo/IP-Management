@@ -315,7 +315,7 @@ def login():
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
-    if (request.method == "GET" and two_factor_mode() == "per_user"
+    if (request.method == "GET" and two_factor_mode() in ("per_user", "shared")
             and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
         return redirect(url_for("setup_2fa"))
     if request.method == "POST":
@@ -325,6 +325,8 @@ def login():
             with connect_db() as db:
                 user = db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone()
             mode = two_factor_mode()
+            if user and mode == "shared" and not user["two_factor_enrolled"]:
+                return redirect(url_for("setup_2fa"))
             secret = shared_two_factor_secret() if mode == "shared" else (user["totp_secret"] if user else "")
             if user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
                 establish_login(user)
