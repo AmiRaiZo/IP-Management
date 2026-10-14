@@ -1,4 +1,29 @@
 (() => {
+  const settingsNav = document.querySelector('.settings-nav[data-settings-tabs], .settings-nav[aria-label="Settings sections"]');
+  if (settingsNav) {
+    const tabLinks = [...settingsNav.querySelectorAll('[data-settings-tab]')];
+    const sections = [...document.querySelectorAll('[data-settings-section]')];
+    function activateSettingsTab(name, updateHash = true) {
+      if (!sections.some(section => section.dataset.settingsSection === name)) name = 'branding';
+      tabLinks.forEach(link => {
+        const active = link.dataset.settingsTab === name;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      });
+      sections.forEach(section => {
+        const active = section.dataset.settingsSection === name;
+        section.classList.toggle('is-active', active);
+        section.hidden = !active;
+      });
+      if (updateHash && window.location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+    }
+    tabLinks.forEach(link => link.addEventListener('click', event => {
+      event.preventDefault();
+      activateSettingsTab(link.dataset.settingsTab);
+    }));
+    activateSettingsTab(window.location.hash.slice(1), false);
+  }
   document.querySelectorAll('[data-toggle-password]').forEach(toggle => {
     toggle.addEventListener('click', () => {
       const input = document.getElementById(toggle.dataset.togglePassword);
