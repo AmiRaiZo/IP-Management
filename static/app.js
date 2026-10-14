@@ -1,4 +1,12 @@
 (() => {
+  document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
+    const dismiss = () => {
+      toast.classList.add('toast-leaving');
+      window.setTimeout(() => toast.remove(), 220);
+    };
+    toast.querySelector('.welcome-toast-close')?.addEventListener('click', dismiss);
+    window.setTimeout(dismiss, Number(toast.dataset.autoDismiss) || 2600);
+  });
   const settingsNav = document.querySelector('.settings-nav[data-settings-tabs], .settings-nav[aria-label="Settings sections"]');
   if (settingsNav) {
     const tabLinks = [...settingsNav.querySelectorAll('[data-settings-tab]')];
