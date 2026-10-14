@@ -127,7 +127,7 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           python3 <<'PY'
-          import json, os, urllib.error, urllib.request
+          import json, os, urllib.error, urllib.parse, urllib.request
           repo = os.environ["GH_REPOSITORY"]
           token = os.environ["GH_TOKEN"]
           base = f"https://api.github.com/repos/{repo}"
