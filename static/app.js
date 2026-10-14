@@ -53,6 +53,27 @@
       checkUpdate.textContent = 'Check again';
     }
   });
+  const ipModal = document.getElementById('ip-modal');
+  const openIpModal = document.getElementById('open-ip-modal');
+  const closeIpModal = () => ipModal?.close();
+  openIpModal?.addEventListener('click', () => { ipModal?.showModal(); document.getElementById('quick-name')?.focus(); });
+  document.getElementById('close-ip-modal')?.addEventListener('click', closeIpModal);
+  document.getElementById('cancel-ip-modal')?.addEventListener('click', closeIpModal);
+  ipModal?.addEventListener('click', event => { if (event.target === ipModal) closeIpModal(); });
+  document.getElementById('quick-ip-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = document.getElementById('save-quick-ip');
+    const error = document.getElementById('quick-ip-error');
+    button.disabled = true; button.textContent = 'Saving…'; error.hidden = true;
+    try {
+      const response = await fetch('/ips/new', {method:'POST', body:new FormData(form), headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Could not save this IP record.');
+      closeIpModal(); window.location.reload();
+    } catch (err) { error.textContent = err.message || 'Could not save this IP record.'; error.hidden = false; }
+    finally { button.disabled = false; button.textContent = 'Save IP address'; }
+  });
   const search = document.querySelector('[data-live-search]');
   const group = document.querySelector('[data-group-filter]');
   const rows = [...document.querySelectorAll('[data-search-row]')];
