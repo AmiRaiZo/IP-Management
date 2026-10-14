@@ -428,7 +428,7 @@ def setup_2fa():
     buffer = BytesIO()
     qr.save(buffer, format="PNG")
     qr_data_uri = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-    return render_template("setup_2fa.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri)
+    return render_template("setup_2fa.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri, user=dict(user))
 
 
 @app.post("/logout")
