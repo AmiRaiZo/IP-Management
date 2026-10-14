@@ -1,4 +1,5 @@
 import hashlib
+import json
 import hmac
 import os
 import re
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from ipaddress import ip_address
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import pyotp
 from cryptography.fernet import Fernet
@@ -538,14 +540,63 @@ def settings():
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
 
 
+def version_tuple(value):
+    match = re.fullmatch(r"v?(\\d+)\\.(\\d+)\\.(\\d+)", str(value or "").strip())
+    return tuple(map(int, match.groups())) if match else (0, 0, 0)
+
+
+def release_status():
+    version_file = BASE_DIR / "VERSION"
+    try:
+        current_version = version_file.read_text(encoding="utf-8").strip().removeprefix("v") or "legacy"
+    except OSError:
+        current_version = "legacy"
+    result = {
+        "current_version": current_version,
+        "latest_version": None,
+        "release_url": None,
+        "release_notes": "",
+        "published_at": None,
+        "update_available": False,
+        "update_status": "Could not check GitHub Releases. Check the server's outbound internet access and try again.",
+    }
+    api_url = "https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
+    try:
+        req = Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive"})
+        with urlopen(req, timeout=4) as response:
+            release = json.load(response)
+        latest = str(release.get("tag_name", "")).strip().removeprefix("v")
+        assets = release.get("assets", [])
+        if not latest or not any(
+            str(asset.get("name", "")).startswith("station-archive-")
+            and str(asset.get("name", "")).endswith(".zip") for asset in assets
+        ):
+            result["update_status"] = "The latest GitHub Release is missing the application package."
+            return result
+        result.update(
+            latest_version=latest,
+            release_url=release.get("html_url"),
+            release_notes=str(release.get("body", ""))[:5000],
+            published_at=release.get("published_at"),
+            update_available=(current_version == "legacy" or version_tuple(latest) > version_tuple(current_version)),
+            update_status=("A new version is available." if current_version == "legacy" or version_tuple(latest) > version_tuple(current_version)
+                           else "This installation is up to date."),
+        )
+    except Exception:
+        pass
+    return result
+
+
 @app.get("/update")
 @superadmin_required
 def update_page():
-    return render_template("update_app.html", current_version="Installed release", latest_version=None,
-                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
-                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")),
-                           update_status="Updates are pulled from the configured public GitHub repository.",
-                           update_available=True)
+    status = release_status()
+    return render_template(
+        "update_app.html",
+        **status,
+        github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "AmiRaiZo/IP-Management")),
+        public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")),
+    )
 
 
 @app.post("/update")
@@ -553,15 +604,22 @@ def update_page():
 def update_app():
     updater = "/usr/local/sbin/station-archive-update"
     if not os.path.isfile(updater):
-        flash("Updater is not installed on this server.", "error")
-        return redirect(url_for("settings"))
+        flash("Updater is not installed on this server. Run the latest release installer once.", "error")
+        return redirect(url_for("update_page"))
+    status = release_status()
+    if not status.get("latest_version"):
+        flash("Could not verify the latest release. No update was started.", "error")
+        return redirect(url_for("update_page"))
+    if not status.get("update_available"):
+        flash("This installation is already on the latest release.", "success")
+        return redirect(url_for("update_page"))
     try:
-        # Detach the updater so restarting Gunicorn cannot terminate the HTTP response.
+        # The root-owned updater downloads and verifies the published release package.
         with open(DATA_DIR / "update.log", "a", encoding="utf-8") as log:
             subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=log,
                              stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-        audit("update_requested", "started")
-        flash("Update started. Wait a few seconds, then refresh this page.", "success")
+        audit("update_requested", f"release={status['latest_version']}")
+        flash(f"Update to version {status['latest_version']} started. Refresh in a few seconds.", "success")
     except (subprocess.SubprocessError, OSError) as exc:
         flash(f"Update could not start: {exc}", "error")
     return redirect(url_for("update_page"))
