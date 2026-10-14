@@ -231,9 +231,12 @@ cleanup() {
 }
 trap cleanup EXIT
 echo "PROGRESS:12:Downloading repository and checking target version"
-git clone --depth 1 "${UPDATE_REPO%/}" "$TMP/source"
+git init -q "$TMP/source"
+git -C "$TMP/source" remote add origin "${UPDATE_REPO%/}"
+git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
+git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
-[[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: GitHub changed after the version check; please check again." >&2; exit 1; }
+[[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
 for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup"
