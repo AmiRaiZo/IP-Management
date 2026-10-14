@@ -92,6 +92,10 @@ fi
 rsync -a --exclude='.git/' --exclude='.venv/' "$APP_DIR/" "$BACKUP_DIR/app/"
 echo "Backup created at $BACKUP_DIR"
 
+# Source code remains root-owned and readable by the service group. Runtime
+# data belongs to www-data; avoid world-readable or world-writable permissions.
+install -d -o www-data -g www-data -m 0750 "$DATA_DIR"
+
 WORK_DIR="$(mktemp -d /tmp/station-archive-existing-upgrade.XXXXXX)"
 DEPLOYED=0
 SUCCESS=0
@@ -103,7 +107,10 @@ cleanup() {
     chown -R root:www-data "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
     find "$APP_DIR" -type d -exec chmod 0750 {} + || true
-    find "$APP_DIR" -type f -exec chmod g+r {} + || true
+    find "$APP_DIR" -type f -exec chmod 0640 {} + || true
+    chown -R www-data:www-data "$DATA_DIR" || true
+    find "$DATA_DIR" -type d -exec chmod 0750 {} + || true
+    find "$DATA_DIR" -type f -exec chmod 0640 {} + || true
     if [[ -d "$APP_DIR/.venv" ]]; then
       chown -R root:www-data "$APP_DIR/.venv" || true
       chmod -R g+rX "$APP_DIR/.venv" || true
@@ -127,9 +134,12 @@ rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
 find "$APP_DIR" -type d -exec chmod 0750 {} +
-find "$APP_DIR" -type f -exec chmod g+r {} +
+find "$APP_DIR" -type f -exec chmod 0640 {} +
 chown -R root:www-data "$APP_DIR/.venv"
 chmod -R g+rX "$APP_DIR/.venv"
+chown -R www-data:www-data "$DATA_DIR"
+find "$DATA_DIR" -type d -exec chmod 0750 {} +
+find "$DATA_DIR" -type f -exec chmod 0640 {} +
 if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"; fi
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
@@ -234,4 +244,3 @@ echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration
 echo "Backups: $BACKUP_DIR"
 echo "Application URL: https://$DOMAIN:$HTTPS_PORT"
 echo "Updater: sudo /usr/local/sbin/station-archive-update"
-
