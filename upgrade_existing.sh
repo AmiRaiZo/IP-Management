@@ -16,9 +16,8 @@ SERVICE_FILE=/etc/systemd/system/station-archive.service
 command -v python3 >/dev/null && command -v systemctl >/dev/null && command -v nginx >/dev/null || { echo "Required tools (Python 3, systemctl, Nginx) are missing." >&2; exit 1; }
 
 prompt() { local name="$1" label="$2" value=""; read -r -p "$label: " value < /dev/tty; printf -v "$name" '%s' "$value"; }
-prompt REPO_URL "Public GitHub repository HTTPS URL"
-[[ "$REPO_URL" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Use a public GitHub URL such as https://github.com/OWNER/REPOSITORY.git." >&2; exit 1; }
-REPO_URL="${REPO_URL%/}"
+# Keep the upgrader aligned with the repository used by the installer.
+REPO_URL="https://github.com/AmiRaiZo/IP-Management"
 
 APP_PORT="$(systemctl show station-archive.service -p ExecStart --value | grep -oE -- '--bind[= ]+127\.0\.0\.1:[0-9]+' | grep -oE '[0-9]+$' | tail -n1 || true)"
 if [[ -z "$APP_PORT" ]]; then
@@ -52,7 +51,7 @@ for root in roots:
                 i += 1
             block = source[start:i-1]
             proxy = re.search(r'proxy_pass\s+http://127\.0\.0\.1:(\d+)', block)
-            ssl_listen = re.search(r'listen\s+(?:\[::\]:)?(\d+)\s+ssl\b', block)
+            ssl_listen = re.search(r'listen\s+(?:(?:\d{1,3}\.){3}\d{1,3}:)?(?:\[::\]:)?(\d+)\s+ssl\b', block)
             domain = re.search(r'(?m)^\s*server_name\s+([^;]+);', block)
             if proxy and ssl_listen and domain:
                 names = domain.group(1).split()

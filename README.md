@@ -6,25 +6,25 @@ IP Archive is an English-language web application for storing and managing IP co
 
 1. Create an `A` DNS record for your domain that points to the server's public IPv4 address.
 2. Allow inbound TCP port `80` and the HTTPS port you intend to use in both the VPS provider firewall and the Ubuntu firewall.
-3. Run the installer from your public GitHub repository. Replace `OWNER/REPOSITORY` with the actual repository path:
+3. Run the installer from the project's public GitHub repository:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/install.sh | sudo bash
+   curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/install.sh | sudo bash
    ```
 
-The installer asks for the domain, public HTTPS port (default `443`), internal application port (default `8088`), public GitHub repository URL, superadmin username, and superadmin password. Password entry is hidden and confirmed; there is no arbitrary minimum password length, but an empty password is rejected. The repository must be public and hosted on GitHub.
+The installer asks for the domain, one HTTPS port (default `443`), superadmin username, and superadmin password. It automatically uses `https://github.com/AmiRaiZo/IP-Management`, so you do not need to enter the repository URL again. The same port number is used publicly and by the application: Nginx binds to the VPS's public IPv4 address, while Gunicorn binds to `127.0.0.1`, so they do not compete for the same socket. The VPS public IPv4 must be assigned directly to a local network interface (not only forwarded through external NAT). Password entry is hidden and confirmed; there is no arbitrary minimum password length, but an empty password is rejected.
 
-The installer installs Python, Nginx, Git, Certbot, and the application dependencies; obtains a Let's Encrypt certificate using the HTTP-01 challenge on port `80`; configures HTTPS on your chosen public port; and creates the initial superadmin account. The app listens only on `127.0.0.1` at the internal port. Open the site at `https://your-domain` for port `443`, or `https://your-domain:PORT` for a custom port.
+The installer installs Python, Nginx, Git, Certbot, and the application dependencies; obtains a Let's Encrypt certificate using the HTTP-01 challenge on port `80`; configures HTTPS on your chosen port; and creates the initial superadmin account. Open the site at `https://your-domain` for port `443`, or `https://your-domain:PORT` for a custom port. If the application service fails to start, the installer prints recent service logs rather than leaving the cause hidden behind a `502 Bad Gateway` page.
 
 ## One-time upgrade of an existing installation
 
-For a server that already has an older installation in `/opt/station-archive`, run the in-place upgrader from the new public GitHub repository:
+For a server that already has an older installation in `/opt/station-archive`, run the in-place upgrader:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/upgrade_existing.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/upgrade_existing.sh | sudo bash
 ```
 
-Replace `OWNER/REPOSITORY` with the repository that contains `upgrade_existing.sh`. The script detects the current internal application port from systemd (or Nginx as a fallback), and detects the existing domain and public HTTPS port from the active Nginx HTTPS proxy block. It asks for the public GitHub repository URL, makes a timestamped root-only backup of the app files, `/etc/station-archive/env`, and `/var/lib/station-archive/archive.sqlite3` (including SQLite sidecar files when present), then updates the code and dependencies in place. It adds or updates repository/domain/port settings while retaining existing secret values and unrelated environment settings. Existing Nginx configuration and SSL certificates are left in place.
+The script detects the current internal application port from systemd (or Nginx as a fallback), and detects the existing domain and public HTTPS port from the active Nginx HTTPS proxy block. It uses the canonical GitHub repository automatically, makes a timestamped root-only backup of the app files, `/etc/station-archive/env`, and `/var/lib/station-archive/archive.sqlite3` (including SQLite sidecar files when present), then updates the code and dependencies in place. It adds or updates repository/domain/port settings while retaining existing secret values and unrelated environment settings. Existing Nginx configuration and SSL certificates are left in place.
 
 The upgrader stops if it cannot identify the existing service or HTTPS proxy configuration. Review the printed backup path after it completes. It does not recreate the database or reinstall the application as a fresh deployment.
 
