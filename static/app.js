@@ -1,4 +1,33 @@
 (() => {
+  const sidebar = document.getElementById('app-sidebar');
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+  function setSidebarOpen(open) {
+    if (!sidebar || !sidebarToggle) return;
+    document.body.classList.toggle('sidebar-open', open);
+    document.body.classList.toggle('sidebar-collapsed', !open && window.matchMedia('(min-width: 721px)').matches);
+    sidebarToggle.setAttribute('aria-expanded', String(open));
+    sidebarToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    sidebarToggle.title = open ? 'Close navigation' : 'Open navigation';
+    sidebarToggle.querySelector('span').textContent = open ? '×' : '☰';
+  }
+  if (sidebar && sidebarToggle) {
+    const mobileSidebar = window.matchMedia('(max-width: 720px)');
+    setSidebarOpen(!mobileSidebar.matches);
+    sidebarToggle.addEventListener('click', () => {
+      const open = !document.body.classList.contains('sidebar-open') &&
+        !(document.body.classList.contains('sidebar-collapsed') === false && !mobileSidebar.matches);
+      setSidebarOpen(open);
+    });
+    sidebarBackdrop?.addEventListener('click', () => setSidebarOpen(false));
+    sidebar.querySelectorAll('a').forEach(link => link.addEventListener('click', () => {
+      if (mobileSidebar.matches) setSidebarOpen(false);
+    }));
+    mobileSidebar.addEventListener?.('change', event => setSidebarOpen(!event.matches));
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && document.body.classList.contains('sidebar-open')) setSidebarOpen(false);
+    });
+  }
   document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
     let dismissed = false;
     const dismissOnClick = () => dismiss();
