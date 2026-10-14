@@ -21,6 +21,8 @@ import pyotp
 from cryptography.fernet import Fernet
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
+from flask import send_from_directory
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,6 +52,11 @@ VERSION_FILE = DATA_DIR / "version"
 UPDATE_TARGET_FILE = DATA_DIR / "update-target"
 UPDATE_TARGET_VERSION_FILE = DATA_DIR / "update-target-version"
 UPDATE_LOG_FILE = DATA_DIR / "update.log"
+UPLOAD_DIR = DATA_DIR / "uploads"
+AVATAR_DIR = UPLOAD_DIR / "avatars"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 @contextmanager
@@ -93,8 +100,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
+          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
         );
@@ -127,6 +135,8 @@ def init_db():
         for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
             if name not in user_cols:
                 db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+        if "profile_image" not in user_cols:
+            db.execute("ALTER TABLE users ADD COLUMN profile_image TEXT NOT NULL DEFAULT ''")
         ip_cols = {r[1] for r in db.execute("PRAGMA table_info(ips)")}
         if not ip_cols:
             # Fresh DB already created the ips table above.
@@ -220,8 +230,20 @@ def inject_globals():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_urlsafe(32)
     user = current_user_row() if session.get("user_id") else None
+    with connect_db() as db:
+        settings_rows = db.execute("SELECT key,value FROM app_settings").fetchall()
+    app_settings = {row["key"]: row["value"] for row in settings_rows}
+    defaults = {"brand_name": "IP Archive", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
+                "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
+                "accent_color": "#4569e8", "footer_text": "IP Archive · Secure network inventory",
+                "app_description": "Keep connection details organized, searchable, and available to the right people.",
+                "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
+                "group_label": "Groups", "user_label": "Users & permissions"}
+    for key, value in defaults.items():
+        app_settings.setdefault(key, value)
     return {"csrf_token": session["csrf_token"], "current_user": session.get("username"),
-            "current_role": user["role"] if user else "", "dark_mode": True}
+            "current_role": user["role"] if user else "", "dark_mode": True, "app_settings": app_settings,
+            "current_avatar": user["profile_image"] if user else ""}
 
 
 @app.after_request
@@ -452,6 +474,8 @@ def ip_new():
                     (data["name"], data["ip"], data["port"], data["username"], data["password"] or "", data["notes"], data["group_id"], request.user["username"], now(), now()))
                 ip_id = cur.lastrowid
             audit("ip_created", f"id={ip_id}; ip={data['ip']}")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return {"ok": True, "message": "IP record created."}
             flash("IP record created.", "success")
             return redirect(url_for("index"))
     return render_template("ip_form.html", ip=None, groups=groups)
@@ -597,8 +621,86 @@ def user_edit(user_id):
 @app.route("/settings", methods=["GET", "POST"])
 @superadmin_required
 def settings():
-    return render_template("settings.html", github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
+    defaults = {"brand_name": "IP Archive", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
+                "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
+                "accent_color": "#4569e8", "footer_text": "IP Archive · Secure network inventory",
+                "app_description": "Keep connection details organized, searchable, and available to the right people.",
+                "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
+                "group_label": "Groups", "user_label": "Users & permissions"}
+    if request.method == "POST":
+        values = {key: request.form.get(key, "").strip()[:500] for key in defaults}
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", values.get("accent_color", "")):
+            flash("Accent color must be a valid six-digit hex color.", "error")
+            return redirect(url_for("settings"))
+        logo = request.files.get("brand_logo")
+        logo_name = ""
+        if logo and logo.filename:
+            ext = Path(secure_filename(logo.filename)).suffix.lower()
+            if ext not in ALLOWED_IMAGE_EXTENSIONS:
+                flash("Logo must be PNG, JPG, JPEG, or WEBP.", "error")
+                return redirect(url_for("settings"))
+            logo_name = "brand" + ext
+            logo.save(UPLOAD_DIR / logo_name)
+        with connect_db() as db:
+            for key, value in values.items():
+                db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+            if logo_name:
+                db.execute("INSERT INTO app_settings(key,value) VALUES('brand_logo',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (logo_name,))
+        audit("application_settings_updated")
+        flash("Application appearance and text settings saved.", "success")
+        return redirect(url_for("settings"))
+    with connect_db() as db:
+        values = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM app_settings")}
+    for key, value in defaults.items():
+        values.setdefault(key, value)
+    values.setdefault("brand_logo", "")
+    return render_template("settings.html", app_values=values,
+                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
+
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    user = request.user
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        if new_password:
+            if not password_matches(current_password, user["password_hash"]):
+                flash("Current password is incorrect.", "error")
+                return redirect(url_for("profile"))
+            if len(new_password) < 10:
+                flash("New password must be at least 10 characters.", "error")
+                return redirect(url_for("profile"))
+            if new_password != confirm_password:
+                flash("New passwords do not match.", "error")
+                return redirect(url_for("profile"))
+        avatar = request.files.get("avatar")
+        avatar_name = user["profile_image"] or ""
+        if avatar and avatar.filename:
+            ext = Path(secure_filename(avatar.filename)).suffix.lower()
+            if ext not in ALLOWED_IMAGE_EXTENSIONS:
+                flash("Profile image must be PNG, JPG, JPEG, or WEBP.", "error")
+                return redirect(url_for("profile"))
+            filename = f"user-{user['id']}{ext}"
+            avatar.save(AVATAR_DIR / filename)
+            avatar_name = "avatars/" + filename
+        with connect_db() as db:
+            if new_password:
+                db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(new_password), user["id"]))
+            db.execute("UPDATE users SET profile_image=? WHERE id=?", (avatar_name, user["id"]))
+        audit("profile_updated")
+        flash("Profile updated successfully.", "success")
+        return redirect(url_for("profile"))
+    return render_template("profile.html", user=user)
+
+
+@app.get("/media/<path:filename>")
+@login_required
+def media_file(filename):
+    return send_from_directory(UPLOAD_DIR, filename)
 
 
 @app.get("/update")
