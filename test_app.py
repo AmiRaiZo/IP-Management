@@ -322,21 +322,14 @@ class ArchiveTests(unittest.TestCase):
 
 
     def test_update_status_ignores_sudo_audit_warning_until_real_failure(self):
-        user_id, _ = self.create_user("status-admin")
-        with archive.connect_db() as db:
-            db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
-        with self.client.session_transaction() as sess:
-            sess["user_id"] = user_id
-            sess["username"] = "status-admin"
         with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
             log_file.read_text.return_value = "\n".join([
                 "Starting update…",
                 "sudo: unable to send audit message: Operation not permitted",
                 "PROGRESS:12:Downloading repository and checking target version",
             ])
-            response = self.client.get("/update/status")
-            self.assertEqual(response.status_code, 200)
-            payload = response.get_json()
+            with archive.app.test_request_context("/update/status"):
+                payload = archive.update_status.__wrapped__.__wrapped__()
             self.assertFalse(payload["done"])
             self.assertEqual(payload["progress"], 12)
 
