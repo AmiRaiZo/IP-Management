@@ -335,7 +335,7 @@ chmod -R g+rX /opt/station-archive/.venv
 	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
 	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	runuser -u www-data -- /bin/sh -c "cd /opt/station-archive && exec /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print(\"Gunicorn service-account check OK:\", gunicorn.__version__, gunicorn.__file__)'"
+	runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
 	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
 	echo "PROGRESS:88:Restarting application with the verified environment"
