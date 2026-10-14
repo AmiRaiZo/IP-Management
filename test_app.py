@@ -137,6 +137,26 @@ class ArchiveTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
 
+    def test_login_copy_is_minimal_and_password_toggle_is_present(self):
+        response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("<h1>Welcome back</h1>", page)
+        self.assertIn('data-toggle-password="password"', page)
+        for removed in ("Encrypted access", "Sign in to securely manage your IP inventory.",
+                        "Your network.", "Your command.", "Continue securely",
+                        "IP Archive · Secure network inventory", "STEP 02 · SECURITY CHECK",
+                        "One last step.", "Enter the 6-digit code from your authenticator app to continue."):
+            self.assertNotIn(removed, page)
+
+    def test_profile_is_not_in_sidebar_navigation_but_account_row_links_to_it(self):
+        _, secret = self.create_user("profilelink")
+        self.login("profilelink", secret)
+        response = self.client.get("/")
+        page = response.get_data(as_text=True)
+        self.assertIn('class="profile-account" href="/profile"', page)
+        self.assertNotIn(">My profile</a>", page)
+
     def test_legacy_database_migrates_records_and_promotes_first_user(self):
         with archive.connect_db() as db:
             db.execute("CREATE TABLE stations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, ip_address TEXT NOT NULL, port INTEGER, username TEXT NOT NULL, password_enc TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
