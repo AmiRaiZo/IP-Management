@@ -197,7 +197,7 @@ html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 
 /* Collapsible navigation and responsive layout across desktop, tablet, and phones. */
 .sidebar{transition:transform .28s ease,width .28s ease;will-change:transform}
-.sidebar-toggle{position:fixed;top:16px;left:198px;z-index:1100;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:20px;line-height:1;transition:left .28s ease,background .15s}
+.sidebar-toggle{position:fixed;top:16px;left:198px;z-index:1100;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:17px;line-height:1;transition:left .28s ease,background .15s}
 .sidebar-toggle:hover{background:var(--surface-2)}
 .sidebar-backdrop{display:none}
 .main-column{transition:margin-left .28s ease;min-width:0}
