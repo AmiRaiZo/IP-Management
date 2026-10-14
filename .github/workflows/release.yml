@@ -26,6 +26,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate deployment shell scripts
+        shell: bash
+        run: bash -n install.sh upgrade_existing.sh update.sh uninstall.sh
+
       - name: Run application tests
         shell: bash
         run: |
