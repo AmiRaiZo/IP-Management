@@ -4,27 +4,23 @@
 {% block content %}
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
-  <a class="login-brand" href="{{ url_for('login') }}">{% if app_settings.brand_logo|default("") %}<img class="brand-symbol login-logo brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol login-logo">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
-  <div class="login-emblem" aria-hidden="true">{% if stage == 'verify' %}⌁{% else %}↗{% endif %}</div>
+
   {% if stage == 'verify' %}
-  <p class="eyebrow login-eyebrow">STEP 02 · SECURITY CHECK</p><h1>One last step.</h1>
-  <p class="muted login-description">Enter the 6-digit code from your authenticator app to continue.</p>
+  <h1>Verification code</h1>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="code">Authenticator code</label><input class="login-input otp-input" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus placeholder="000 000">
-    <button class="btn btn-primary full login-submit" type="submit">Verify and sign in <span>→</span></button>
+    <button class="btn btn-primary full login-submit" type="submit">Verify and sign in</button>
   </form>
   <form class="back-to-password" method="get" action="{{ url_for('login') }}"><input type="hidden" name="reset" value="1"><button type="submit">← Use a different account</button></form>
   {% else %}
-  <p class="eyebrow login-eyebrow">WELCOME BACK</p><h1>{{ app_settings.login_title }}</h1>
-  <p class="muted login-description">{{ app_settings.login_subtitle }}</p>
+  <h1>Welcome back</h1>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
-    <label for="password">Password</label><input class="login-input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password">
-    <button class="btn btn-primary full login-submit" type="submit">Continue securely <span>→</span></button>
+    <label for="password">Password</label><div class="password-field"><input class="login-input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button class="password-toggle" type="button" data-toggle-password="password" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+    <button class="btn btn-primary full login-submit" type="submit">Login</button>
   </form>
   {% endif %}
-  <div class="login-bottom"><span class="login-lock">◇</span><span>Encrypted access</span><i></i><span>IP Archive</span></div>
 </section>
 {% endblock %}
