@@ -335,7 +335,6 @@ chmod -R g+rX /opt/station-archive/.venv
 	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
 	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
 	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version; then
 	  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
 	  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
