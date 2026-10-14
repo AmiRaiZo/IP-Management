@@ -286,6 +286,9 @@ def login():
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
+    if (request.method == "GET" and two_factor_required()
+            and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
+        return redirect(url_for("setup_2fa"))
     if request.method == "POST":
         pending_id = session.get("pending_2fa_user_id")
         if pending_id:
