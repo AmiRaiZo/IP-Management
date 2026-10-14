@@ -56,6 +56,21 @@
     });
   });
   const root = document.documentElement;
+  const updateSuccessModal = document.getElementById('update-success-modal');
+  const closeUpdateSuccess = () => {
+    if (!updateSuccessModal) return;
+    updateSuccessModal.remove();
+    const url = new URL(window.location.href);
+    url.searchParams.delete('update');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  };
+  document.getElementById('close-update-success')?.addEventListener('click', closeUpdateSuccess);
+  updateSuccessModal?.addEventListener('click', event => {
+    if (event.target === updateSuccessModal) closeUpdateSuccess();
+  });
+  if (updateSuccessModal) document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeUpdateSuccess();
+  });
   const button = document.getElementById('theme-toggle');
   const icon = document.getElementById('theme-icon');
   const label = button?.querySelector('.theme-text');
@@ -134,7 +149,7 @@
       updatePhase.textContent = 'Update failed';
       if (closeUpdateModal) closeUpdateModal.hidden = false;
     }
-    if (success) window.setTimeout(() => window.location.reload(), 1800);
+    if (success) window.setTimeout(() => window.location.assign('/update/finish'), 1200);
   }
   closeUpdateModal?.addEventListener('click', () => {
     if (updateState.textContent !== 'FAILED') return;

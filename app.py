@@ -507,7 +507,8 @@ def index():
             prepared_rows.append(item)
         rows = prepared_rows
     return render_template("index.html", ips=rows, q=term, groups=groups, group_filter=group_filter,
-                           show_ip_passwords=show_ip_passwords and request.user["role"] == "superadmin")
+                           show_ip_passwords=show_ip_passwords and request.user["role"] == "superadmin",
+                           update_success=request.args.get("update") == "success")
 
 
 def can_view_ip(ip_id, user=None):
@@ -1146,8 +1147,7 @@ def update_finish():
     except OSError:
         log = ""
     if "IP Management updated successfully." in log:
-        flash("Update completed successfully. The latest version is now installed.", "success")
-        return redirect(url_for("index"))
+        return redirect(url_for("index", update="success"))
     if "Update failed" in log or "Update process failed" in log:
         flash("Update failed. Review the server output on the Updates page and try again after fixing the issue.", "error")
         return redirect(url_for("update_page"))
