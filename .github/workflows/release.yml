@@ -1,0 +1,104 @@
+name: Publish versioned release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional exact semantic version (for example 2.0.0). Leave blank to auto-increment the patch version."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate release version and package source
+        id: package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          BASE="$(tr -d '[:space:]' < VERSION)"
+          VERSION="${MANUAL_VERSION:-}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="$(python3 - "$BASE" "$GITHUB_REPOSITORY" "$GH_TOKEN" <<'PY'
+          import json, re, sys, urllib.request
+          base, repo, token = sys.argv[1:]
+          if not re.fullmatch(r"\d+\.\d+\.\d+", base):
+              raise SystemExit("VERSION must be semantic version X.Y.Z.")
+          major, minor, patch = map(int, base.split("."))
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/releases/latest",
+              headers={"Accept":"application/vnd.github+json", "Authorization":f"Bearer {token}", "User-Agent":"IP-Archive-Release"})
+          try:
+              with urllib.request.urlopen(req, timeout=10) as response:
+                  tag = json.load(response).get("tag_name", "").removeprefix("v")
+          except Exception:
+              tag = ""
+          if re.fullmatch(r"\d+\.\d+\.\d+", tag):
+              old_major, old_minor, old_patch = map(int, tag.split("."))
+              if (old_major, old_minor) == (major, minor):
+                  patch = max(patch, old_patch + 1)
+          print(f"{major}.{minor}.{patch}")
+          PY
+          )"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version: $VERSION" >&2; exit 1; }
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Release tag $TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          printf '%s\n' "$VERSION" > VERSION
+          python3 - "$VERSION" <<'PY'
+          import pathlib, sys, zipfile
+          version=sys.argv[1]
+          root=pathlib.Path(".")
+          output=pathlib.Path(f"station-archive-v{version}.zip")
+          include=["app.py","requirements.txt","setup_admin.py","install.sh","upgrade_existing.sh","update.sh","VERSION","README.md"]
+          with zipfile.ZipFile(output,"w",zipfile.ZIP_DEFLATED) as archive:
+              for item in include:
+                  path=root/item
+                  if path.is_file():
+                      archive.write(path, item)
+              for folder in ("templates","static"):
+                  for path in sorted((root/folder).rglob("*")):
+                      if path.is_file():
+                          archive.write(path, path.relative_to(root).as_posix())
+          with zipfile.ZipFile(output) as archive:
+              required={"app.py","requirements.txt","VERSION","update.sh","templates","static"}
+              names=set(archive.namelist())
+              missing=[name for name in required if not any(n==name or n.startswith(name+"/") for n in names)]
+              if missing:
+                  raise SystemExit("Release package missing: "+", ".join(sorted(missing)))
+          print(f"Built {output}")
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "asset=station-archive-$TAG.zip" >> "$GITHUB_OUTPUT"
+          mv "station-archive-v$VERSION.zip" "station-archive-$TAG.zip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.package.outputs.tag }}
+          name: IP Archive ${{ steps.package.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: station-archive-${{ steps.package.outputs.tag }}.zip
