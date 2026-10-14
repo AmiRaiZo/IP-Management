@@ -897,13 +897,7 @@ def check_update():
             "message": f"Version {release['version']} is available." if available else "You already have the latest version."}
 
 
-@app.get("/update/status")
-@superadmin_required
-def update_status():
-    try:
-        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")[-30000:]
-    except OSError:
-        log = ""
+def parse_update_status_log(log):
     progress = 0
     phase = "Waiting for update process…"
     done = False
@@ -924,6 +918,16 @@ def update_status():
         phase = "Running server update commands…"
     return {"log": log, "progress": progress, "phase": phase, "done": done, "success": success,
             "current": installed_version()}
+
+
+@app.get("/update/status")
+@superadmin_required
+def update_status():
+    try:
+        log = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")[-30000:]
+    except OSError:
+        log = ""
+    return parse_update_status_log(log)
 
 
 @app.post("/update")
