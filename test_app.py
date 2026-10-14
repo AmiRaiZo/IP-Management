@@ -322,8 +322,12 @@ class ArchiveTests(unittest.TestCase):
 
 
     def test_update_status_ignores_sudo_audit_warning_until_real_failure(self):
-        _, secret = self.create_user("status-admin")
-        self.login("status-admin", secret)
+        user_id, _ = self.create_user("status-admin")
+        with archive.connect_db() as db:
+            db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = user_id
+            sess["username"] = "status-admin"
         with patch.object(archive, "UPDATE_LOG_FILE") as log_file:
             log_file.read_text.return_value = "\n".join([
                 "Starting update…",
