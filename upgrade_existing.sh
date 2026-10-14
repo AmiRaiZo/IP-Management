@@ -74,7 +74,7 @@ read -r -p "Type UPGRADE to continue: " CONFIRM < /dev/tty
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y git rsync python3-venv python3-pip
+apt-get install -y curl git rsync python3-venv python3-pip
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/station-archive-upgrade-$STAMP"
 install -d -o root -g root -m 0700 "$BACKUP_DIR"
@@ -125,10 +125,39 @@ cleanup() {
   rm -rf -- "$WORK_DIR"
 }
 trap cleanup EXIT
-git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static; do
-  [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
+RELEASE_API="https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
+curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: IP-Archive-Upgrader' "$RELEASE_API" -o "$WORK_DIR/release.json"
+mapfile -t RELEASE_INFO < <(python3 - "$WORK_DIR/release.json" <<'PY'
+import json, sys
+release=json.load(open(sys.argv[1], encoding="utf-8"))
+assets=[a for a in release.get("assets", []) if a.get("name", "").startswith("station-archive-v") and a.get("name", "").endswith(".zip")]
+if not release.get("tag_name") or not assets:
+    raise SystemExit("Latest GitHub Release has no IP Archive ZIP package.")
+url=assets[0].get("browser_download_url", "")
+if not url.startswith("https://github.com/AmiRaiZo/IP-Management/releases/download/"):
+    raise SystemExit("Release package URL failed validation.")
+print(release["tag_name"])
+print(url)
+PY
+)
+[[ ${#RELEASE_INFO[@]} -eq 2 ]] || { echo "Could not read GitHub Release metadata." >&2; exit 1; }
+curl -fsSL --retry 3 --retry-delay 1 "${RELEASE_INFO[1]}" -o "$WORK_DIR/release.zip"
+python3 - "$WORK_DIR/release.zip" "$WORK_DIR/source" <<'PY'
+import sys, zipfile
+archive, destination=sys.argv[1:]
+with zipfile.ZipFile(archive) as z:
+    bad=z.testzip()
+    if bad: raise SystemExit("Corrupt release package: "+bad)
+    for item in z.infolist():
+        name=item.filename.replace("\\\\", "/")
+        if name.startswith("/") or ".." in name.split("/"):
+            raise SystemExit("Unsafe path in release package.")
+    z.extractall(destination)
+PY
+for required in app.py requirements.txt VERSION templates static update.sh; do
+  [[ -e "$WORK_DIR/source/$required" ]] || { echo "Release package is missing required path: $required" >&2; exit 1; }
 done
+echo "Preparing in-place upgrade to ${RELEASE_INFO[0]} from GitHub Releases."
 
 # Keep the currently installed virtual environment and all data outside APP_DIR.
 DEPLOYED=1
@@ -186,58 +215,8 @@ chmod 0750 /etc/station-archive
 cat > /usr/local/sbin/station-archive-update <<'UPDATER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-umask 077
 [[ ${EUID} -eq 0 ]] || { echo "This updater must run as root." >&2; exit 1; }
-ENV_FILE=/etc/station-archive/env
-[[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
-set -a; . "$ENV_FILE"; set +a
-UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
-[[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
-[[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
-TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
-DEPLOYED=0; SUCCESS=0
-cleanup() {
-  if (( DEPLOYED == 1 && SUCCESS == 0 )); then
-    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
-      chown -R root:www-data /opt/station-archive
-      chown root:www-data /opt/station-archive
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-      chown -R root:www-data /opt/station-archive/.venv || true
-      chmod -R g+rX /opt/station-archive/.venv || true
-      systemctl restart station-archive.service >/dev/null 2>&1 || true
-      echo "Update failed; previous application files were restored." >&2
-    else
-      echo "Update failed and automatic rollback could not restore previous files." >&2
-    fi
-  fi
-  rm -rf -- "$TMP"
-}
-trap cleanup EXIT
-git clone --depth 1 "${UPDATE_REPO%/}" "$TMP/source"
-for required in app.py requirements.txt templates static; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
-mkdir -p "$TMP/backup"
-rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
-DEPLOYED=1
-systemctl stop station-archive.service
-rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
-chown -R root:www-data /opt/station-archive
-chown root:www-data /opt/station-archive
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-# Always recreate the disposable venv to avoid damaged/stale pip launchers.
-python3 -m venv --clear /opt/station-archive/.venv
-chown -R root:www-data /opt/station-archive/.venv
-find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
-find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
-find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} +
-/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
-/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-nginx -t
-systemctl restart station-archive.service
-systemctl is-active --quiet station-archive.service
-SUCCESS=1
-echo "IP Archive updated successfully."
+exec /bin/bash /opt/station-archive/update.sh
 UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
