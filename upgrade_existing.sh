@@ -309,6 +309,18 @@ chmod -R g+rX /opt/station-archive/.venv
 	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
 	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
 	runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
+	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version; then
+	  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
+	  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
+	  python3 -m venv /opt/station-archive/.venv
+	  /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+	  /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+	  chown -R root:www-data /opt/station-archive/.venv
+	  chmod -R g+rX /opt/station-archive/.venv
+	  chown root:www-data /opt/station-archive/.venv/bin/gunicorn
+	  chmod 0750 /opt/station-archive/.venv/bin/gunicorn
+	  runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
+	fi
 	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
 	echo "PROGRESS:88:Restarting application with the verified environment"
