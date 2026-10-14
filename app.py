@@ -100,7 +100,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', two_factor_enabled INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
+          role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', two_factor_enabled INTEGER NOT NULL DEFAULT 0, two_factor_enrolled INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
@@ -132,7 +132,7 @@ def init_db():
         """)
         # In-place migrations preserve the database created by the first release.
         user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)")}
-        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
+        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1")):
             if name not in user_cols:
                 db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
         if "profile_image" not in user_cols:
@@ -144,6 +144,9 @@ def init_db():
             db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode',?)", ("per_user" if legacy_required else "off",))
             if legacy_required:
                 db.execute("UPDATE users SET two_factor_enabled=1")
+        current_mode = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
+        if "two_factor_enrolled" not in user_cols and (not current_mode or current_mode["value"] != "shared"):
+            db.execute("UPDATE users SET two_factor_enrolled=1 WHERE totp_secret!=''")
         ip_cols = {r[1] for r in db.execute("PRAGMA table_info(ips)")}
         if not ip_cols:
             # Fresh DB already created the ips table above.
@@ -338,6 +341,12 @@ def login():
         if user and password_matches(password, user["password_hash"]):
             if user_requires_two_factor(user):
                 mode = two_factor_mode()
+                if mode == "shared" and not user["two_factor_enrolled"]:
+                    session.clear()
+                    session["pending_2fa_user_id"] = user["id"]
+                    session["pending_2fa_secret"] = shared_two_factor_secret()
+                    session["csrf_token"] = secrets.token_urlsafe(32)
+                    return redirect(url_for("setup_2fa"))
                 if mode == "per_user" and not user["totp_secret"]:
                     session.clear()
                     session["pending_2fa_user_id"] = user["id"]
@@ -370,13 +379,15 @@ def setup_2fa():
     # Signed-in users cannot alter their own authenticator configuration.
     user_id = session.get("pending_2fa_user_id")
     secret = session.get("pending_2fa_secret")
-    if two_factor_mode() != "per_user" or not user_id or not secret:
+    mode = two_factor_mode()
+    if mode not in ("per_user", "shared") or not user_id or not secret:
         if session.get("user_id"):
             abort(403)
         return redirect(url_for("login"))
     with connect_db() as db:
-        user = db.execute("SELECT id,username,two_factor_enabled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
-    if not user or not user["two_factor_enabled"]:
+        user = db.execute("SELECT id,username,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
+    if (not user or not user["two_factor_enabled"]
+            or (mode == "shared" and (secret != shared_two_factor_secret() or user["two_factor_enrolled"]))):
         session.clear()
         return redirect(url_for("login"))
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
@@ -384,7 +395,10 @@ def setup_2fa():
         code = re.sub(r"\s", "", request.form.get("code", ""))
         if pyotp.TOTP(secret).verify(code, valid_window=1):
             with connect_db() as db:
-                db.execute("UPDATE users SET totp_secret=? WHERE id=?", (secret, user_id))
+                if mode == "shared":
+                    db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
+                else:
+                    db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (secret, user_id))
             session.clear()
             # Authentication must remain a browser-session cookie. Only the
             # separate signed 2FA-remember cookie is persistent (24 hours).
@@ -652,7 +666,7 @@ def user_edit(user_id):
             with connect_db() as db:
                 db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=? WHERE id=?", (role, enabled, two_factor_enabled, user_id))
                 if not two_factor_enabled:
-                    db.execute("UPDATE users SET totp_secret='' WHERE id=?", (user_id,))
+                    db.execute("UPDATE users SET totp_secret='',two_factor_enrolled=0 WHERE id=?", (user_id,))
                 if password:
                     db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password), user_id))
                 db.execute("DELETE FROM user_group_access WHERE user_id=?", (user_id,))
@@ -677,6 +691,7 @@ def update_security_settings():
         secret = pyotp.random_base32()
         with connect_db() as db:
             db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (secret,))
+            db.execute("UPDATE users SET two_factor_enrolled=0")
         audit("shared_two_factor_secret_generated")
         flash("Shared Authenticator secret generated. Enroll the site Authenticator before enabling shared mode.", "success")
         return redirect(url_for("settings") + "#security")
