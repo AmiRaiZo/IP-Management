@@ -78,6 +78,9 @@ python3 -m venv /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install --upgrade pip
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
+chown root:www-data /opt/station-archive/.venv/bin/gunicorn
+chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
@@ -251,6 +254,9 @@ chmod -R g+rX /opt/station-archive/.venv
 echo "PROGRESS:62:Installing Python dependencies"
 /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
+chown root:www-data /opt/station-archive/.venv/bin/gunicorn
+chmod 0750 /opt/station-archive/.venv/bin/gunicorn
 /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
 echo "PROGRESS:80:Validating server configuration"
 nginx -t
