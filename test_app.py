@@ -25,6 +25,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM ips")
             db.execute("DELETE FROM groups")
             db.execute("DELETE FROM users")
+            db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required','1') ON CONFLICT(key) DO UPDATE SET value='1'")
 
     def csrf(self):
         with self.client.session_transaction() as sess:
@@ -85,12 +86,42 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn(b'name="password"', response.data)
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
         self.assertEqual(response.status_code, 302)
-        self.assertIsNotNone(self.client.get_cookie("ip_archive_2fa"))
+        self.assertIsNotNone(self.client.get_cookie("ip_management_2fa"))
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
         self.assertEqual(response.status_code, 302)
         self.assertIn("/", response.location)
+
+    def test_global_two_factor_policy_is_superadmin_controlled(self):
+        _, secret = self.create_user("policyadmin", role="superadmin")
+        self.assertEqual(self.login("policyadmin", secret).status_code, 302)
+        response = self.client.get("/settings")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"name=\"two_factor_required\"", response.data)
+        response = self.client.post("/settings/security", data={
+            "csrf_token": self.csrf(), "two_factor_required": "0",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(archive.two_factor_required())
+
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        _, user_secret = self.create_user("policyuser", role="admin")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "policyuser", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("setup-2fa", response.location)
+
+    def test_regular_user_cannot_change_two_factor_configuration(self):
+        _, secret = self.create_user("ordinary", role="admin")
+        self.assertEqual(self.login("ordinary", secret).status_code, 302)
+        response = self.client.get("/setup-2fa")
+        self.assertEqual(response.status_code, 403)
+        response = self.client.post("/settings/security", data={
+            "csrf_token": self.csrf(), "two_factor_required": "0",
+        })
+        self.assertEqual(response.status_code, 403)
 
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
