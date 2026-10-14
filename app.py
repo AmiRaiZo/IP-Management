@@ -541,7 +541,7 @@ def settings():
 
 
 def version_tuple(value):
-    match = re.fullmatch(r"v?(\\d+)\\.(\\d+)\\.(\\d+)", str(value or "").strip())
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value or "").strip())
     return tuple(map(int, match.groups())) if match else (0, 0, 0)
 
 
