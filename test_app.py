@@ -70,6 +70,8 @@ class ArchiveTests(unittest.TestCase):
             secret = sess["pending_2fa_secret"]
         response = self.client.post("/setup-2fa", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
         self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertFalse(sess.permanent, "Login session must expire when the browser session ends")
         with archive.connect_db() as db:
             user = db.execute("SELECT totp_secret FROM users WHERE username='firstadmin'").fetchone()
         self.assertEqual(user["totp_secret"], secret)
