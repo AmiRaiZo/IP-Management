@@ -1,6 +1,7 @@
 import hashlib
-import json
 import hmac
+import base64
+from io import BytesIO
 import os
 import re
 import secrets
@@ -12,12 +13,12 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from ipaddress import ip_address
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 import pyotp
 from cryptography.fernet import Fernet
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("STATION_ARCHIVE_DATA", BASE_DIR / "instance"))
@@ -39,6 +40,9 @@ app.config.update(
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-archive-remember-2fa")
+REMEMBER_2FA_COOKIE = "ip_archive_2fa"
+REMEMBER_2FA_SECONDS = 24 * 60 * 60
 
 
 @contextmanager
@@ -163,6 +167,28 @@ def login_required(fn):
     return wrapped
 
 
+def remembered_two_factor(user_id):
+    token = request.cookies.get(REMEMBER_2FA_COOKIE, "")
+    if not token:
+        return False
+    try:
+        payload = two_factor_serializer.loads(token, max_age=REMEMBER_2FA_SECONDS)
+        return payload.get("uid") == user_id
+    except (BadSignature, SignatureExpired, AttributeError):
+        return False
+
+
+def establish_login(user):
+    session.clear()
+    # Keep the authenticated session as a browser-session cookie. Passwords
+    # are required again after the browser session ends; only 2FA is remembered.
+    session.permanent = False
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+    session["csrf_token"] = secrets.token_urlsafe(32)
+    audit("login_success")
+
+
 def superadmin_required(fn):
     @wraps(fn)
     @login_required
@@ -197,7 +223,7 @@ def security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
@@ -207,10 +233,28 @@ def security_headers(response):
 def login():
     if session.get("user_id"):
         return redirect(url_for("index"))
+    if request.method == "GET" and request.args.get("reset") == "1":
+        session.pop("pending_2fa_user_id", None)
+        session.pop("pending_2fa_secret", None)
+        session["csrf_token"] = secrets.token_urlsafe(32)
     if request.method == "POST":
+        pending_id = session.get("pending_2fa_user_id")
+        if pending_id:
+            code = re.sub(r"\s", "", request.form.get("code", ""))
+            with connect_db() as db:
+                user = db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone()
+            if user and user["totp_secret"] and pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1):
+                establish_login(user)
+                response = redirect(safe_login_target())
+                response.set_cookie(REMEMBER_2FA_COOKIE, two_factor_serializer.dumps({"uid": user["id"]}),
+                                    max_age=REMEMBER_2FA_SECONDS, httponly=True, secure=app.config["SESSION_COOKIE_SECURE"], samesite="Lax", path="/")
+                return response
+            time.sleep(0.35)
+            flash("The verification code is invalid. Try again.", "error")
+            return render_template("login.html", stage="verify")
+
         username = request.form.get("username", "").strip()[:80]
         password = request.form.get("password", "")
-        code = re.sub(r"\s", "", request.form.get("code", ""))
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
         if user and password_matches(password, user["password_hash"]) and not user["totp_secret"]:
@@ -219,21 +263,22 @@ def login():
             session["pending_2fa_secret"] = pyotp.random_base32()
             session["csrf_token"] = secrets.token_urlsafe(32)
             return redirect(url_for("setup_2fa"))
-        valid_otp = bool(user and user["totp_secret"] and pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1))
-        if user and password_matches(password, user["password_hash"]) and valid_otp:
+        if user and password_matches(password, user["password_hash"]):
+            if remembered_two_factor(user["id"]):
+                establish_login(user)
+                return redirect(safe_login_target())
             session.clear()
-            session.permanent = True
-            session["user_id"] = user["id"]
-            session["username"] = user["username"]
+            session["pending_2fa_user_id"] = user["id"]
             session["csrf_token"] = secrets.token_urlsafe(32)
-            audit("login_success")
-            target = request.args.get("next", "")
-            if not target.startswith("/") or target.startswith("//"):
-                target = url_for("index")
-            return redirect(target)
+            return render_template("login.html", stage="verify")
         time.sleep(0.35)
-        flash("Invalid username, password, or authenticator code.", "error")
-    return render_template("login.html")
+        flash("Invalid username or password.", "error")
+    return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password")
+
+
+def safe_login_target():
+    target = request.args.get("next", "")
+    return target if target.startswith("/") and not target.startswith("//") else url_for("index")
 
 
 @app.route("/setup-2fa", methods=["GET", "POST"])
@@ -272,7 +317,12 @@ def setup_2fa():
             flash("Two-factor authentication is enabled.", "success")
             return redirect(url_for("index"))
         flash("The authenticator code is invalid. Try again.", "error")
-    return render_template("setup_2fa.html", secret=secret, uri=uri)
+    import qrcode
+    qr = qrcode.make(uri)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    qr_data_uri = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    return render_template("setup_2fa.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri)
 
 
 @app.post("/logout")
@@ -540,63 +590,14 @@ def settings():
                            public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
 
 
-def version_tuple(value):
-    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value or "").strip())
-    return tuple(map(int, match.groups())) if match else (0, 0, 0)
-
-
-def release_status():
-    version_file = BASE_DIR / "VERSION"
-    try:
-        current_version = version_file.read_text(encoding="utf-8").strip().removeprefix("v") or "legacy"
-    except OSError:
-        current_version = "legacy"
-    result = {
-        "current_version": current_version,
-        "latest_version": None,
-        "release_url": None,
-        "release_notes": "",
-        "published_at": None,
-        "update_available": False,
-        "update_status": "Could not check GitHub Releases. Check the server's outbound internet access and try again.",
-    }
-    api_url = "https://api.github.com/repos/AmiRaiZo/IP-Management/releases/latest"
-    try:
-        req = Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive"})
-        with urlopen(req, timeout=4) as response:
-            release = json.load(response)
-        latest = str(release.get("tag_name", "")).strip().removeprefix("v")
-        assets = release.get("assets", [])
-        if not latest or not any(
-            str(asset.get("name", "")).startswith("station-archive-")
-            and str(asset.get("name", "")).endswith(".zip") for asset in assets
-        ):
-            result["update_status"] = "The latest GitHub Release is missing the application package."
-            return result
-        result.update(
-            latest_version=latest,
-            release_url=release.get("html_url"),
-            release_notes=str(release.get("body", ""))[:5000],
-            published_at=release.get("published_at"),
-            update_available=(current_version == "legacy" or version_tuple(latest) > version_tuple(current_version)),
-            update_status=("A new version is available." if current_version == "legacy" or version_tuple(latest) > version_tuple(current_version)
-                           else "This installation is up to date."),
-        )
-    except Exception:
-        pass
-    return result
-
-
 @app.get("/update")
 @superadmin_required
 def update_page():
-    status = release_status()
-    return render_template(
-        "update_app.html",
-        **status,
-        github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "AmiRaiZo/IP-Management")),
-        public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")),
-    )
+    return render_template("update_app.html", current_version="Installed release", latest_version=None,
+                           github_repo=os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "not configured")),
+                           public_port=os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")),
+                           update_status="Updates are pulled from the configured public GitHub repository.",
+                           update_available=True)
 
 
 @app.post("/update")
@@ -604,22 +605,15 @@ def update_page():
 def update_app():
     updater = "/usr/local/sbin/station-archive-update"
     if not os.path.isfile(updater):
-        flash("Updater is not installed on this server. Run the latest release installer once.", "error")
-        return redirect(url_for("update_page"))
-    status = release_status()
-    if not status.get("latest_version"):
-        flash("Could not verify the latest release. No update was started.", "error")
-        return redirect(url_for("update_page"))
-    if not status.get("update_available"):
-        flash("This installation is already on the latest release.", "success")
-        return redirect(url_for("update_page"))
+        flash("Updater is not installed on this server.", "error")
+        return redirect(url_for("settings"))
     try:
-        # The root-owned updater downloads and verifies the published release package.
+        # Detach the updater so restarting Gunicorn cannot terminate the HTTP response.
         with open(DATA_DIR / "update.log", "a", encoding="utf-8") as log:
             subprocess.Popen(["sudo", "-n", updater], stdout=log, stderr=log,
                              stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-        audit("update_requested", f"release={status['latest_version']}")
-        flash(f"Update to version {status['latest_version']} started. Refresh in a few seconds.", "success")
+        audit("update_requested", "started")
+        flash("Update started. Wait a few seconds, then refresh this page.", "success")
     except (subprocess.SubprocessError, OSError) as exc:
         flash(f"Update could not start: {exc}", "error")
     return redirect(url_for("update_page"))
