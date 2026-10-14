@@ -257,7 +257,10 @@ nginx -t
 echo "PROGRESS:88:Restarting application and web server"
 systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
-printf '%s\n' "$SOURCE_SHA" > "$VERSION_FILE"
+TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
+[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
+printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
+printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
 chown www-data:www-data "$VERSION_FILE"
 chmod 0640 "$VERSION_FILE"
 SUCCESS=1
@@ -278,7 +281,8 @@ systemctl restart station-archive.service
 systemctl is-active --quiet station-archive.service
 HTTP_CODE="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" || true)"
 [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]] || { echo "Application health check failed (HTTP $HTTP_CODE)." >&2; exit 1; }
-git -C "$WORK_DIR/source" rev-parse HEAD > "$DATA_DIR/version"
+tr -d '[:space:]' < "$WORK_DIR/source/VERSION" > "$DATA_DIR/version"
+git -C "$WORK_DIR/source" rev-parse HEAD > "$DATA_DIR/commit"
 chown www-data:www-data "$DATA_DIR/version"
 chmod 0640 "$DATA_DIR/version"
 SUCCESS=1
