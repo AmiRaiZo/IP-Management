@@ -106,14 +106,17 @@ cleanup() {
     cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
     chown -R root:www-data "$APP_DIR"
     chown root:www-data "$APP_DIR" || true
-    find "$APP_DIR" -type d -exec chmod 0750 {} + || true
-    find "$APP_DIR" -type f -exec chmod 0640 {} + || true
+    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} + || true
+    find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} + || true
     chown -R www-data:www-data "$DATA_DIR" || true
     find "$DATA_DIR" -type d -exec chmod 0750 {} + || true
     find "$DATA_DIR" -type f -exec chmod 0640 {} + || true
     if [[ -d "$APP_DIR/.venv" ]]; then
+      if [[ ! -x "$APP_DIR/.venv/bin/python" || ! -x "$APP_DIR/.venv/bin/pip" ]]; then python3 -m venv --clear "$APP_DIR/.venv" || true; fi
       chown -R root:www-data "$APP_DIR/.venv" || true
-      chmod -R g+rX "$APP_DIR/.venv" || true
+      find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + || true
+      find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} + || true
+      find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} + || true
     fi
     chown root:www-data /etc/station-archive || true
     chmod 0750 /etc/station-archive || true
@@ -133,14 +136,18 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
-find "$APP_DIR" -type d -exec chmod 0750 {} +
-find "$APP_DIR" -type f -exec chmod 0640 {} +
+find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
+find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} +
 chown -R root:www-data "$APP_DIR/.venv"
 chmod -R g+rX "$APP_DIR/.venv"
 chown -R www-data:www-data "$DATA_DIR"
 find "$DATA_DIR" -type d -exec chmod 0750 {} +
 find "$DATA_DIR" -type f -exec chmod 0640 {} +
-if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then python3 -m venv "$APP_DIR/.venv"; fi
+if [[ ! -x "$APP_DIR/.venv/bin/python" || ! -x "$APP_DIR/.venv/bin/pip" ]]; then python3 -m venv --clear "$APP_DIR/.venv"; fi
+chown -R root:www-data "$APP_DIR/.venv"
+find "$APP_DIR/.venv" -type d -exec chmod 0750 {} +
+find "$APP_DIR/.venv" -type f -perm /u=r -exec chmod g+r {} +
+find "$APP_DIR/.venv" -type f -perm /u=x -exec chmod g+x {} +
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
@@ -193,8 +200,8 @@ cleanup() {
     if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
       chown -R root:www-data /opt/station-archive
       chown root:www-data /opt/station-archive
-      find /opt/station-archive -type d -exec chmod 0750 {} +
-      find /opt/station-archive -type f -exec chmod g+r {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv || true
       chmod -R g+rX /opt/station-archive/.venv || true
       /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
@@ -216,10 +223,13 @@ systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
-find /opt/station-archive -type d -exec chmod 0750 {} +
-find /opt/station-archive -type f -exec chmod g+r {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
+if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv; fi
 chown -R root:www-data /opt/station-archive/.venv
-chmod -R g+rX /opt/station-archive/.venv
+find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
+find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
+find /opt/station-archive/.venv -type f -perm /u=x -exec chmod g+x {} +
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 nginx -t
 systemctl restart station-archive.service
