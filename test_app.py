@@ -163,9 +163,6 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"<h1>Welcome back</h1>", response.data)
         self.assertNotIn(b"IP Archive", response.data)
         _, secret = self.create_user("minimalverify")
-        self.client.post("/login", data={
-            "csrf_token": self.csrf(), "username": "minimalverify", "password": "test-pass",
-        })
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": "minimalverify", "password": "test-pass",
         })
