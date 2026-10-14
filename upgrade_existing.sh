@@ -149,7 +149,7 @@ with zipfile.ZipFile(archive) as z:
     bad=z.testzip()
     if bad: raise SystemExit("Corrupt release package: "+bad)
     for item in z.infolist():
-        name=item.filename.replace("\\\\", "/")
+        name=item.filename.replace(chr(92), "/")
         if name.startswith("/") or ".." in name.split("/"):
             raise SystemExit("Unsafe path in release package.")
     z.extractall(destination)
