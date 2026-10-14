@@ -7,7 +7,10 @@
       toast.classList.add('toast-leaving');
       window.setTimeout(() => toast.remove(), 220);
     };
-    window.setTimeout(dismiss, Number(toast.dataset.autoDismiss) || 2600);
+    window.setTimeout(dismiss, Number(toast.dataset.autoDismiss) || 8000);
+    if (toast.classList.contains('welcome-toast')) {
+      document.addEventListener('click', dismiss, {once: true});
+    }
   });
   const settingsNav = document.querySelector('.settings-nav[data-settings-tabs], .settings-nav[aria-label="Settings sections"]');
   if (settingsNav) {
