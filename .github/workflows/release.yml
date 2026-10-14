@@ -29,8 +29,9 @@ jobs:
       - name: Run application tests
         shell: bash
         run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m unittest -v
+          python3 -m venv .venv-ci
+          .venv-ci/bin/python -m pip install -r requirements.txt
+          .venv-ci/bin/python -m unittest -v
 
       - name: Calculate release version and package source
         id: package
