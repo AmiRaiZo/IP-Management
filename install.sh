@@ -76,7 +76,8 @@ find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -ex
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 python3 -m venv --clear /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install --upgrade pip
-/opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
+/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
 chown -R root:www-data /opt/station-archive/.venv
 chmod -R g+rX /opt/station-archive/.venv
 
@@ -234,6 +235,9 @@ chown root:www-data /opt/station-archive
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
 find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
 if [[ ! -x /opt/station-archive/.venv/bin/python || ! -x /opt/station-archive/.venv/bin/pip ]]; then python3 -m venv --clear /opt/station-archive/.venv; fi
+# Always recreate the disposable venv during an upgrade so a damaged pip
+# launcher cannot block deployment. Persistent database/uploads live in DATA_DIR.
+python3 -m venv --clear /opt/station-archive/.venv
 chown -R root:www-data /opt/station-archive/.venv
 find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
 find /opt/station-archive/.venv -type f -perm /u=r -exec chmod g+r {} +
