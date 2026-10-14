@@ -331,10 +331,11 @@ def login():
             if user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
                 establish_login(user)
                 session["two_factor_verified"] = True
+                flash(f"Welcome back, {user['username']}!", "welcome")
                 return redirect(safe_login_target())
             time.sleep(0.35)
             flash("The verification code is invalid. Try again.", "error")
-            return render_template("login.html", stage="verify")
+            return render_template("login.html", stage="verify", login_user=dict(user) if user else None)
 
         username = request.form.get("username", "").strip()[:80]
         password = request.form.get("password", "")
@@ -362,12 +363,19 @@ def login():
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_urlsafe(32)
-                return render_template("login.html", stage="verify")
+                return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
             establish_login(user)
+            flash(f"Welcome back, {user['username']}!", "welcome")
             return redirect(safe_login_target())
         time.sleep(0.35)
         flash("Invalid username or password.", "error")
-    return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password")
+    pending_user = None
+    if session.get("pending_2fa_user_id"):
+        with connect_db() as db:
+            pending_user = db.execute("SELECT id,username,role,profile_image FROM users WHERE id=? AND enabled=1",
+                                      (session["pending_2fa_user_id"],)).fetchone()
+    return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password",
+                           login_user=dict(pending_user) if pending_user else None)
 
 
 def safe_login_target():
@@ -387,7 +395,7 @@ def setup_2fa():
             abort(403)
         return redirect(url_for("login"))
     with connect_db() as db:
-        user = db.execute("SELECT id,username,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
+        user = db.execute("SELECT id,username,role,profile_image,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
     if (not user or (mode == "per_user" and not user["two_factor_enabled"])
             or (mode == "shared" and (secret != shared_two_factor_secret() or user["two_factor_enrolled"]))):
         session.clear()
@@ -412,7 +420,7 @@ def setup_2fa():
             session["csrf_token"] = secrets.token_urlsafe(32)
             session["two_factor_verified"] = True
             audit("two_factor_enabled")
-            flash("Two-factor authentication is enabled.", "success")
+            flash(f"Welcome back, {user['username']}! Two-factor authentication is enabled.", "welcome")
             return redirect(url_for("index"))
         flash("The authenticator code is invalid. Try again.", "error")
     import qrcode
@@ -807,9 +815,13 @@ def profile():
 @app.get("/media/<path:filename>")
 def media_file(filename):
     # The application logo is public so it can render on the sign-in page.
-    # User avatars remain available only to authenticated users.
+    # During 2FA, permit the pending user to load only their own profile image.
     if filename.startswith("avatars/") and not current_user_row():
-        return redirect(url_for("login"))
+        pending_id = session.get("pending_2fa_user_id")
+        with connect_db() as db:
+            pending = db.execute("SELECT profile_image FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone() if pending_id else None
+        if not pending or pending["profile_image"] != filename:
+            return redirect(url_for("login"))
     if filename not in {"brand.png", "brand.jpg", "brand.jpeg", "brand.webp"} and not filename.startswith("avatars/"):
         abort(404)
     return send_from_directory(UPLOAD_DIR, filename)
