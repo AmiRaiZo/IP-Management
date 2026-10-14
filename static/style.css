@@ -253,3 +253,119 @@ body.sidebar-collapsed .sidebar-toggle{left:12px}
 @media(prefers-reduced-motion:reduce){
   .sidebar,.main-column,.sidebar-toggle{transition:none!important}
 }
+
+
+/* Cross-device layout refinements: centered authentication and adaptive content. */
+html,body{width:100%;min-width:0}
+body{overflow-x:hidden}
+.app-shell,.main-column,.container,.panel,.panel-heading,.form-panel,.settings-content{min-width:0;max-width:100%}
+.auth-column{display:flex;flex-direction:column;align-items:stretch;justify-content:center;width:100%;min-height:100vh;min-height:100dvh;margin:0!important}
+.auth-column .container.login-wrap{box-sizing:border-box;width:100%!important;max-width:none!important;min-height:100vh;min-height:100dvh;margin:0!important;padding:clamp(16px,3.5vw,44px)!important;display:grid!important;place-items:center!important;align-content:center}
+.login-wrap{width:100%;max-width:none;margin:0 auto;justify-items:center;align-items:center}
+.login-card{width:min(100%,450px);max-width:100%;margin:auto;overflow-wrap:anywhere}
+.login-card.verify-stage{width:min(100%,450px)}
+.login-card form,.login-card label,.login-card input,.password-field{min-width:0;max-width:100%}
+.login-card input{box-sizing:border-box}
+.password-field{position:relative;display:flex;align-items:center}
+.password-field input{width:100%;padding-right:48px}
+.login-user-card{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.login-user-copy{min-width:0;overflow-wrap:anywhere}
+.login-user-copy h2{overflow-wrap:anywhere}
+.login-user-meta{overflow-wrap:anywhere}
+.security-setup{width:100%;max-width:1000px;margin-inline:auto;grid-template-columns:repeat(2,minmax(0,1fr))}
+.security-setup>*{min-width:0}
+.setup-card{min-width:0;overflow-wrap:anywhere}
+.setup-card code,.uri-box,.secret-details code{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+.qr-code{max-width:100%;height:auto;aspect-ratio:1}
+.page-heading,.panel-heading,.form-footer,.setting-row,.update-card{min-width:0;flex-wrap:wrap}
+.form-grid,.admin-grid,.settings-layout,.permission-grid{min-width:0}
+.field,.field input,.field textarea,.field select,.stack-form input,.stack-form textarea{min-width:0;max-width:100%}
+.table-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+table{max-width:none}
+img,video,canvas,svg{max-width:100%}
+button,a,input,select,textarea{touch-action:manipulation}
+@media(min-width:1600px){
+  .container:not(.login-wrap){width:min(1360px,calc(100% - 112px))}
+  .security-setup{max-width:1100px}
+}
+@media(max-width:1050px){
+  .container:not(.login-wrap){width:calc(100% - 48px)}
+  .topbar{gap:12px}
+  .settings-layout{grid-template-columns:minmax(130px,190px) minmax(0,1fr)}
+  .admin-grid{grid-template-columns:minmax(0,1fr)}
+  .update-info{min-width:0}
+}
+@media(max-width:800px){
+  .security-setup{grid-template-columns:minmax(0,1fr);max-width:620px}
+  .setup-card{padding:clamp(17px,4vw,26px)}
+  .form-grid{grid-template-columns:minmax(0,1fr)}
+  .full-field{grid-column:auto}
+  .settings-layout{grid-template-columns:minmax(0,1fr)}
+  .settings-nav{display:flex;overflow-x:auto;gap:6px;max-width:100%;white-space:nowrap}
+  .settings-nav a{flex:0 0 auto}
+  .permission-grid{grid-template-columns:minmax(0,1fr)}
+  .form-footer{align-items:stretch;flex-direction:column}
+  .form-footer .actions{flex-wrap:wrap}
+}
+@media(max-width:720px){
+  .auth-column .container.login-wrap{padding:20px 14px!important}
+  .login-card{border-radius:20px;padding:clamp(21px,6vw,32px)}
+  .login-card h1{font-size:clamp(22px,6vw,27px)}
+  .login-card.verify-stage>h1{font-size:22px!important}
+  .login-user-card{gap:12px}
+  .login-user-avatar,.login-user-avatar-image{flex:0 0 42px;width:42px;height:42px}
+  .container:not(.login-wrap){width:calc(100% - 28px);margin:22px auto 30px}
+  .topbar{height:auto;min-height:56px;padding:10px 14px;flex-wrap:wrap}
+  .topbar-title{min-width:0;flex-wrap:wrap}
+  .topbar-actions{margin-left:auto;flex-wrap:wrap}
+  .page-heading{align-items:flex-start;flex-direction:column;gap:12px}
+  .page-heading h1{font-size:clamp(22px,5vw,28px);overflow-wrap:anywhere}
+  .stats{grid-template-columns:minmax(0,1fr)}
+  .stat-card{padding:16px}
+  .filters{flex-direction:column;padding:0 14px 14px}
+  .search-input{width:100%;max-width:none}
+  .select-wrap,.select-wrap select{width:100%;min-width:0}
+  .panel-heading{padding:16px}
+  .form-panel{padding:0 16px 18px}
+  .form-heading{margin-inline:-16px}
+  .directory-heading-actions{width:100%;align-items:stretch}
+  .directory-heading-actions .btn{max-width:100%}
+  .update-card{padding:18px}
+  .update-card>form{width:100%}
+  .update-card>form .btn{flex:1 1 auto}
+  .login-wrap{padding-inline:0}
+}
+@media(max-width:480px){
+  .auth-column .container.login-wrap{padding:14px 10px!important}
+  .login-card{padding:22px 18px;border-radius:18px}
+  .login-brand{margin-bottom:24px}
+  .login-card form{margin-top:20px}
+  .login-card .btn{width:100%;white-space:normal;line-height:1.4}
+  .login-user-meta{font-size:10px}
+  .otp-input,.totp-input{letter-spacing:5px!important}
+  .container:not(.login-wrap){width:calc(100% - 20px);margin-top:18px}
+  .topbar{padding:9px 10px}
+  .panel-heading{padding:14px 11px}
+  .form-panel{padding-inline:12px}
+  .form-heading{margin-inline:-12px}
+  .setup-card{padding:17px}
+  .qr-code,.qr-placeholder{width:min(180px,65vw);height:auto;aspect-ratio:1}
+  .form-footer .actions,.actions{flex-wrap:wrap}
+  .form-footer .actions .btn,.actions .btn{max-width:100%}
+}
+@media(max-height:560px) and (min-width:481px){
+  .auth-column .container.login-wrap{align-content:start;padding-block:14px!important}
+  .login-card{padding:22px 30px}
+  .login-brand{margin-bottom:18px}
+  .login-card form{margin-top:15px}
+  .login-card label{margin-top:12px}
+}
+@media(orientation:landscape) and (max-height:500px) and (max-width:900px){
+  .auth-column .container.login-wrap{align-content:start;padding-block:10px!important}
+  .login-card{padding:18px 24px}
+  .login-brand{margin-bottom:14px}
+  .login-card form{margin-top:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
+}
