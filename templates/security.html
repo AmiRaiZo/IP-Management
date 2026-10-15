@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Security & login logs · IP Management{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">ADMINISTRATION</p><h1>Security & login logs</h1><p class="muted">Review sign-in attempts and control IP access for this application only.</p></div>
+</div>
+
+<section class="panel form-panel security-rule-panel">
+  <div class="panel-heading"><div><h2>Application IP access rules</h2><p>These rules are enforced by IP Management only. They do not add firewall rules or block other services on your server.</p></div></div>
+  <p class="security-current-ip"><strong>Your current detected IP:</strong> <code>{{ current_ip }}</code></p>
+  <form method="post" action="{{ url_for('add_ip_access_rule') }}" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-grid">
+      <div class="field"><label for="rule_type">Rule type</label><select id="rule_type" name="rule_type"><option value="block">Block IP / network</option><option value="allow">Allow IP / network</option></select></div>
+      <div class="field"><label for="network">IP address or CIDR</label><input id="network" name="network" required maxlength="64" placeholder="203.0.113.25 or 203.0.113.0/24" autocomplete="off"></div>
+      <div class="field full-field"><label for="note">Note (optional)</label><input id="note" name="note" maxlength="160" placeholder="Reason / who this belongs to"></div>
+    </div>
+    <label class="security-checkbox"><input type="checkbox" name="allowlist_enabled" value="1" {% if allowlist_enabled %}checked{% endif %}> Enable allowlist: only listed IPs/networks may access this application</label>
+    <p class="muted">Add an allow rule for your current IP before enabling the allowlist. Block rules take priority over allow rules. A network can be entered using CIDR notation.</p>
+    <div class="form-footer"><span class="muted">No OS firewall or other service is changed.</span><button class="btn btn-primary" type="submit">Save IP rule</button></div>
+  </form>
+  <div class="table-scroll"><table><thead><tr><th>Type</th><th>IP / network</th><th>Note</th><th>Created by</th><th>Created (UTC)</th><th>Action</th></tr></thead><tbody>
+  {% for rule in rules %}<tr><td><span class="security-result {{ 'failed' if rule.rule_type == 'block' else 'success' }}">{{ 'BLOCK' if rule.rule_type == 'block' else 'ALLOW' }}</span></td><td><code>{{ rule.network }}</code></td><td>{{ rule.note or '—' }}</td><td>{{ rule.created_by or 'system' }}</td><td>{{ rule.created_at }}</td><td><form method="post" action="{{ url_for('delete_ip_access_rule', rule_id=rule.id) }}" onsubmit="return confirm('Remove this IP rule?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-secondary btn-small" type="submit">Remove</button></form></td></tr>
+  {% else %}<tr><td colspan="6" class="empty-state">No IP rules have been added.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="muted">Allowlist status: <strong>{{ 'ENABLED' if allowlist_enabled else 'disabled' }}</strong></p>
+</section>
+
+<section class="panel form-panel security-log-panel">
+  <div class="panel-heading"><div><h2>Authentication & security events</h2><p>Latest 250 events, newest first. Dates are shown in the Iranian/Jalali calendar and Iran local time.</p></div></div>
+  <p class="security-privacy-note"><strong>Password privacy:</strong> Submitted passwords and authenticator codes are never stored in these logs. Logs contain the attempted username, source IP, time, result, user agent and a short reason only. Storing real passwords would put every account at risk if logs were exposed.</p>
+  <div class="table-scroll"><table><thead><tr><th>Date / time (Jalali)</th><th>IP address</th><th>Username</th><th>Event</th><th>Result</th><th>Password data</th><th>Details</th><th>Browser / client</th></tr></thead><tbody>
+  {% for event in events %}<tr><td class="security-date">{{ event.jalali_time }}</td><td><code>{{ event.remote_ip }}</code></td><td>{{ event.attempted_username or '—' }}</td><td>{{ event.event_type }}</td><td><span class="security-result {{ 'success' if event.result == 'success' else ('failed' if event.result in ['failed','blocked','throttled'] else 'info') }}">{{ event.result }}</span></td><td>{{ 'Not stored by design' if event.event_type in ['login','two_factor_login','login_rate_limit'] else '—' }}</td><td>{{ event.detail or '—' }}</td><td class="security-agent">{{ event.user_agent or '—' }}</td></tr>
+  {% else %}<tr><td colspan="8" class="empty-state">No security events have been recorded yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
