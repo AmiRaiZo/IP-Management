@@ -462,4 +462,3 @@ echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration
 echo "Backups: $BACKUP_DIR"
 echo "Application URL: https://$DOMAIN:$HTTPS_PORT"
 echo "Updater: sudo /usr/local/sbin/station-archive-update"
-
