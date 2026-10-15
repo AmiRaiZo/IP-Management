@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import sqlite3
+import socket
 import subprocess
 import time
 from urllib.request import Request, urlopen
@@ -14,13 +15,15 @@ from urllib.error import URLError, HTTPError
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 import pyotp
+from PIL import Image, ImageOps, UnidentifiedImageError
 from cryptography.fernet import Fernet, InvalidToken
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for, send_file
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.datastructures import MultiDict
 from werkzeug.utils import secure_filename
 from flask import send_from_directory
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -44,7 +47,10 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
+if os.environ.get("APP_DOMAIN", "").strip():
+    # Reject arbitrary Host headers when the installer has configured a public domain.
+    app.config["TRUSTED_HOSTS"] = [os.environ["APP_DOMAIN"].strip().lower()]
 two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-management-remember-2fa")
 REMEMBER_2FA_COOKIE = "ip_management_2fa"
 REMEMBER_2FA_SECONDS = 24 * 60 * 60
@@ -96,6 +102,54 @@ def password_matches(password, stored):
         return False
 
 
+def encrypt_authenticator_secret(secret):
+    """Encrypt TOTP seeds at rest while marking ciphertext for safe migrations."""
+    if not secret:
+        return ""
+    if str(secret).startswith("fernet:"):
+        return str(secret)
+    return "fernet:" + vault.encrypt(str(secret).encode("utf-8")).decode("ascii")
+
+
+def decrypt_authenticator_secret(value):
+    """Read encrypted seeds and transparently support legacy plaintext during migration."""
+    value = str(value or "")
+    if not value:
+        return ""
+    if not value.startswith("fernet:"):
+        return value
+    try:
+        return vault.decrypt(value[len("fernet:"):].encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def save_sanitized_image(upload, destination, extension):
+    """Decode and re-encode uploads so extension spoofing and embedded payloads are discarded."""
+    formats = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}
+    image_format = formats.get(extension.lower())
+    if not image_format:
+        raise ValueError("Unsupported image format")
+    try:
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as source:
+            if source.width < 1 or source.height < 1 or source.width * source.height > 16_000_000:
+                raise ValueError("Image dimensions are too large")
+            source.verify()
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as source:
+            image = ImageOps.exif_transpose(source)
+            image.thumbnail((4096, 4096))
+            keep_alpha = image_format == "PNG" or (image_format == "WEBP" and "A" in image.getbands())
+            image = image.convert("RGBA" if keep_alpha else "RGB")
+            options = {"optimize": True}
+            if image_format in ("JPEG", "WEBP"):
+                options["quality"] = 90
+            image.save(destination, format=image_format, **options)
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+        raise ValueError("Uploaded file is not a valid supported image") from exc
+
+
 def init_db():
     with connect_db() as db:
         db.executescript("""
@@ -103,6 +157,10 @@ def init_db():
           id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
           role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', two_factor_enabled INTEGER NOT NULL DEFAULT 0, two_factor_enrolled INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS user_recovery_codes (
+          id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          code_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
@@ -129,6 +187,17 @@ def init_db():
         CREATE TABLE IF NOT EXISTS audit_log (
           id INTEGER PRIMARY KEY, username TEXT NOT NULL, action TEXT NOT NULL,
           detail TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS security_events (
+          id INTEGER PRIMARY KEY, event_type TEXT NOT NULL, remote_ip TEXT NOT NULL,
+          attempted_username TEXT NOT NULL DEFAULT '', result TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(remote_ip, created_at DESC);
+        CREATE TABLE IF NOT EXISTS ip_access_rules (
+          id INTEGER PRIMARY KEY, network TEXT NOT NULL UNIQUE, rule_type TEXT NOT NULL CHECK(rule_type IN ('block','allow')),
+          note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_ips_ip ON ips(ip_address);
         CREATE INDEX IF NOT EXISTS idx_ips_name ON ips(name);
@@ -170,9 +239,301 @@ def init_db():
             first_user = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
             if first_user:
                 db.execute("UPDATE users SET role='superadmin' WHERE id=?", (first_user["id"],))
+        # Migrate legacy plaintext authenticator seeds to Fernet-encrypted values.
+        # The decrypt helper remains backward-compatible if a row is restored from an old DB.
+        for row in db.execute("SELECT id,totp_secret FROM users WHERE totp_secret!=''").fetchall():
+            if not str(row["totp_secret"]).startswith("fernet:"):
+                db.execute("UPDATE users SET totp_secret=? WHERE id=?",
+                           (encrypt_authenticator_secret(row["totp_secret"]), row["id"]))
+        shared_row = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()
+        if shared_row and shared_row["value"] and not str(shared_row["value"]).startswith("fernet:"):
+            db.execute("UPDATE app_settings SET value=? WHERE key='shared_two_factor_secret'",
+                       (encrypt_authenticator_secret(shared_row["value"]),))
 
 
 init_db()
+
+
+def client_ip():
+    # The app is deployed behind Nginx on loopback; ProxyFix trusts one proxy hop.
+    return (request.remote_addr or "unknown")[:64]
+
+
+def security_event(event_type, username="", result="info", detail=""):
+    """Record security metadata only. Never record submitted passwords or TOTP codes."""
+    try:
+        with connect_db() as db:
+            db.execute(
+                "INSERT INTO security_events(event_type,remote_ip,attempted_username,result,detail,user_agent,created_at) VALUES(?,?,?,?,?,?,?)",
+                (event_type[:40], client_ip(), str(username or "")[:80], result[:40], str(detail or "")[:240],
+                 request.headers.get("User-Agent", "")[:240], now()),
+            )
+    except Exception:
+        app.logger.exception("Could not write security event")
+
+
+def failed_password_fingerprint(password):
+    """Stable keyed fingerprint for correlating guesses without retaining the password."""
+    value = str(password or "").encode("utf-8", errors="replace")[:1024]
+    return hmac.new(app.secret_key.encode(), b"failed-login-password\0" + value, hashlib.sha256).hexdigest()[:16]
+
+
+def recovery_code_hash(user_id, code):
+    normalized = re.sub(r"[^A-Za-z0-9]", "", str(code or "")).upper()
+    return hmac.new(app.secret_key.encode(), f"2fa-recovery:{user_id}:{normalized}".encode(), hashlib.sha256).hexdigest()
+
+
+def consume_recovery_code(user_id, submitted):
+    """Consume exactly one offline recovery code; only a keyed hash is stored."""
+    normalized = re.sub(r"[^A-Za-z0-9]", "", str(submitted or "")).upper()
+    if not normalized or len(normalized) > 40:
+        return False
+    candidate = recovery_code_hash(user_id, normalized)
+    with connect_db() as db:
+        row = db.execute("SELECT id,code_hash FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchall()
+        matched = next((item for item in row if hmac.compare_digest(item["code_hash"], candidate)), None)
+        if not matched:
+            return False
+        db.execute("DELETE FROM user_recovery_codes WHERE id=?", (matched["id"],))
+    return True
+
+
+def secure_setting(key):
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    if not row or not row["value"]:
+        return ""
+    try:
+        return vault.decrypt(row["value"].encode()).decode()
+    except (InvalidToken, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def save_secure_setting(key, value):
+    encrypted = vault.encrypt(str(value).encode()).decode() if value else ""
+    with connect_db() as db:
+        db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, encrypted))
+
+
+def send_telegram_security_alert(message):
+    """Best-effort Telegram alert. Never include submitted passwords or TOTP codes."""
+    token = secure_setting("telegram_bot_token_enc")
+    chat_id = secure_setting("telegram_chat_id_enc")
+    if not token or not chat_id:
+        return False
+    try:
+        payload = {"chat_id": chat_id, "text": str(message)[:3900], "disable_web_page_preview": True}
+        req = Request(f"https://api.telegram.org/bot{token}/sendMessage", data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=5) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+        return bool(result.get("ok"))
+    except (URLError, HTTPError, TimeoutError, ValueError, OSError):
+        app.logger.warning("Telegram security notification failed")
+        return False
+
+
+def telegram_api(method, payload):
+    token = secure_setting("telegram_bot_token_enc")
+    if not token:
+        return {}
+    try:
+        req = Request(f"https://api.telegram.org/bot{token}/{method}",
+                      data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=5) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+        return result if result.get("ok") else {}
+    except (URLError, HTTPError, TimeoutError, ValueError, OSError):
+        app.logger.warning("Telegram bot API request failed")
+        return {}
+
+
+def telegram_send(chat_id, text, reply_markup=None):
+    payload = {"chat_id": str(chat_id), "text": str(text)[:3900], "disable_web_page_preview": True}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    return telegram_api("sendMessage", payload)
+
+
+def telegram_set_state(state):
+    save_secure_setting("telegram_conversation_state_enc", json.dumps(state, ensure_ascii=False))
+
+
+def telegram_get_state():
+    raw = secure_setting("telegram_conversation_state_enc")
+    try:
+        value = json.loads(raw) if raw else {}
+        return value if isinstance(value, dict) else {}
+    except ValueError:
+        return {}
+
+
+def telegram_menu(chat_id, message_id=None):
+    markup = {"inline_keyboard": [[
+        {"text": "➕ اد آیپی", "callback_data": "ip_add"},
+        {"text": "🔎 سرچ", "callback_data": "ip_search"},
+    ]]}
+    if message_id:
+        telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
+                         "text": "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", "reply_markup": markup})
+    else:
+        telegram_send(chat_id, "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", markup)
+
+
+def handle_telegram_update(update):
+    configured_chat = secure_setting("telegram_chat_id_enc")
+    if not configured_chat:
+        return
+    callback = update.get("callback_query") or {}
+    message = update.get("message") or callback.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = str(chat.get("id", ""))
+    if chat_id != str(configured_chat):
+        return
+    if callback:
+        telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
+        action = callback.get("data", "")
+        if action == "menu":
+            telegram_set_state({})
+            telegram_menu(chat_id, message.get("message_id"))
+        elif action == "ip_add":
+            telegram_set_state({"mode": "add", "step": "name", "data": {}})
+            telegram_send(chat_id, "مرحله ۱ از ۵ — نام این IP/سرور را وارد کن:")
+        elif action == "ip_search":
+            telegram_set_state({"mode": "search", "step": "query"})
+            telegram_send(chat_id, "نام ثبت‌شده یا آدرس IP را بفرست:")
+        return
+    text = str(message.get("text", "")).strip()
+    if text.lower() in ("ربات", "/start", "/menu"):
+        telegram_set_state({})
+        telegram_menu(chat_id)
+        return
+    state = telegram_get_state()
+    if not state:
+        return
+    if state.get("mode") == "search":
+        term = text[:100]
+        with connect_db() as db:
+            rows = db.execute("SELECT name,ip_address,port,username,notes FROM ips WHERE ip_address LIKE ? OR name LIKE ? ORDER BY name LIMIT 10",
+                              (f"%{term}%", f"%{term}%")).fetchall()
+        telegram_set_state({})
+        if not rows:
+            telegram_send(chat_id, "رکوردی با این نام یا IP پیدا نشد.", {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+            return
+        lines = ["نتیجه جست‌وجو:"]
+        for row in rows:
+            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 نام‌کاربری اتصال: {row['username'] or '-'}\n📝 توضیحات: {(row['notes'] or '-')[:300]}")
+        telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+        return
+    if state.get("mode") == "add":
+        step = state.get("step")
+        data = state.get("data") or {}
+        prompts = {
+            "name": ("name", "نام", "مرحله ۲ از ۵ — آدرس IP یا hostname را وارد کن:"),
+            "ip": ("ip_address", "IP", "مرحله ۳ از ۵ — پورت را وارد کن (مثلاً 22 یا 443):"),
+            "port": ("port", "port", "مرحله ۴ از ۵ — نام کاربری اتصال را وارد کن:"),
+            "username": ("username", "username", "مرحله ۵ از ۵ — توضیحات را وارد کن یا - بفرست:"),
+        }
+        if step == "name":
+            data["name"] = text[:120]
+            state.update(step="ip", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, prompts["name"][2])
+            return
+        if step == "ip":
+            data["ip_address"] = text[:255]
+            state.update(step="port", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, prompts["ip"][2])
+            return
+        if step == "port":
+            data["port"] = text[:10]
+            state.update(step="username", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, prompts["port"][2])
+            return
+        if step == "username":
+            data["username"] = text[:120]
+            state.update(step="notes", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, prompts["username"][2])
+            return
+        if step == "notes":
+            data["notes"] = "" if text == "-" else text[:3000]
+            data["password"] = ""
+            data["group_id"] = ""
+            clean, error = validate_ip(MultiDict(data))
+            if error:
+                telegram_send(chat_id, f"❌ اطلاعات معتبر نیست: {error}\nبرای شروع دوباره «ربات» را بفرست.")
+                telegram_set_state({})
+                return
+            with connect_db() as db:
+                cur = db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                                 (clean["name"], clean["ip"], clean["port"], clean["username"], clean["password"] or "", clean["notes"], clean["group_id"], "telegram-bot", now(), now()))
+            telegram_set_state({})
+            telegram_send(chat_id, f"✅ IP ثبت شد.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port']}\nشناسه رکورد: {cur.lastrowid}",
+                          {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+def telegram_hostname():
+    """Return a short configured host label without exposing local machine details."""
+    return (os.environ.get("APP_HOSTNAME", "").strip() or socket.gethostname() or "IP Archive")[:80]
+
+
+def safe_telegram_username(value):
+    return re.sub(r"[^A-Za-z0-9_.@-]", "?", str(value or "unknown"))[:80] or "(empty)"
+
+
+def send_login_success_alert(username, remote_ip):
+    return send_telegram_security_alert(
+        "✅ با موفقیت به پنل وارد شدید.\n"
+        f"💻 نام‌میزبان: {telegram_hostname()}\n"
+        f"👤 نام‌کاربری: {safe_telegram_username(username)}\n"
+        f"🌐 آدرس‌آی‌پی: {remote_ip}\n"
+        f"⏰ زمان: {jalali_datetime(now())}"
+    )
+
+
+def send_login_failure_alert(username, remote_ip, reason, password=""):
+    """Alert on failure without disclosing raw credentials to Telegram or app logs."""
+    guess_id = failed_password_fingerprint(password) if password else "not-applicable"
+    return send_telegram_security_alert(
+        "❗️ ورود به پنل ناموفق‌بود\n"
+        f"علت: {reason}\n"
+        f"💻 نام‌میزبان: {telegram_hostname()}\n"
+        f"👤 نام‌کاربری: {safe_telegram_username(username)}\n"
+        f"🌐 آدرس‌آی‌پی: {remote_ip}\n"
+        f"⏰ زمان: {jalali_datetime(now())}\n"
+        f"شناسه اثرانگشت رمز حدس‌زده‌شده: {guess_id}\n"
+        "رمز خام برای حفظ امنیت ارسال یا ذخیره نشده است."
+    )
+
+
+def jalali_datetime(value):
+    """Convert an ISO UTC timestamp to a Persian-calendar date/time in Iran time."""
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        # Iran uses UTC+03:30 year-round; a fixed offset avoids OS tzdata dependencies.
+        dt = dt.astimezone(timezone(timedelta(hours=3, minutes=30)))
+        gy, gm, gd = dt.year, dt.month, dt.day
+        g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+        gy2 = gy + 1 if gm > 2 else gy
+        days = 355666 + 365 * gy + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400 + gd + g_d_m[gm - 1]
+        jy = -1595 + 33 * (days // 12053)
+        days %= 12053
+        jy += 4 * (days // 1461)
+        days %= 1461
+        if days > 365:
+            jy += (days - 1) // 365
+            days = (days - 1) % 365
+        if days < 186:
+            jm, jd = 1 + days // 31, 1 + days % 31
+        else:
+            jm, jd = 7 + (days - 186) // 30, 1 + (days - 186) % 30
+        return f"{jy:04d}/{jm:02d}/{jd:02d} {dt:%H:%M:%S}"
+    except (ValueError, TypeError, OverflowError):
+        return str(value or "—")
 
 
 def audit(action, detail=""):
@@ -214,7 +575,7 @@ def two_factor_mode():
 def shared_two_factor_secret():
     with connect_db() as db:
         row = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()
-    return row["value"] if row else ""
+    return decrypt_authenticator_secret(row["value"]) if row else ""
 
 
 def user_requires_two_factor(user):
@@ -252,6 +613,7 @@ def establish_login(user):
     session["username"] = user["username"]
     session["csrf_token"] = secrets.token_urlsafe(32)
     audit("login_success")
+    security_event("login", user["username"], "success", "Password and any required second factor were accepted")
 
 
 def superadmin_required(fn):
@@ -262,6 +624,33 @@ def superadmin_required(fn):
             abort(403)
         return fn(*args, **kwargs)
     return wrapped
+
+
+@app.before_request
+def enforce_application_ip_rules():
+    if request.endpoint == "static":
+        return None
+    ip = client_ip()
+    try:
+        address = ip_address(ip)
+    except ValueError:
+        security_event("ip_policy", session.get("username", ""), "blocked", "Could not determine a valid client IP")
+        return "Access denied by IP security policy.", 403
+    with connect_db() as db:
+        rules = db.execute("SELECT network,rule_type FROM ip_access_rules").fetchall()
+        setting = db.execute("SELECT value FROM app_settings WHERE key='ip_allowlist_enabled'").fetchone()
+    networks = []
+    for rule in rules:
+        try:
+            networks.append((ip_network(rule["network"], strict=False), rule["rule_type"]))
+        except ValueError:
+            continue
+    if any(kind == "block" and address in network for network, kind in networks):
+        security_event("ip_policy", session.get("username", ""), "blocked", "Client IP matches a blocked network")
+        return "Access denied by IP security policy.", 403
+    if setting and setting["value"] == "1" and not any(kind == "allow" and address in network for network, kind in networks):
+        security_event("ip_policy", session.get("username", ""), "blocked", "Client IP is not on the application allowlist")
+        return "Access denied by IP security policy.", 403
 
 
 @app.before_request
@@ -276,6 +665,8 @@ def enforce_global_two_factor():
 
 @app.before_request
 def csrf_guard():
+    if request.endpoint == "telegram_webhook":
+        return
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         token = session.get("csrf_token", "")
         supplied = request.form.get("csrf_token", "")
@@ -317,12 +708,34 @@ def security_headers(response):
     return response
 
 
+def auth_throttle_response(attempted_username=""):
+    """Apply one shared IP-based throttle to password, TOTP, and enrollment checks."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(timespec="seconds")
+    with connect_db() as db:
+        failures = db.execute(
+            "SELECT COUNT(*) AS n FROM security_events WHERE remote_ip=? AND result='failed' "
+            "AND event_type IN ('login','two_factor_login','two_factor_enrollment') AND created_at>=?",
+            (client_ip(), cutoff),
+        ).fetchone()["n"]
+    if failures < 8:
+        return None
+    security_event("login_rate_limit", str(attempted_username or "")[:80], "throttled",
+                   "Eight failed authentication checks from this IP in the last 15 minutes")
+    response = app.make_response(("Too many failed authentication attempts. Wait 15 minutes and try again.", 429))
+    response.headers["Retry-After"] = "900"
+    return response
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET" and request.args.get("server_reconfigured") == "1":
         flash("The server address was changed successfully. Please sign in again at this new address.", "success")
     if session.get("user_id"):
         return redirect(url_for("index"))
+    if request.method == "POST":
+        limited = auth_throttle_response(request.form.get("username", ""))
+        if limited:
+            return limited
     if request.method == "GET" and request.args.get("reset") == "1":
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
@@ -339,13 +752,29 @@ def login():
             mode = two_factor_mode()
             if user and mode == "shared" and not user["two_factor_enrolled"]:
                 return redirect(url_for("setup_2fa"))
-            secret = shared_two_factor_secret() if mode == "shared" else (user["totp_secret"] if user else "")
-            if user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
+            secret = shared_two_factor_secret() if mode == "shared" else (decrypt_authenticator_secret(user["totp_secret"]) if user else "")
+            totp_ok = bool(user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1))
+            recovery_ok = bool(user and user_requires_two_factor(user) and not totp_ok and consume_recovery_code(user["id"], code))
+            if user and user_requires_two_factor(user) and (totp_ok or recovery_ok):
                 establish_login(user)
                 session["two_factor_verified"] = True
+                if recovery_ok:
+                    security_event("two_factor_recovery", user["username"], "success", "One-time offline recovery code consumed")
+                    audit("two_factor_recovery_code_used")
+                send_login_success_alert(user["username"], client_ip())
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 return redirect(safe_login_target())
             time.sleep(0.35)
+            security_event("two_factor_login", user["username"] if user else "", "failed", "Invalid or unavailable authenticator code")
+            send_telegram_security_alert(
+                "❗️ ورود به پنل ناموفق‌بود\n"
+                "علت: کد 2FA اشتباه است\n"
+                f"💻 نام‌میزبان: {telegram_hostname()}\n"
+                f"👤 نام‌کاربری: {safe_telegram_username(user['username'] if user else '')}\n"
+                f"🌐 آدرس‌آی‌پی: {client_ip()}\n"
+                f"⏰ زمان: {jalali_datetime(now())}\n"
+                "کد 2FA خام ذخیره یا ارسال نشده است."
+            )
             flash("The verification code is invalid. Try again.", "error")
             return render_template("login.html", stage="verify", login_user=dict(user) if user else None)
 
@@ -353,33 +782,41 @@ def login():
         password = request.form.get("password", "")
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
-        if user and password_matches(password, user["password_hash"]):
+        if user and len(password) <= 1024 and password_matches(password, user["password_hash"]):
             if user_requires_two_factor(user):
                 mode = two_factor_mode()
                 if mode == "shared" and not user["two_factor_enrolled"]:
+                    security_event("login", username, "password_ok_2fa_pending", "Password accepted; authenticator enrollment is required")
                     session.clear()
                     session["pending_2fa_user_id"] = user["id"]
                     session["pending_2fa_secret"] = shared_two_factor_secret()
                     session["csrf_token"] = secrets.token_urlsafe(32)
                     return redirect(url_for("setup_2fa"))
-                if mode == "per_user" and not user["totp_secret"]:
+                if mode == "per_user" and not decrypt_authenticator_secret(user["totp_secret"]):
+                    security_event("login", username, "password_ok_2fa_pending", "Password accepted; authenticator enrollment is required")
                     session.clear()
                     session["pending_2fa_user_id"] = user["id"]
                     session["pending_2fa_secret"] = pyotp.random_base32()
                     session["csrf_token"] = secrets.token_urlsafe(32)
                     return redirect(url_for("setup_2fa"))
-                secret = shared_two_factor_secret() if mode == "shared" else user["totp_secret"]
+                secret = shared_two_factor_secret() if mode == "shared" else decrypt_authenticator_secret(user["totp_secret"])
                 if not secret:
+                    security_event("login", username, "blocked", "Second factor is required but not configured")
                     flash("Two-factor authentication is not configured. Contact the super administrator.", "error")
                     return redirect(url_for("login"))
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_urlsafe(32)
+                security_event("login", username, "password_ok_2fa_pending", "Password accepted; waiting for second factor")
                 return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
             establish_login(user)
+            send_login_success_alert(user["username"], client_ip())
             flash(f"Welcome back, {user['username']}!", "welcome")
             return redirect(safe_login_target())
         time.sleep(0.35)
+        guess_id = failed_password_fingerprint(password)
+        security_event("login", username, "failed", f"Invalid username/password or disabled account; password not stored; guess fingerprint={guess_id}")
+        send_login_failure_alert(username, client_ip(), "رمز و نام کاربری اشتباه است", password)
         flash("Invalid username or password.", "error")
     pending_user = None
     if session.get("pending_2fa_user_id"):
@@ -393,6 +830,20 @@ def login():
 def safe_login_target():
     target = request.args.get("next", "")
     return target if target.startswith("/") and not target.startswith("//") else url_for("index")
+
+
+def normalize_github_repo(value):
+    value = str(value or "").strip().rstrip("/")
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", value, re.IGNORECASE)
+    if not match:
+        return ""
+    return f"https://github.com/{match.group(1).lower()}/{match.group(2).removesuffix('.git').lower()}"
+
+
+def trusted_update_repository():
+    configured = os.environ.get("GITHUB_REPO") or os.environ.get("APP_REPO_URL") or "https://github.com/AmiRaiZo/IP-Management"
+    normalized = normalize_github_repo(configured)
+    return normalized or "https://github.com/amiraizo/ip-management"
 
 
 @app.route("/setup-2fa", methods=["GET", "POST"])
@@ -414,13 +865,16 @@ def setup_2fa():
         return redirect(url_for("login"))
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
     if request.method == "POST":
+        limited = auth_throttle_response(user["username"])
+        if limited:
+            return limited
         code = re.sub(r"\s", "", request.form.get("code", ""))
         if pyotp.TOTP(secret).verify(code, valid_window=1):
             with connect_db() as db:
                 if mode == "shared":
                     db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
                 else:
-                    db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (secret, user_id))
+                    db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (encrypt_authenticator_secret(secret), user_id))
             session.clear()
             # Authentication must remain a browser-session cookie. Only the
             # separate signed 2FA-remember cookie is persistent (24 hours).
@@ -432,8 +886,11 @@ def setup_2fa():
             session["csrf_token"] = secrets.token_urlsafe(32)
             session["two_factor_verified"] = True
             audit("two_factor_enabled")
+            security_event("two_factor_enrollment", user["username"], "success", "Authenticator enrollment completed")
             flash(f"Welcome back, {user['username']}! Two-factor authentication is enabled.", "welcome")
             return redirect(url_for("index"))
+        time.sleep(0.35)
+        security_event("two_factor_enrollment", user["username"], "failed", "Invalid authenticator enrollment code")
         flash("The authenticator code is invalid. Try again.", "error")
     import qrcode
     qr = qrcode.make(uri)
@@ -482,7 +939,6 @@ def index():
         lower = term.casefold()
         rows = [r for r in rows if lower in (r["ip_address"] or "").casefold() or lower in (r["name"] or "").casefold() or lower in (r["username"] or "").casefold() or lower in (r["notes"] or "").casefold()]
     with connect_db() as db:
-        show_ip_passwords = request.user["role"] == "superadmin" or bool(request.user.get("can_view_passwords", 0))
         if request.user["role"] == "superadmin":
             groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
         else:
@@ -495,6 +951,7 @@ def index():
                 AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
               ORDER BY groups.sort_order, groups.id
             """, (request.user["id"], request.user["id"], request.user["id"])).fetchall()
+    show_ip_passwords = request.user["role"] == "superadmin" or bool(request.user.get("can_view_passwords", 0))
     if show_ip_passwords:
         prepared_rows = []
         for row in rows:
@@ -692,14 +1149,14 @@ def users():
         role = request.form.get("role", "admin")
         if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,80}", username):
             flash("Username must be 3–80 characters using letters, numbers, dot, underscore, @ or hyphen.", "error")
-        elif not password:
-            flash("Password cannot be empty.", "error")
+        elif not 12 <= len(password) <= 1024:
+            flash("Password must be between 12 and 1024 characters.", "error")
         elif role not in ("admin", "superadmin"):
             flash("Invalid role.", "error")
         else:
             try:
                 with connect_db() as db:
-                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,0,1)", (username, password_hash(password), now(), role, ""))
+                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)", (username, password_hash(password), now(), role, ""))
                 audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
                 flash("User created. Configure this account’s two-factor policy in user settings if per-user authentication is selected.", "success")
                 return redirect(url_for("users"))
@@ -731,6 +1188,8 @@ def user_edit(user_id):
         password = request.form.get("password", "")
         if user_id == request.user["id"] and (role != "superadmin" or not enabled):
             flash("You cannot remove your own superadmin role or disable your own account.", "error")
+        elif password and not 12 <= len(password) <= 1024:
+            flash("Password must be between 12 and 1024 characters.", "error")
         elif role not in ("admin", "superadmin"):
             flash("Invalid role.", "error")
         else:
@@ -762,8 +1221,9 @@ def update_security_settings():
     if request.form.get("action") == "generate_shared_secret":
         secret = pyotp.random_base32()
         with connect_db() as db:
-            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (secret,))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (encrypt_authenticator_secret(secret),))
             db.execute("UPDATE users SET two_factor_enrolled=0")
+        session["show_shared_2fa_secret_once"] = True
         audit("shared_two_factor_secret_generated")
         flash("Shared Authenticator secret generated. Enroll the site Authenticator before enabling shared mode.", "success")
         return redirect(url_for("settings") + "#security")
@@ -780,6 +1240,74 @@ def update_security_settings():
     audit("two_factor_policy_updated", f"mode={mode}")
     flash("Two-factor policy saved. Users must sign in again for the new policy to apply.", "success")
     return redirect(url_for("settings") + "#security")
+
+
+@app.get("/security")
+@superadmin_required
+def security_center():
+    with connect_db() as db:
+        events = db.execute("SELECT * FROM security_events ORDER BY id DESC LIMIT 250").fetchall()
+        rules = db.execute("SELECT * FROM ip_access_rules ORDER BY rule_type,network").fetchall()
+        setting = db.execute("SELECT value FROM app_settings WHERE key='ip_allowlist_enabled'").fetchone()
+    return render_template("security.html", events=[{**dict(row), "jalali_time": jalali_datetime(row["created_at"])} for row in events],
+                           rules=[dict(row) for row in rules], allowlist_enabled=bool(setting and setting["value"] == "1"),
+                           current_ip=client_ip())
+
+
+@app.post("/security/rules")
+@superadmin_required
+def add_ip_access_rule():
+    rule_type = request.form.get("rule_type", "block")
+    raw_network = request.form.get("network", "").strip()
+    note = request.form.get("note", "").strip()[:160]
+    enabled = request.form.get("allowlist_enabled") == "1"
+    if rule_type not in ("block", "allow"):
+        flash("Choose a valid IP rule type.", "error")
+        return redirect(url_for("security_center"))
+    try:
+        network = ip_network(raw_network, strict=False)
+    except ValueError:
+        flash("Enter a valid IPv4/IPv6 address or CIDR network.", "error")
+        return redirect(url_for("security_center"))
+    try:
+        current = ip_address(client_ip())
+        if rule_type == "block" and current in network:
+            flash("You cannot block the IP address you are currently using.", "error")
+            return redirect(url_for("security_center"))
+        with connect_db() as db:
+            if enabled:
+                existing_allow = db.execute("SELECT network FROM ip_access_rules WHERE rule_type='allow'").fetchall()
+                allowed_current = (rule_type == "allow" and current in network) or any(
+                    current in ip_network(row["network"], strict=False) for row in existing_allow
+                )
+                if not allowed_current:
+                    flash("To avoid locking yourself out, first add an allow rule that includes your current IP, then enable the allowlist.", "error")
+                    return redirect(url_for("security_center"))
+            db.execute("INSERT INTO ip_access_rules(network,rule_type,note,created_by,created_at) VALUES(?,?,?,?,?) "
+                       "ON CONFLICT(network) DO UPDATE SET rule_type=excluded.rule_type,note=excluded.note,created_by=excluded.created_by,created_at=excluded.created_at",
+                       (str(network), rule_type, note, session.get("username", ""), now()))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('ip_allowlist_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("1" if enabled else "0",))
+    except (ValueError, TypeError):
+        flash("The current client IP could not be validated. No changes were made.", "error")
+        return redirect(url_for("security_center"))
+    security_event("ip_rule_added", session.get("username", ""), "success", f"{rule_type} rule: {network}; allowlist={'enabled' if enabled else 'disabled'}")
+    audit("ip_access_rule_updated", f"type={rule_type}; network={network}; allowlist={enabled}")
+    flash("IP access rule saved for this application only.", "success")
+    return redirect(url_for("security_center"))
+
+
+@app.post("/security/rules/<int:rule_id>/delete")
+@superadmin_required
+def delete_ip_access_rule(rule_id):
+    with connect_db() as db:
+        row = db.execute("SELECT network,rule_type FROM ip_access_rules WHERE id=?", (rule_id,)).fetchone()
+        if not row:
+            abort(404)
+        db.execute("DELETE FROM ip_access_rules WHERE id=?", (rule_id,))
+    security_event("ip_rule_removed", session.get("username", ""), "success", f"Removed {row['rule_type']} rule {row['network']}")
+    audit("ip_access_rule_removed", f"type={row['rule_type']}; network={row['network']}")
+    flash("IP rule removed.", "success")
+    return redirect(url_for("security_center"))
 
 
 @app.post("/settings/directory")
@@ -819,7 +1347,11 @@ def settings():
                 flash("Logo must be PNG, JPG, JPEG, or WEBP.", "error")
                 return redirect(url_for("settings") + "#branding")
             logo_name = "brand" + ext
-            logo.save(UPLOAD_DIR / logo_name)
+            try:
+                save_sanitized_image(logo, UPLOAD_DIR / logo_name, ext)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("settings") + "#branding")
         with connect_db() as db:
             for key, value in values.items():
                 db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
@@ -835,7 +1367,10 @@ def settings():
         values.setdefault(key, value)
     values["brand_name"] = "IP Management"
     values.setdefault("brand_logo", "")
-    shared_secret = shared_two_factor_secret()
+    # Reveal the shared enrollment seed/QR only once immediately after rotation.
+    # Reopening Settings must not keep redisclosing this high-value secret to the browser.
+    reveal_shared_secret = bool(session.pop("show_shared_2fa_secret_once", False))
+    shared_secret = shared_two_factor_secret() if reveal_shared_secret else ""
     shared_uri = pyotp.TOTP(shared_secret).provisioning_uri(name="All users", issuer_name="IP Management") if shared_secret else ""
     shared_qr = ""
     if shared_uri:
@@ -848,13 +1383,150 @@ def settings():
             "SELECT key,value FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")}
     deployment.setdefault("public_domain", os.environ.get("APP_DOMAIN", ""))
     deployment.setdefault("public_port", os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
-    deployment.setdefault("update_repository", os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")))
+    deployment["update_repository"] = trusted_update_repository()
     return render_template("settings.html", app_values=values, deployment=deployment,
                            two_factor_mode=two_factor_mode(), shared_two_factor_secret=shared_secret,
                            shared_two_factor_uri=shared_uri, shared_two_factor_qr=shared_qr,
+                           telegram_configured=bool(secure_setting("telegram_bot_token_enc") and secure_setting("telegram_chat_id_enc")),
                            show_ip_passwords=show_ip_passwords,
                            github_repo=deployment["update_repository"],
                            public_port=deployment["public_port"])
+
+
+@app.post("/settings/telegram")
+@superadmin_required
+def update_telegram_settings():
+    action = request.form.get("action", "save")
+    token = request.form.get("telegram_bot_token", "").strip()
+    chat_id = request.form.get("telegram_chat_id", "").strip()
+    if token or chat_id:
+        if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{20,100}", token) or not re.fullmatch(r"-?\d{1,20}", chat_id):
+            flash("Enter a valid Telegram bot token and numeric chat ID. Leave both blank to keep the saved values.", "error")
+            return redirect(url_for("settings") + "#notifications")
+        save_secure_setting("telegram_bot_token_enc", token)
+        save_secure_setting("telegram_chat_id_enc", chat_id)
+        webhook_secret = secure_setting("telegram_webhook_secret_enc") or secrets.token_urlsafe(32)
+        save_secure_setting("telegram_webhook_secret_enc", webhook_secret)
+        audit("telegram_security_alerts_configured")
+        public_base = (os.environ.get("APP_PUBLIC_URL", "").strip().rstrip("/")
+                       or request.url_root.rstrip("/"))
+        if public_base.startswith("https://"):
+            telegram_api("setWebhook", {"url": public_base + url_for("telegram_webhook"),
+                                         "secret_token": webhook_secret,
+                                         "allowed_updates": ["message", "callback_query"]})
+    if action == "test":
+        if send_telegram_security_alert("IP Management security notification test.\nThis confirms Telegram delivery; no passwords or authenticator codes are included."):
+            flash("Telegram test notification sent.", "success")
+        else:
+            flash("Telegram test failed. Check the bot token, chat ID, bot access to the chat, and server internet access.", "error")
+    else:
+        flash("Telegram security notification settings saved. Raw attempted passwords are never sent.", "success")
+    return redirect(url_for("settings") + "#notifications")
+
+
+@app.post("/telegram/webhook")
+def telegram_webhook():
+    expected = secure_setting("telegram_webhook_secret_enc")
+    supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not expected or not hmac.compare_digest(expected, supplied):
+        abort(403)
+    update = request.get_json(silent=True)
+    if not isinstance(update, dict):
+        abort(400)
+    handle_telegram_update(update)
+    return {"ok": True}
+
+
+@app.post("/settings/export.txt")
+@superadmin_required
+def export_text_backup():
+    password = request.form.get("current_password", "")
+    user = current_user_row()
+    if not user or len(password) > 1024 or not password_matches(password, user["password_hash"]):
+        security_event("backup_export", session.get("username", ""), "failed", "Re-authentication failed")
+        abort(403)
+    with connect_db() as db:
+        users = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,two_factor_enrolled,can_view_passwords FROM users ORDER BY id").fetchall()
+        groups = db.execute("SELECT id,name,description,created_at,sort_order FROM groups ORDER BY sort_order,id").fetchall()
+        ips = db.execute("SELECT id,name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at FROM ips ORDER BY id").fetchall()
+        settings = db.execute("SELECT key,value FROM app_settings ORDER BY key").fetchall()
+        group_access = db.execute("SELECT user_id,group_id FROM user_group_access ORDER BY user_id,group_id").fetchall()
+        ip_access = db.execute("SELECT user_id,ip_id,can_view FROM user_ip_access ORDER BY user_id,ip_id").fetchall()
+        ip_rules = db.execute("SELECT network,rule_type,note,created_by,created_at FROM ip_access_rules ORDER BY id").fetchall()
+        audit_rows = db.execute("SELECT username,action,detail,created_at FROM audit_log ORDER BY id DESC LIMIT 5000").fetchall()
+        event_rows = db.execute("SELECT event_type,remote_ip,attempted_username,result,detail,user_agent,created_at FROM security_events ORDER BY id DESC LIMIT 5000").fetchall()
+    safe_settings = {}
+    secret_setting_keys = {"shared_two_factor_secret", "telegram_bot_token_enc", "telegram_chat_id_enc"}
+    for row in settings:
+        key, value = row["key"], row["value"]
+        safe_settings[key] = "[REDACTED: secret]" if key in secret_setting_keys else value
+    lines = [
+        "IP MANAGEMENT - READABLE TEXT DATA BACKUP",
+        f"Generated (UTC): {now()}",
+        f"Generated by: {user['username']}",
+        "=" * 78,
+        "SECURITY NOTICE: This file contains confidential network inventory and connection passwords.",
+        "Store it encrypted and share it only with authorized administrators.",
+        "Account password hashes, TOTP seeds, Telegram bot token and Telegram chat ID are excluded/redacted.",
+        "This is a readable data export, not a full source-code/system-image backup.",
+        "=" * 78,
+    ]
+    def add_section(title, records):
+        lines.extend(["", "# " + title, "-" * 78])
+        if not records:
+            lines.append("(no records)")
+        for record in records:
+            lines.append(json.dumps(dict(record), ensure_ascii=False, indent=2, default=str))
+    add_section("USERS (password hashes and authenticator seeds excluded)", users)
+    add_section("GROUPS", groups)
+    ip_records = []
+    for row in ips:
+        record = dict(row)
+        encrypted = record.pop("password_enc", "")
+        try:
+            record["connection_password"] = vault.decrypt(encrypted.encode()).decode() if encrypted else ""
+        except (InvalidToken, ValueError, UnicodeDecodeError):
+            record["connection_password"] = "[UNREADABLE: encryption key mismatch]"
+        ip_records.append(record)
+    add_section("IP RECORDS (connection passwords included for backup)", ip_records)
+    add_section("APPLICATION SETTINGS (secrets redacted)", [{"key": k, "value": v} for k, v in safe_settings.items()])
+    add_section("USER GROUP ACCESS", group_access)
+    add_section("USER IP ACCESS", ip_access)
+    add_section("APPLICATION IP RULES", ip_rules)
+    add_section("LATEST AUDIT LOG (up to 5000)", audit_rows)
+    add_section("LATEST SECURITY EVENTS (up to 5000; no raw passwords are logged)", event_rows)
+    lines.extend(["", "# APPLICATION SOURCE FILES (UTF-8 text files only)", "-" * 78,
+                  "Runtime secrets, environment files, virtual environments, SQLite files and binary media are deliberately excluded."])
+    source_paths = []
+    for name in ("app.py", "setup_admin.py", "requirements.txt", "README.md", "install.sh",
+                 "upgrade_existing.sh", "reconfigure_server.sh", "VERSION", ".gitignore"):
+        candidate = BASE_DIR / name
+        if candidate.is_file():
+            source_paths.append(candidate)
+    for folder in (BASE_DIR / "templates", BASE_DIR / "static"):
+        if folder.is_dir():
+            source_paths.extend(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in
+                                {".py", ".html", ".js", ".css", ".md", ".txt", ".svg", ".json", ".xml"})
+    for source_path in sorted(set(source_paths)):
+        try:
+            if source_path.stat().st_size > 1_000_000:
+                continue
+            source_text = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines.extend(["", f"--- FILE: {source_path.relative_to(BASE_DIR).as_posix()} ---", source_text,
+                      f"--- END FILE: {source_path.relative_to(BASE_DIR).as_posix()} ---"])
+    lines.extend(["", "# EXCLUDED ITEMS", "Binary logos/avatars and runtime environment/secrets are not embedded in this TXT file.",
+                  "For disaster recovery, separately preserve the server environment secrets and binary uploads in an encrypted backup."])
+    content = "\n".join(lines) + "\n"
+    audit("text_backup_exported", f"users={len(users)}; groups={len(groups)}; ips={len(ips)}")
+    from io import BytesIO as _BytesIO
+    output = _BytesIO(content.encode("utf-8-sig"))
+    response = send_file(output, mimetype="text/plain; charset=utf-8", as_attachment=True,
+                         download_name=f"ip-management-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt", max_age=0)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.post("/settings/deployment")
@@ -868,9 +1540,13 @@ def update_deployment_settings():
         if not user or not password_matches(password, user["password_hash"]):
             flash("Password confirmation failed. The update repository was not changed.", "error")
             return redirect(url_for("settings") + "#updates")
-        if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?", repo_url):
+        if not normalize_github_repo(repo_url):
             flash("Enter a valid HTTPS GitHub repository URL.", "error")
             return redirect(url_for("settings") + "#updates")
+        if normalize_github_repo(repo_url) != trusted_update_repository():
+            flash("For security, the updater can only use the repository configured by the server installer. Change it in the server environment and redeploy if you need to switch trusted repositories.", "error")
+            return redirect(url_for("settings") + "#updates")
+        repo_url = trusted_update_repository()
         with connect_db() as db:
             db.execute("INSERT INTO app_settings(key,value) VALUES('update_repository',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (repo_url,))
         audit("update_repository_changed", repo_url)
@@ -946,8 +1622,8 @@ def profile():
             if not password_matches(current_password, user["password_hash"]):
                 flash("Current password is incorrect.", "error")
                 return redirect(url_for("profile"))
-            if len(new_password) < 10:
-                flash("New password must be at least 10 characters.", "error")
+            if not 12 <= len(new_password) <= 1024:
+                flash("New password must be between 12 and 1024 characters.", "error")
                 return redirect(url_for("profile"))
             if new_password != confirm_password:
                 flash("New passwords do not match.", "error")
@@ -960,7 +1636,11 @@ def profile():
                 flash("Profile image must be PNG, JPG, JPEG, or WEBP.", "error")
                 return redirect(url_for("profile"))
             filename = f"user-{user['id']}{ext}"
-            avatar.save(AVATAR_DIR / filename)
+            try:
+                save_sanitized_image(avatar, AVATAR_DIR / filename, ext)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("profile"))
             avatar_name = "avatars/" + filename
         with connect_db() as db:
             if new_password:
@@ -969,7 +1649,34 @@ def profile():
         audit("profile_updated")
         flash("Profile updated successfully.", "success")
         return redirect(url_for("profile"))
-    return render_template("profile.html", user=user)
+    return render_template("profile.html", user=user, two_factor_mode=two_factor_mode())
+
+
+@app.post("/profile/recovery-codes")
+@login_required
+def generate_recovery_codes():
+    user = request.user
+    current_password = request.form.get("current_password", "")
+    current_code = re.sub(r"\s", "", request.form.get("current_code", ""))
+    if not password_matches(current_password, user["password_hash"]):
+        flash("Current password is incorrect; recovery codes were not changed.", "error")
+        return redirect(url_for("profile"))
+    if user_requires_two_factor(user):
+        mode = two_factor_mode()
+        secret = shared_two_factor_secret() if mode == "shared" else decrypt_authenticator_secret(user["totp_secret"])
+        if not secret or not pyotp.TOTP(secret).verify(current_code, valid_window=1):
+            flash("Verify with your current authenticator before generating recovery codes.", "error")
+            return redirect(url_for("profile"))
+    codes = [secrets.token_hex(10).upper() for _ in range(10)]
+    with connect_db() as db:
+        db.execute("DELETE FROM user_recovery_codes WHERE user_id=?", (user["id"],))
+        db.executemany("INSERT INTO user_recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)",
+                       [(user["id"], recovery_code_hash(user["id"], code), now()) for code in codes])
+    audit("two_factor_recovery_codes_generated", "count=10")
+    response = app.make_response(render_template("recovery_codes.html", codes=codes, username=user["username"]))
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.get("/media/<path:filename>")
@@ -1022,7 +1729,10 @@ def installed_version(release=None):
 def latest_release():
     with connect_db() as db:
         row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
-    repo_url = (row["value"] if row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))).rstrip("/")
+    repo_url = (row["value"] if row else trusted_update_repository()).rstrip("/")
+    if normalize_github_repo(repo_url) != trusted_update_repository():
+        raise ValueError("Configured update repository differs from the trusted repository set by the server installer. Restore the trusted repository in Settings before updating.")
+    repo_url = trusted_update_repository()
     match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", repo_url)
     if not match:
         raise ValueError("Configured GitHub repository URL is invalid.")
@@ -1125,7 +1835,7 @@ def update_app():
         UPDATE_TARGET_VERSION_FILE.write_text(release["version"] + "\n", encoding="utf-8")
         with connect_db() as db:
             repo_row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
-        configured_repo = repo_row["value"] if repo_row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))
+        configured_repo = trusted_update_repository()
         UPDATE_REPOSITORY_FILE.write_text(configured_repo.rstrip("/") + "\n", encoding="utf-8")
         UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
         with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
@@ -1161,14 +1871,17 @@ def update_finish():
 
 @app.errorhandler(400)
 def bad_request(error):
+    security_event("http_400", session.get("username", ""), "blocked", f"Bad request or CSRF check failed: {request.method} {request.path}")
     return render_template("error.html", code=400, message=getattr(error, "description", "Invalid request.")), 400
 
 
 @app.errorhandler(403)
 def forbidden(error):
+    security_event("http_403", session.get("username", ""), "blocked", f"Authorization denied: {request.method} {request.path}")
     return render_template("error.html", code=403, message="You do not have permission to access this page."), 403
 
 
 @app.errorhandler(404)
 def not_found(error):
+    security_event("http_404", session.get("username", ""), "blocked", f"Unknown path probe: {request.method} {request.path}")
     return render_template("error.html", code=404, message="The requested page or record was not found."), 404
