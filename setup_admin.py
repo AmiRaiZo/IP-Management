@@ -19,4 +19,3 @@ with sqlite3.connect(DB_PATH) as db:
     db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,'superadmin','',1,1)",
                (username, password_hash(password), datetime.now(timezone.utc).isoformat(timespec="seconds")))
 print("Superadmin account created. Two-factor authentication is required; configure an authenticator app at first login.")
-
