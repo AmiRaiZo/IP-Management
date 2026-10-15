@@ -25,10 +25,18 @@
     <form class="stack-form profile-password-form" method="post" action="{{ url_for('profile') }}" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
-      <label for="new_password">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
-      <label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
-      <p class="helper-note">Your new password must contain at least 8 characters.</p>
+      <label for="new_password">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+      <label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+      <p class="helper-note">Your new password must contain at least 12 characters.</p>
       <button class="btn btn-primary" type="submit">Save new password</button>
+    </form>
+    <div class="panel-heading" style="margin-top:2rem"><div><h2>Two-factor recovery codes</h2><p>Generate one-time codes to use if your authenticator app is unavailable. Each code works once; save them offline.</p></div></div>
+    <form class="stack-form" method="post" action="{{ url_for('generate_recovery_codes') }}" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="recovery_current_password">Current password</label><input id="recovery_current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
+      {% if user.two_factor_enabled or two_factor_mode == 'shared' %}<label for="recovery_current_code">Current authenticator code</label><input id="recovery_current_code" name="current_code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required>{% endif %}
+      <p class="helper-note">Generating a new set immediately invalidates every previously generated recovery code. Codes are shown only once and are never sent to Telegram.</p>
+      <button class="btn btn-secondary" type="submit">Generate 10 recovery codes</button>
     </form>
   </section>
 </div>
