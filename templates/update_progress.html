@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
-{% block title %}Updating application | IP Management{% endblock %}
+{% block title %}Updating application | IP Archive{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">LIVE DEPLOYMENT</p><h1>Updating application</h1><p class="muted">Live server update. Please wait until the update completes; leaving this screen is discouraged.</p></div></div>
-<section class="panel deploy-panel" id="deployment-lock">
+<div class="page-heading"><div><p class="eyebrow">LIVE DEPLOYMENT</p><h1>Updating application</h1><p class="muted">Live output from the server. Keep this page open until the process finishes.</p></div></div>
+<section class="panel deploy-panel">
   <div class="deploy-top"><div><span class="stat-caption">CURRENT STEP</span><h2 id="deploy-phase">Connecting to update process…</h2></div><strong id="deploy-percent">0%</strong></div>
   <div class="deploy-progress" role="progressbar" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="deploy-progress"><span id="deploy-progress-fill"></span></div>
   <div class="terminal-window"><div class="terminal-title"><span></span><span></span><span></span><strong>SERVER OUTPUT · LIVE</strong><span class="terminal-live" id="terminal-live">LIVE</span></div><pre id="deploy-log" aria-live="polite">Waiting for server output…</pre></div>
