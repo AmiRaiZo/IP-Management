@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 25243)
+Total output lines: 1888
+
 import hashlib
 import hmac
 import base64
@@ -7,6 +10,7 @@ import os
 import re
 import secrets
 import sqlite3
+import socket
 import subprocess
 import time
 from urllib.request import Request, urlopen
@@ -14,13 +18,15 @@ from urllib.error import URLError, HTTPError
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 import pyotp
+from PIL import Image, ImageOps, UnidentifiedImageError
 from cryptography.fernet import Fernet, InvalidToken
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for, send_file
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.datastructures import MultiDict
 from werkzeug.utils import secure_filename
 from flask import send_from_directory
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -44,7 +50,10 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
+if os.environ.get("APP_DOMAIN", "").strip():
+    # Reject arbitrary Host headers when the installer has configured a public domain.
+    app.config["TRUSTED_HOSTS"] = [os.environ["APP_DOMAIN"].strip().lower()]
 two_factor_serializer = URLSafeTimedSerializer(app.secret_key, salt="ip-management-remember-2fa")
 REMEMBER_2FA_COOKIE = "ip_management_2fa"
 REMEMBER_2FA_SECONDS = 24 * 60 * 60
@@ -96,6 +105,54 @@ def password_matches(password, stored):
         return False
 
 
+def encrypt_authenticator_secret(secret):
+    """Encrypt TOTP seeds at rest while marking ciphertext for safe migrations."""
+    if not secret:
+        return ""
+    if str(secret).startswith("fernet:"):
+        return str(secret)
+    return "fernet:" + vault.encrypt(str(secret).encode("utf-8")).decode("ascii")
+
+
+def decrypt_authenticator_secret(value):
+    """Read encrypted seeds and transparently support legacy plaintext during migration."""
+    value = str(value or "")
+    if not value:
+        return ""
+    if not value.startswith("fernet:"):
+        return value
+    try:
+        return vault.decrypt(value[len("fernet:"):].encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def save_sanitized_image(upload, destination, extension):
+    """Decode and re-encode uploads so extension spoofing and embedded payloads are discarded."""
+    formats = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}
+    image_format = formats.get(extension.lower())
+    if not image_format:
+        raise ValueError("Unsupported image format")
+    try:
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as source:
+            if source.width < 1 or source.height < 1 or source.width * source.height > 16_000_000:
+                raise ValueError("Image dimensions are too large")
+            source.verify()
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as source:
+            image = ImageOps.exif_transpose(source)
+            image.thumbnail((4096, 4096))
+            keep_alpha = image_format == "PNG" or (image_format == "WEBP" and "A" in image.getbands())
+            image = image.convert("RGBA" if keep_alpha else "RGB")
+            options = {"optimize": True}
+            if image_format in ("JPEG", "WEBP"):
+                options["quality"] = 90
+            image.save(destination, format=image_format, **options)
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+        raise ValueError("Uploaded file is not a valid supported image") from exc
+
+
 def init_db():
     with connect_db() as db:
         db.executescript("""
@@ -103,6 +160,10 @@ def init_db():
           id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
           role TEXT NOT NULL DEFAULT 'admin', totp_secret TEXT NOT NULL DEFAULT '', two_factor_enabled INTEGER NOT NULL DEFAULT 0, two_factor_enrolled INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, profile_image TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS user_recovery_codes (
+          id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          code_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
@@ -129,6 +190,17 @@ def init_db():
         CREATE TABLE IF NOT EXISTS audit_log (
           id INTEGER PRIMARY KEY, username TEXT NOT NULL, action TEXT NOT NULL,
           detail TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS security_events (
+          id INTEGER PRIMARY KEY, event_type TEXT NOT NULL, remote_ip TEXT NOT NULL,
+          attempted_username TEXT NOT NULL DEFAULT '', result TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(remote_ip, created_at DESC);
+        CREATE TABLE IF NOT EXISTS ip_access_rules (
+          id INTEGER PRIMARY KEY, network TEXT NOT NULL UNIQUE, rule_type TEXT NOT NULL CHECK(rule_type IN ('block','allow')),
+          note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_ips_ip ON ips(ip_address);
         CREATE INDEX IF NOT EXISTS idx_ips_name ON ips(name);
@@ -170,691 +242,179 @@ def init_db():
             first_user = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
             if first_user:
                 db.execute("UPDATE users SET role='superadmin' WHERE id=?", (first_user["id"],))
+        # Migrate legacy plaintext authenticator seeds to Fernet-encrypted values.
+        # The decrypt helper remains backward-compatible if a row is restored from an old DB.
+        for row in db.execute("SELECT id,totp_secret FROM users WHERE totp_secret!=''").fetchall():
+            if not str(row["totp_secret"]).startswith("fernet:"):
+                db.execute("UPDATE users SET totp_secret=? WHERE id=?",
+                           (encrypt_authenticator_secret(row["totp_secret"]), row["id"]))
+        shared_row = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()
+        if shared_row and shared_row["value"] and not str(shared_row["value"]).startswith("fernet:"):
+            db.execute("UPDATE app_settings SET value=? WHERE key='shared_two_factor_secret'",
+                       (encrypt_authenticator_secret(shared_row["value"]),))
 
 
 init_db()
 
 
-def audit(action, detail=""):
-    with connect_db() as db:
-        db.execute("INSERT INTO audit_log(username,action,detail,created_at) VALUES(?,?,?,?)",
-                   (session.get("username", "system"), action, detail[:300], now()))
+def client_ip():
+    # The app is deployed behind Nginx on loopback; ProxyFix trusts one proxy hop.
+    return (request.remote_addr or "unknown")[:64]
 
 
-def current_user_row():
-    user_id = session.get("user_id")
-    if not user_id:
-        return None
-    with connect_db() as db:
-        return db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
+def security_event(event_type, username="", result="info", detail=""):
+    """Record security metadata only. Never record submitted passwords or TOTP codes."""
+    try:
+        with connect_db() as db:
+            db.execute(
+                "INSERT INTO security_events(event_type,remote_ip,attempted_username,result,detail,user_agent,created_at) VALUES(?,?,?,?,?,?,?)",
+                (event_type[:40], client_ip(), str(username or "")[:80], result[:40], str(detail or "")[:240],
+                 request.headers.get("User-Agent", "")[:240], now()),
+            )
+    except Exception:
+        app.logger.exception("Could not write security event")
 
 
-def login_required(fn):
-    @wraps(fn)
-    def wrapped(*args, **kwargs):
-        if not session.get("user_id"):
-            return redirect(url_for("login", next=request.path))
-        user = current_user_row()
-        if not user:
-            session.clear()
-            return redirect(url_for("login"))
-        g_user = dict(user)
-        request.user = g_user
-        return fn(*args, **kwargs)
-    return wrapped
+def failed_password_fingerprint(password):
+    """Stable keyed fingerprint for correlating guesses without retaining the password."""
+    value = str(password or "").encode("utf-8", errors="replace")[:1024]
+    return hmac.new(app.secret_key.encode(), b"failed-login-password\0" + value, hashlib.sha256).hexdigest()[:16]
 
 
-def two_factor_mode():
-    with connect_db() as db:
-        row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
-    mode = row["value"] if row else "off"
-    return mode if mode in ("off", "shared", "per_user") else "off"
+def recovery_code_hash(user_id, code):
+    normalized = re.sub(r"[^A-Za-z0-9]", "", str(code or "")).upper()
+    return hmac.new(app.secret_key.encode(), f"2fa-recovery:{user_id}:{normalized}".encode(), hashlib.sha256).hexdigest()
 
 
-def shared_two_factor_secret():
-    with connect_db() as db:
-        row = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()
-    return row["value"] if row else ""
-
-
-def user_requires_two_factor(user):
-    mode = two_factor_mode()
-    if mode == "shared":
-        return bool(shared_two_factor_secret())
-    if mode == "per_user":
-        return bool(user and user["two_factor_enabled"])
-    return False
-
-
-def two_factor_required():
-    return two_factor_mode() == "shared"
-
-
-def remembered_two_factor(user_id):
-    if two_factor_mode() != "off":
+def consume_recovery_code(user_id, submitted):
+    """Consume exactly one offline recovery code; only a keyed hash is stored."""
+    normalized = re.sub(r"[^A-Za-z0-9]", "", str(submitted or "")).upper()
+    if not normalized or len(normalized) > 40:
         return False
-    token = request.cookies.get(REMEMBER_2FA_COOKIE, "")
+    candidate = recovery_code_hash(user_id, normalized)
+    with connect_db() as db:
+        row = db.execute("SELECT id,code_hash FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchall()
+        matched = next((item for item in row if hmac.compare_digest(item["code_hash"], candidate)), None)
+        if not matched:
+            return False
+        db.execute("DELETE FROM user_recovery_codes WHERE id=?", (matched["id"],))
+    return True
+
+
+def secure_setting(key):
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    if not row or not row["value"]:
+        return ""
+    try:
+        return vault.decrypt(row["value"].encode()).decode()
+    except (InvalidToken, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def save_secure_setting(key, value):
+    encrypted = vault.encrypt(str(value).encode()).decode() if value else ""
+    with connect_db() as db:
+        db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, encrypted))
+
+
+def send_telegram_security_alert(message):
+    """Best-effort Telegram alert. Never include submitted passwords or TOTP codes."""
+    token = secure_setting("telegram_bot_token_enc")
+    chat_id = secure_setting("telegram_chat_id_enc")
+    if not token or not chat_id:
+        return False
+    try:
+        payload = {"chat_id": chat_id, "text": str(message)[:3900], "disable_web_page_preview": True}
+        req = Request(f"https://api.telegram.org/bot{token}/sendMessage", data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=5) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+        return bool(result.get("ok"))
+    except (URLError, HTTPError, TimeoutError, ValueError, OSError):
+        app.logger.warning("Telegram security notification failed")
+        return False
+
+
+def telegram_api(method, payload):
+    token = secure_setting("telegram_bot_token_enc")
     if not token:
-        return False
+        return {}
     try:
-        payload = two_factor_serializer.loads(token, max_age=REMEMBER_2FA_SECONDS)
-        return payload.get("uid") == user_id
-    except (BadSignature, SignatureExpired, AttributeError):
-        return False
+        req = Request(f"https://api.telegram.org/bot{token}/{method}",
+                      data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=5) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+        return result if result.get("ok") else {}
+    except (URLError, HTTPError, TimeoutError, ValueError, OSError):
+        app.logger.warning("Telegram bot API request failed")
+        return {}
 
 
-def establish_login(user):
-    session.clear()
-    # Keep the authenticated session as a browser-session cookie. Passwords
-    # are required again after the browser session ends.
-    session.permanent = False
-    session["user_id"] = user["id"]
-    session["username"] = user["username"]
-    session["csrf_token"] = secrets.token_urlsafe(32)
-    audit("login_success")
+def telegram_send(chat_id, text, reply_markup=None):
+    payload = {"chat_id": str(chat_id), "text": str(text)[:3900], "disable_web_page_preview": True}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    return telegram_api("sendMessage", payload)
 
 
-def superadmin_required(fn):
-    @wraps(fn)
-    @login_required
-    def wrapped(*args, **kwargs):
-        if request.user["role"] != "superadmin":
-            abort(403)
-        return fn(*args, **kwargs)
-    return wrapped
+def telegram_set_state(state):
+    save_secure_setting("telegram_conversation_state_enc", json.dumps(state, ensure_ascii=False))
 
 
-@app.before_request
-def enforce_global_two_factor():
-    if (session.get("user_id") and not session.get("two_factor_verified")
-            and request.endpoint not in ("login", "static")):
-        user = current_user_row()
-        if user_requires_two_factor(user):
-            session.clear()
-            return redirect(url_for("login"))
+def telegram_get_state():
+    raw = secure_setting("telegram_conversation_state_enc")
+    try:
+        value = json.loads(raw) if raw else {}
+        return value if isinstance(value, dict) else {}
+    except ValueError:
+        return {}
 
 
-@app.before_request
-def csrf_guard():
-    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-        token = session.get("csrf_token", "")
-        supplied = request.form.get("csrf_token", "")
-        if not token or not hmac.compare_digest(token, supplied):
-            abort(400, "Invalid or expired form token. Refresh the page and try again.")
+def telegram_menu(chat_id, message_id=None):
+    markup = {"inline_keyboard": [[
+        {"text": "➕ اد آیپی", "callback_data": "ip_add"},
+        {"text": "🔎 سرچ", "callback_data": "ip_search"},
+    ]]}
+    if message_id:
+        telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
+                         "text": "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", "reply_markup": markup})
+    else:
+        telegram_send(chat_id, "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", markup)
 
 
-@app.context_processor
-def inject_globals():
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_urlsafe(32)
-    user = current_user_row() if session.get("user_id") else None
-    with connect_db() as db:
-        settings_rows = db.execute("SELECT key,value FROM app_settings").fetchall()
-    app_settings = {row["key"]: row["value"] for row in settings_rows}
-    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
-                "login_title": "Welcome back", "login_subtitle": "",
-                "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
-                "app_description": "Keep connection details organized, searchable, and available to the right people.",
-                "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
-                "group_label": "Groups", "user_label": "Users & permissions"}
-    for key, value in defaults.items():
-        app_settings.setdefault(key, value)
-    app_settings["brand_name"] = "IP Management"
-    return {"csrf_token": session["csrf_token"], "current_user": session.get("username"),
-            "current_role": user["role"] if user else "", "dark_mode": True, "app_settings": app_settings,
-            "current_avatar": user["profile_image"] if user else ""}
-
-
-@app.after_request
-def security_headers(response):
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
-    if request.is_secure:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+def handle_telegram_update(update):
+    configured_chat = secure_setting("telegram_chat_id_enc")
+    if not configured_chat:
+        return
+    callback = update.get("callback_query") or {}
+    message = update.get("message") or callback.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = str(chat.get("id", ""))
+    if chat_id != str(configured_chat):
+        return
+    if callback:
+        telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
+        action = callback.get("data", "")
+        if action == "menu":
+            telegram_set_state({})
+            telegram_menu(chat_id, message.get("message_id"))
+        elif action == "ip_add":
+            telegram_set_state({"mode": "add", "step": "name", "data": {}})
+            telegram_send(chat_id, "مرحله ۱ از ۵ — نام این IP/سرور را وارد کن:")
+        elif action == "ip_search":
+            telegram_set_state({"mode": "search", "step": "query"})
+            telegram_send(chat_id, "نام ثبت‌شده یا آدرس IP را بفرست:")
+        return
+    text = str(message.get("text", "")).strip()
+    if text.lower() in ("ربات", "/start", "/menu"):
+        telegram_set_stat…15243 tokens truncated…  output = _BytesIO(content.encode("utf-8-sig"))
+    response = send_file(output, mimetype="text/plain; charset=utf-8", as_attachment=True,
+                         download_name=f"ip-management-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt", max_age=0)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return response
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "GET" and request.args.get("server_reconfigured") == "1":
-        flash("The server address was changed successfully. Please sign in again at this new address.", "success")
-    if session.get("user_id"):
-        return redirect(url_for("index"))
-    if request.method == "GET" and request.args.get("reset") == "1":
-        session.pop("pending_2fa_user_id", None)
-        session.pop("pending_2fa_secret", None)
-        session["csrf_token"] = secrets.token_urlsafe(32)
-    if (request.method == "GET" and two_factor_mode() in ("per_user", "shared")
-            and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
-        return redirect(url_for("setup_2fa"))
-    if request.method == "POST":
-        pending_id = session.get("pending_2fa_user_id")
-        if pending_id:
-            code = re.sub(r"\s", "", request.form.get("code", ""))
-            with connect_db() as db:
-                user = db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone()
-            mode = two_factor_mode()
-            if user and mode == "shared" and not user["two_factor_enrolled"]:
-                return redirect(url_for("setup_2fa"))
-            secret = shared_two_factor_secret() if mode == "shared" else (user["totp_secret"] if user else "")
-            if user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1):
-                establish_login(user)
-                session["two_factor_verified"] = True
-                flash(f"Welcome back, {user['username']}!", "welcome")
-                return redirect(safe_login_target())
-            time.sleep(0.35)
-            flash("The verification code is invalid. Try again.", "error")
-            return render_template("login.html", stage="verify", login_user=dict(user) if user else None)
-
-        username = request.form.get("username", "").strip()[:80]
-        password = request.form.get("password", "")
-        with connect_db() as db:
-            user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
-        if user and password_matches(password, user["password_hash"]):
-            if user_requires_two_factor(user):
-                mode = two_factor_mode()
-                if mode == "shared" and not user["two_factor_enrolled"]:
-                    session.clear()
-                    session["pending_2fa_user_id"] = user["id"]
-                    session["pending_2fa_secret"] = shared_two_factor_secret()
-                    session["csrf_token"] = secrets.token_urlsafe(32)
-                    return redirect(url_for("setup_2fa"))
-                if mode == "per_user" and not user["totp_secret"]:
-                    session.clear()
-                    session["pending_2fa_user_id"] = user["id"]
-                    session["pending_2fa_secret"] = pyotp.random_base32()
-                    session["csrf_token"] = secrets.token_urlsafe(32)
-                    return redirect(url_for("setup_2fa"))
-                secret = shared_two_factor_secret() if mode == "shared" else user["totp_secret"]
-                if not secret:
-                    flash("Two-factor authentication is not configured. Contact the super administrator.", "error")
-                    return redirect(url_for("login"))
-                session.clear()
-                session["pending_2fa_user_id"] = user["id"]
-                session["csrf_token"] = secrets.token_urlsafe(32)
-                return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
-            establish_login(user)
-            flash(f"Welcome back, {user['username']}!", "welcome")
-            return redirect(safe_login_target())
-        time.sleep(0.35)
-        flash("Invalid username or password.", "error")
-    pending_user = None
-    if session.get("pending_2fa_user_id"):
-        with connect_db() as db:
-            pending_user = db.execute("SELECT id,username,role,profile_image FROM users WHERE id=? AND enabled=1",
-                                      (session["pending_2fa_user_id"],)).fetchone()
-    return render_template("login.html", stage="verify" if session.get("pending_2fa_user_id") else "password",
-                           login_user=dict(pending_user) if pending_user else None)
-
-
-def safe_login_target():
-    target = request.args.get("next", "")
-    return target if target.startswith("/") and not target.startswith("//") else url_for("index")
-
-
-@app.route("/setup-2fa", methods=["GET", "POST"])
-def setup_2fa():
-    # Enrollment is only allowed in the mandatory first-login flow.
-    # Signed-in users cannot alter their own authenticator configuration.
-    user_id = session.get("pending_2fa_user_id")
-    secret = session.get("pending_2fa_secret")
-    mode = two_factor_mode()
-    if mode not in ("per_user", "shared") or not user_id or not secret:
-        if session.get("user_id"):
-            abort(403)
-        return redirect(url_for("login"))
-    with connect_db() as db:
-        user = db.execute("SELECT id,username,role,profile_image,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
-    if (not user or (mode == "per_user" and not user["two_factor_enabled"])
-            or (mode == "shared" and (secret != shared_two_factor_secret() or user["two_factor_enrolled"]))):
-        session.clear()
-        return redirect(url_for("login"))
-    uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
-    if request.method == "POST":
-        code = re.sub(r"\s", "", request.form.get("code", ""))
-        if pyotp.TOTP(secret).verify(code, valid_window=1):
-            with connect_db() as db:
-                if mode == "shared":
-                    db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
-                else:
-                    db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (secret, user_id))
-            session.clear()
-            # Authentication must remain a browser-session cookie. Only the
-            # separate signed 2FA-remember cookie is persistent (24 hours).
-            # A permanent Flask session would keep the login alive after the
-            # browser is closed and reopened.
-            session.permanent = False
-            session["user_id"] = user_id
-            session["username"] = user["username"]
-            session["csrf_token"] = secrets.token_urlsafe(32)
-            session["two_factor_verified"] = True
-            audit("two_factor_enabled")
-            flash(f"Welcome back, {user['username']}! Two-factor authentication is enabled.", "welcome")
-            return redirect(url_for("index"))
-        flash("The authenticator code is invalid. Try again.", "error")
-    import qrcode
-    qr = qrcode.make(uri)
-    buffer = BytesIO()
-    qr.save(buffer, format="PNG")
-    qr_data_uri = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-    return render_template("setup_2fa.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri, user=dict(user))
-
-
-@app.post("/logout")
-@login_required
-def logout():
-    audit("logout")
-    session.clear()
-    return redirect(url_for("login"))
-
-
-def visible_ips(user):
-    with connect_db() as db:
-        if user["role"] == "superadmin":
-            return db.execute("SELECT ips.*, groups.name AS group_name FROM ips LEFT JOIN groups ON groups.id=ips.group_id ORDER BY ips.ip_address LIMIT 1000").fetchall()
-        rows = db.execute("""
-          SELECT DISTINCT ips.*, groups.name AS group_name FROM ips
-          LEFT JOIN groups ON groups.id=ips.group_id
-          LEFT JOIN user_group_access uga ON uga.group_id=ips.group_id AND uga.user_id=?
-          LEFT JOIN user_ip_access uia ON uia.ip_id=ips.id AND uia.user_id=?
-          WHERE (uga.user_id IS NOT NULL OR uia.can_view=1)
-            AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
-          ORDER BY ips.ip_address LIMIT 1000
-        """, (user["id"], user["id"], user["id"])).fetchall()
-        return rows
-
-
-@app.route("/")
-@login_required
-def index():
-    term = request.args.get("q", "").strip()[:100]
-    group_filter = request.args.get("group", "").strip()
-    all_visible = visible_ips(request.user)
-    rows = list(all_visible)
-    if group_filter == "ungrouped":
-        rows = [r for r in rows if r["group_id"] is None]
-    elif group_filter.isdigit():
-        rows = [r for r in rows if r["group_id"] == int(group_filter)]
-    if term:
-        lower = term.casefold()
-        rows = [r for r in rows if lower in (r["ip_address"] or "").casefold() or lower in (r["name"] or "").casefold() or lower in (r["username"] or "").casefold() or lower in (r["notes"] or "").casefold()]
-    with connect_db() as db:
-        show_ip_passwords = request.user["role"] == "superadmin" or bool(request.user.get("can_view_passwords", 0))
-        if request.user["role"] == "superadmin":
-            groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
-        else:
-            groups = db.execute("""
-              SELECT DISTINCT groups.* FROM groups
-              JOIN ips ON ips.group_id=groups.id
-              LEFT JOIN user_group_access uga ON uga.group_id=groups.id AND uga.user_id=?
-              LEFT JOIN user_ip_access uia ON uia.ip_id=ips.id AND uia.user_id=?
-              WHERE (uga.user_id IS NOT NULL OR uia.can_view=1)
-                AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
-              ORDER BY groups.sort_order, groups.id
-            """, (request.user["id"], request.user["id"], request.user["id"])).fetchall()
-    if show_ip_passwords:
-        prepared_rows = []
-        for row in rows:
-            item = dict(row)
-            try:
-                item["password_plain"] = vault.decrypt((row["password_enc"] or "").encode()).decode() if row["password_enc"] else ""
-            except (InvalidToken, ValueError, TypeError):
-                item["password_plain"] = ""
-            prepared_rows.append(item)
-        rows = prepared_rows
-    return render_template("index.html", ips=rows, q=term, groups=groups, group_filter=group_filter,
-                           show_ip_passwords=show_ip_passwords,
-                           update_success=request.args.get("update") == "success")
-
-
-def can_view_ip(ip_id, user=None):
-    user = user or request.user
-    if user["role"] == "superadmin":
-        return True
-    with connect_db() as db:
-        row = db.execute("""SELECT ips.group_id,
-          EXISTS(SELECT 1 FROM user_group_access a WHERE a.user_id=? AND a.group_id=ips.group_id) AS group_ok,
-          (SELECT can_view FROM user_ip_access b WHERE b.user_id=? AND b.ip_id=ips.id) AS ip_rule
-          FROM ips WHERE ips.id=?""", (user["id"], user["id"], ip_id)).fetchone()
-    if not row:
-        return False
-    if row["ip_rule"] == 0:
-        return False
-    return bool(row["group_ok"] or row["ip_rule"] == 1)
-
-
-def validate_ip(form):
-    label = form.get("name", "").strip()[:120]
-    address = form.get("ip_address", "").strip()[:255]
-    username = form.get("username", "").strip()[:120]
-    raw_port = form.get("port", "").strip()
-    submitted_password = form.get("password", "")
-    notes = form.get("notes", "").strip()[:3000]
-    group_raw = form.get("group_id", "").strip()
-    if not address:
-        return None, "IP address or hostname is required."
-    try:
-        port = int(raw_port) if raw_port else None
-        if port is not None and not 1 <= port <= 65535:
-            raise ValueError
-    except ValueError:
-        return None, "Port must be a number between 1 and 65535."
-    try:
-        group_id = int(group_raw) if group_raw else None
-    except ValueError:
-        return None, "Select a valid group."
-    with connect_db() as db:
-        if group_id is None:
-            default_group = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()
-            group_id = default_group["id"] if default_group else None
-        if group_id:
-            if not db.execute("SELECT id FROM groups WHERE id=?", (group_id,)).fetchone():
-                return None, "Selected group does not exist."
-    if len(submitted_password) > 500:
-        return None, "Connection password is too long."
-    return {"name": label, "ip": address, "port": port, "username": username,
-            "password": vault.encrypt(submitted_password.encode()).decode() if submitted_password else None,
-            "notes": notes, "group_id": group_id}, None
-
-
-@app.route("/ips/new", methods=["GET", "POST"])
-@superadmin_required
-def ip_new():
-    with connect_db() as db:
-        groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
-        default_group = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()
-    if request.method == "POST":
-        data, error = validate_ip(request.form)
-        if error:
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                return {"ok": False, "error": error}, 400
-            flash(error, "error")
-        else:
-            with connect_db() as db:
-                cur = db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (data["name"], data["ip"], data["port"], data["username"], data["password"] or "", data["notes"], data["group_id"], request.user["username"], now(), now()))
-                ip_id = cur.lastrowid
-            audit("ip_created", f"id={ip_id}; ip={data['ip']}")
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                return {"ok": True, "message": "IP record created."}
-            flash("IP record created.", "success")
-            return redirect(url_for("index"))
-    return render_template("ip_form.html", ip=None, groups=groups, default_group_id=default_group["id"] if default_group else None)
-
-
-@app.route("/ips/<int:ip_id>/edit", methods=["GET", "POST"])
-@superadmin_required
-def ip_edit(ip_id):
-    with connect_db() as db:
-        ip = db.execute("SELECT * FROM ips WHERE id=?", (ip_id,)).fetchone()
-        groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
-    if not ip:
-        abort(404)
-    if request.method == "POST":
-        data, error = validate_ip(request.form)
-        if error:
-            flash(error, "error")
-        else:
-            enc = data["password"] if data["password"] is not None else ip["password_enc"]
-            with connect_db() as db:
-                db.execute("UPDATE ips SET name=?,ip_address=?,port=?,username=?,password_enc=?,notes=?,group_id=?,updated_at=? WHERE id=?",
-                           (data["name"], data["ip"], data["port"], data["username"], enc, data["notes"], data["group_id"], now(), ip_id))
-            audit("ip_updated", f"id={ip_id}; ip={data['ip']}")
-            flash("IP record updated.", "success")
-            return redirect(url_for("index"))
-    ip_data = dict(ip)
-    try:
-        ip_data["password_plain"] = vault.decrypt((ip["password_enc"] or "").encode()).decode() if ip["password_enc"] else ""
-    except (InvalidToken, ValueError, TypeError):
-        ip_data["password_plain"] = ""
-    return render_template("ip_form.html", ip=ip_data, groups=groups, default_group_id=None)
-
-
-@app.post("/ips/<int:ip_id>/delete")
-@superadmin_required
-def ip_delete(ip_id):
-    with connect_db() as db:
-        row = db.execute("SELECT ip_address FROM ips WHERE id=?", (ip_id,)).fetchone()
-        if row:
-            db.execute("DELETE FROM ips WHERE id=?", (ip_id,))
-    if row:
-        audit("ip_deleted", f"id={ip_id}; ip={row['ip_address']}")
-        flash("IP record deleted.", "success")
-    return redirect(url_for("index"))
-
-
-@app.route("/groups", methods=["GET", "POST"])
-@superadmin_required
-def groups():
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()[:80]
-        description = request.form.get("description", "").strip()[:300]
-        if not name:
-            flash("Group name is required.", "error")
-        else:
-            try:
-                with connect_db() as db:
-                    next_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM groups").fetchone()[0]
-                    db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES(?,?,?,?)", (name, description, now(), next_order))
-                audit("group_created", name)
-                flash("Group created.", "success")
-                return redirect(url_for("groups"))
-            except sqlite3.IntegrityError:
-                flash("A group with that name already exists.", "error")
-    with connect_db() as db:
-        rows = db.execute("SELECT groups.*, COUNT(ips.id) AS ip_count FROM groups LEFT JOIN ips ON ips.group_id=groups.id GROUP BY groups.id ORDER BY groups.sort_order, groups.id").fetchall()
-    return render_template("groups.html", groups=rows)
-
-
-@app.post("/groups/<int:group_id>/move")
-@superadmin_required
-def group_move(group_id):
-    direction = request.form.get("direction", "")
-    if direction not in ("up", "down"):
-        abort(400)
-    moved = False
-    with connect_db() as db:
-        ordered = db.execute("SELECT id, sort_order FROM groups ORDER BY sort_order, id").fetchall()
-        ids = [row["id"] for row in ordered]
-        if group_id not in ids:
-            abort(404)
-        current = ids.index(group_id)
-        target = current - 1 if direction == "up" else current + 1
-        if 0 <= target < len(ids):
-            first, second = ordered[current], ordered[target]
-            db.execute("UPDATE groups SET sort_order=? WHERE id=?", (second["sort_order"], first["id"]))
-            db.execute("UPDATE groups SET sort_order=? WHERE id=?", (first["sort_order"], second["id"]))
-            moved = True
-    if moved:
-        audit("group_reordered", f"id={group_id}; direction={direction}")
-    return redirect(url_for("groups"))
-
-
-@app.post("/groups/<int:group_id>/delete")
-@superadmin_required
-def group_delete(group_id):
-    with connect_db() as db:
-        db.execute("DELETE FROM groups WHERE id=?", (group_id,))
-    audit("group_deleted", f"id={group_id}")
-    flash("Group deleted. IP records remain and become ungrouped.", "success")
-    return redirect(url_for("groups"))
-
-
-@app.route("/users", methods=["GET", "POST"])
-@superadmin_required
-def users():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()[:80]
-        password = request.form.get("password", "")
-        role = request.form.get("role", "admin")
-        if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,80}", username):
-            flash("Username must be 3–80 characters using letters, numbers, dot, underscore, @ or hyphen.", "error")
-        elif not password:
-            flash("Password cannot be empty.", "error")
-        elif role not in ("admin", "superadmin"):
-            flash("Invalid role.", "error")
-        else:
-            try:
-                with connect_db() as db:
-                    cur = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,0,1)", (username, password_hash(password), now(), role, ""))
-                audit("user_created", f"id={cur.lastrowid}; username={username}; role={role}")
-                flash("User created. Configure this account’s two-factor policy in user settings if per-user authentication is selected.", "success")
-                return redirect(url_for("users"))
-            except sqlite3.IntegrityError:
-                flash("That username already exists.", "error")
-    with connect_db() as db:
-        rows = db.execute("SELECT id,username,role,enabled,created_at FROM users ORDER BY username").fetchall()
-    return render_template("users.html", users=rows)
-
-
-@app.route("/users/<int:user_id>", methods=["GET", "POST"])
-@superadmin_required
-def user_edit(user_id):
-    with connect_db() as db:
-        user = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,can_view_passwords FROM users WHERE id=?", (user_id,)).fetchone()
-        groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
-        ips = db.execute("SELECT id,ip_address,name,group_id FROM ips ORDER BY ip_address").fetchall()
-        allowed_groups = {r[0] for r in db.execute("SELECT group_id FROM user_group_access WHERE user_id=?", (user_id,))}
-        ip_rules = {r[0]: r[1] for r in db.execute("SELECT ip_id,can_view FROM user_ip_access WHERE user_id=?", (user_id,))}
-    if not user:
-        abort(404)
-    if request.method == "POST":
-        role = request.form.get("role", "admin")
-        enabled = 1 if request.form.get("enabled") == "1" else 0
-        can_view_passwords = 1 if role == "superadmin" or request.form.get("can_view_passwords") == "1" else 0
-        two_factor_setting_submitted = "two_factor_enabled" in request.form
-        two_factor_enabled = (1 if request.form.get("two_factor_enabled") == "1" else 0
-                              if two_factor_setting_submitted else int(user["two_factor_enabled"]))
-        password = request.form.get("password", "")
-        if user_id == request.user["id"] and (role != "superadmin" or not enabled):
-            flash("You cannot remove your own superadmin role or disable your own account.", "error")
-        elif role not in ("admin", "superadmin"):
-            flash("Invalid role.", "error")
-        else:
-            selected_groups = {int(x) for x in request.form.getlist("groups") if x.isdigit()}
-            with connect_db() as db:
-                db.execute("UPDATE users SET role=?,enabled=?,two_factor_enabled=?,can_view_passwords=? WHERE id=?", (role, enabled, two_factor_enabled, can_view_passwords, user_id))
-                if two_factor_setting_submitted and not two_factor_enabled:
-                    db.execute("UPDATE users SET totp_secret='',two_factor_enrolled=0 WHERE id=?", (user_id,))
-                if password:
-                    db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password), user_id))
-                db.execute("DELETE FROM user_group_access WHERE user_id=?", (user_id,))
-                db.executemany("INSERT INTO user_group_access(user_id,group_id) VALUES(?,?)", [(user_id, gid) for gid in selected_groups])
-                db.execute("DELETE FROM user_ip_access WHERE user_id=?", (user_id,))
-                for ip in ips:
-                    mode = request.form.get(f"ip_{ip['id']}", "inherit")
-                    if mode == "allow":
-                        db.execute("INSERT INTO user_ip_access(user_id,ip_id,can_view) VALUES(?,?,1)", (user_id, ip["id"]))
-                    elif mode == "deny":
-                        db.execute("INSERT INTO user_ip_access(user_id,ip_id,can_view) VALUES(?,?,0)", (user_id, ip["id"]))
-            audit("user_permissions_updated", f"id={user_id}; role={role}")
-            flash("User and visibility permissions updated.", "success")
-            return redirect(url_for("user_edit", user_id=user_id))
-    return render_template("user_edit.html", user=user, groups=groups, ips=ips, allowed_groups=allowed_groups, ip_rules=ip_rules, two_factor_mode=two_factor_mode())
-
-
-@app.post("/settings/security")
-@superadmin_required
-def update_security_settings():
-    if request.form.get("action") == "generate_shared_secret":
-        secret = pyotp.random_base32()
-        with connect_db() as db:
-            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (secret,))
-            db.execute("UPDATE users SET two_factor_enrolled=0")
-        audit("shared_two_factor_secret_generated")
-        flash("Shared Authenticator secret generated. Enroll the site Authenticator before enabling shared mode.", "success")
-        return redirect(url_for("settings") + "#security")
-    mode = request.form.get("two_factor_mode", "off")
-    if mode not in ("off", "shared", "per_user"):
-        flash("Select a valid two-factor policy.", "error")
-        return redirect(url_for("settings") + "#security")
-    if mode == "shared" and not shared_two_factor_secret():
-        flash("Generate the shared Authenticator secret before enabling shared mode.", "error")
-        return redirect(url_for("settings") + "#security")
-    with connect_db() as db:
-        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (mode,))
-        db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_required',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("1" if mode == "shared" else "0",))
-    audit("two_factor_policy_updated", f"mode={mode}")
-    flash("Two-factor policy saved. Users must sign in again for the new policy to apply.", "success")
-    return redirect(url_for("settings") + "#security")
-
-
-@app.post("/settings/directory")
-@superadmin_required
-def update_directory_settings():
-    show_passwords = "1" if request.form.get("show_ip_passwords") == "1" else "0"
-    with connect_db() as db:
-        db.execute("INSERT INTO app_settings(key,value) VALUES('show_ip_passwords',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (show_passwords,))
-    audit("ip_password_visibility_updated", f"enabled={show_passwords}")
-    flash("IP directory password visibility setting saved.", "success")
-    return redirect(url_for("settings") + "#directory")
-
-
-@app.route("/settings", methods=["GET", "POST"])
-@superadmin_required
-def settings():
-    if request.method == "GET" and request.args.get("reconfigured") == "1":
-        flash("Server address updated successfully. Nginx, the HTTPS certificate and application listener are using the new address.", "success")
-    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
-                "login_title": "Your network. Your command.", "login_subtitle": "Sign in to securely manage your IP inventory.",
-                "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
-                "app_description": "Keep connection details organized, searchable, and available to the right people.",
-                "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
-                "group_label": "Groups", "user_label": "Users & permissions"}
-    if request.method == "POST":
-        values = {key: request.form.get(key, "").strip()[:500] for key in defaults if key in request.form}
-        if "brand_name" in values:
-            values["brand_name"] = "IP Management"
-        if "accent_color" in values and not re.fullmatch(r"#[0-9a-fA-F]{6}", values["accent_color"]):
-            flash("Accent color must be a valid six-digit hex color.", "error")
-            return redirect(url_for("settings") + "#branding")
-        logo = request.files.get("brand_logo")
-        logo_name = ""
-        if logo and logo.filename:
-            ext = Path(secure_filename(logo.filename)).suffix.lower()
-            if ext not in ALLOWED_IMAGE_EXTENSIONS:
-                flash("Logo must be PNG, JPG, JPEG, or WEBP.", "error")
-                return redirect(url_for("settings") + "#branding")
-            logo_name = "brand" + ext
-            logo.save(UPLOAD_DIR / logo_name)
-        with connect_db() as db:
-            for key, value in values.items():
-                db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
-            if logo_name:
-                db.execute("INSERT INTO app_settings(key,value) VALUES('brand_logo',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (logo_name,))
-        audit("application_settings_updated")
-        flash("Application settings saved.", "success")
-        return redirect(url_for("settings") + ("#branding" if "brand_subtitle" in values or "brand_logo_text" in values else "#text"))
-    with connect_db() as db:
-        values = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM app_settings")}
-        show_ip_passwords = values.get("show_ip_passwords", "0") == "1"
-    for key, value in defaults.items():
-        values.setdefault(key, value)
-    values["brand_name"] = "IP Management"
-    values.setdefault("brand_logo", "")
-    shared_secret = shared_two_factor_secret()
-    shared_uri = pyotp.TOTP(shared_secret).provisioning_uri(name="All users", issuer_name="IP Management") if shared_secret else ""
-    shared_qr = ""
-    if shared_uri:
-        import qrcode
-        qr_buffer = BytesIO()
-        qrcode.make(shared_uri).save(qr_buffer, format="PNG")
-        shared_qr = "data:image/png;base64," + base64.b64encode(qr_buffer.getvalue()).decode("ascii")
-    with connect_db() as db:
-        deployment = {row["key"]: row["value"] for row in db.execute(
-            "SELECT key,value FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")}
-    deployment.setdefault("public_domain", os.environ.get("APP_DOMAIN", ""))
-    deployment.setdefault("public_port", os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
-    deployment.setdefault("update_repository", os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management")))
-    return render_template("settings.html", app_values=values, deployment=deployment,
-                           two_factor_mode=two_factor_mode(), shared_two_factor_secret=shared_secret,
-                           shared_two_factor_uri=shared_uri, shared_two_factor_qr=shared_qr,
-                           show_ip_passwords=show_ip_passwords,
-                           github_repo=deployment["update_repository"],
-                           public_port=deployment["public_port"])
 
 
 @app.post("/settings/deployment")
@@ -868,9 +428,13 @@ def update_deployment_settings():
         if not user or not password_matches(password, user["password_hash"]):
             flash("Password confirmation failed. The update repository was not changed.", "error")
             return redirect(url_for("settings") + "#updates")
-        if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?", repo_url):
+        if not normalize_github_repo(repo_url):
             flash("Enter a valid HTTPS GitHub repository URL.", "error")
             return redirect(url_for("settings") + "#updates")
+        if normalize_github_repo(repo_url) != trusted_update_repository():
+            flash("For security, the updater can only use the repository configured by the server installer. Change it in the server environment and redeploy if you need to switch trusted repositories.", "error")
+            return redirect(url_for("settings") + "#updates")
+        repo_url = trusted_update_repository()
         with connect_db() as db:
             db.execute("INSERT INTO app_settings(key,value) VALUES('update_repository',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (repo_url,))
         audit("update_repository_changed", repo_url)
@@ -946,8 +510,8 @@ def profile():
             if not password_matches(current_password, user["password_hash"]):
                 flash("Current password is incorrect.", "error")
                 return redirect(url_for("profile"))
-            if len(new_password) < 10:
-                flash("New password must be at least 10 characters.", "error")
+            if not 12 <= len(new_password) <= 1024:
+                flash("New password must be between 12 and 1024 characters.", "error")
                 return redirect(url_for("profile"))
             if new_password != confirm_password:
                 flash("New passwords do not match.", "error")
@@ -960,7 +524,11 @@ def profile():
                 flash("Profile image must be PNG, JPG, JPEG, or WEBP.", "error")
                 return redirect(url_for("profile"))
             filename = f"user-{user['id']}{ext}"
-            avatar.save(AVATAR_DIR / filename)
+            try:
+                save_sanitized_image(avatar, AVATAR_DIR / filename, ext)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("profile"))
             avatar_name = "avatars/" + filename
         with connect_db() as db:
             if new_password:
@@ -969,7 +537,34 @@ def profile():
         audit("profile_updated")
         flash("Profile updated successfully.", "success")
         return redirect(url_for("profile"))
-    return render_template("profile.html", user=user)
+    return render_template("profile.html", user=user, two_factor_mode=two_factor_mode())
+
+
+@app.post("/profile/recovery-codes")
+@login_required
+def generate_recovery_codes():
+    user = request.user
+    current_password = request.form.get("current_password", "")
+    current_code = re.sub(r"\s", "", request.form.get("current_code", ""))
+    if not password_matches(current_password, user["password_hash"]):
+        flash("Current password is incorrect; recovery codes were not changed.", "error")
+        return redirect(url_for("profile"))
+    if user_requires_two_factor(user):
+        mode = two_factor_mode()
+        secret = shared_two_factor_secret() if mode == "shared" else decrypt_authenticator_secret(user["totp_secret"])
+        if not secret or not pyotp.TOTP(secret).verify(current_code, valid_window=1):
+            flash("Verify with your current authenticator before generating recovery codes.", "error")
+            return redirect(url_for("profile"))
+    codes = [secrets.token_hex(10).upper() for _ in range(10)]
+    with connect_db() as db:
+        db.execute("DELETE FROM user_recovery_codes WHERE user_id=?", (user["id"],))
+        db.executemany("INSERT INTO user_recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)",
+                       [(user["id"], recovery_code_hash(user["id"], code), now()) for code in codes])
+    audit("two_factor_recovery_codes_generated", "count=10")
+    response = app.make_response(render_template("recovery_codes.html", codes=codes, username=user["username"]))
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.get("/media/<path:filename>")
@@ -1022,7 +617,10 @@ def installed_version(release=None):
 def latest_release():
     with connect_db() as db:
         row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
-    repo_url = (row["value"] if row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))).rstrip("/")
+    repo_url = (row["value"] if row else trusted_update_repository()).rstrip("/")
+    if normalize_github_repo(repo_url) != trusted_update_repository():
+        raise ValueError("Configured update repository differs from the trusted repository set by the server installer. Restore the trusted repository in Settings before updating.")
+    repo_url = trusted_update_repository()
     match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", repo_url)
     if not match:
         raise ValueError("Configured GitHub repository URL is invalid.")
@@ -1125,7 +723,7 @@ def update_app():
         UPDATE_TARGET_VERSION_FILE.write_text(release["version"] + "\n", encoding="utf-8")
         with connect_db() as db:
             repo_row = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
-        configured_repo = repo_row["value"] if repo_row else os.environ.get("GITHUB_REPO", os.environ.get("APP_REPO_URL", "https://github.com/AmiRaiZo/IP-Management"))
+        configured_repo = trusted_update_repository()
         UPDATE_REPOSITORY_FILE.write_text(configured_repo.rstrip("/") + "\n", encoding="utf-8")
         UPDATE_LOG_FILE.write_text("Starting update…\n", encoding="utf-8")
         with UPDATE_LOG_FILE.open("a", encoding="utf-8") as log:
@@ -1161,14 +759,18 @@ def update_finish():
 
 @app.errorhandler(400)
 def bad_request(error):
+    security_event("http_400", session.get("username", ""), "blocked", f"Bad request or CSRF check failed: {request.method} {request.path}")
     return render_template("error.html", code=400, message=getattr(error, "description", "Invalid request.")), 400
 
 
 @app.errorhandler(403)
 def forbidden(error):
+    security_event("http_403", session.get("username", ""), "blocked", f"Authorization denied: {request.method} {request.path}")
     return render_template("error.html", code=403, message="You do not have permission to access this page."), 403
 
 
 @app.errorhandler(404)
 def not_found(error):
+    security_event("http_404", session.get("username", ""), "blocked", f"Unknown path probe: {request.method} {request.path}")
     return render_template("error.html", code=404, message="The requested page or record was not found."), 404
+
