@@ -48,7 +48,7 @@ prompt ADMIN_USER "Superadmin username"
 read -r -s -p "Superadmin password: " ADMIN_PASSWORD < /dev/tty; printf '\n' > /dev/tty
 read -r -s -p "Confirm superadmin password: " ADMIN_PASSWORD_CONFIRM < /dev/tty; printf '\n' > /dev/tty
 [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]] || { echo "Passwords do not match." >&2; exit 1; }
-[[ -n "$ADMIN_PASSWORD" ]] || { echo "Password must not be empty." >&2; exit 1; }
+[[ ${#ADMIN_PASSWORD} -ge 12 && ${#ADMIN_PASSWORD} -le 1024 ]] || { echo "Password must be between 12 and 1024 characters." >&2; exit 1; }
 
 echo "Install target: https://$DOMAIN:$HTTPS_PORT (single port $HTTPS_PORT; public bind $PUBLIC_IP, app bind 127.0.0.1)"
 echo "Make sure DNS points to this server and inbound TCP ports 80 and $HTTPS_PORT are allowed by both the VPS provider and the server firewall."
@@ -226,6 +226,9 @@ if [[ -f /var/lib/station-archive/update-repository ]]; then
   UPDATE_REPO="$(cat /var/lib/station-archive/update-repository)"
 fi
 [[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
+TRUSTED_REPO="${GITHUB_REPO:-${APP_REPO_URL:-https://github.com/AmiRaiZo/IP-Management}}"
+normalize_repo() { local value="${1%/}"; value="${value%.git}"; printf '%s' "${value,,}"; }
+[[ "$(normalize_repo "$UPDATE_REPO")" == "$(normalize_repo "$TRUSTED_REPO")" ]] || { echo "Update refused: repository differs from the trusted repository configured by the installer." >&2; exit 1; }
 [[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
 [[ "${APP_INTERNAL_PORT:-}" =~ ^[0-9]{1,5}$ ]] && (( APP_INTERNAL_PORT >= 1 && APP_INTERNAL_PORT <= 65535 )) || { echo "Configured application port is invalid." >&2; exit 1; }
 VERSION_FILE=/var/lib/station-archive/version
@@ -468,3 +471,4 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
+
