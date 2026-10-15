@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Two-factor recovery codes | IP Archive{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ACCOUNT SECURITY</p><h1>Save your recovery codes</h1><p class="muted">These codes are shown once for {{ username }}. Store them somewhere private and offline.</p></div></div>
+<section class="panel form-panel">
+  <p class="helper-note">Each code can be used once instead of an authenticator code. Anyone who obtains a code can use it with your password, so do not share these codes or store them in Telegram.</p>
+  <ol style="columns:2;max-width:36rem;line-height:2.2">{% for code in codes %}<li><code>{{ code }}</code></li>{% endfor %}</ol>
+  <button class="btn btn-secondary" type="button" onclick="window.print()">Print / save securely</button>
+  <a class="btn btn-primary" href="{{ url_for('profile') }}">I saved these codes</a>
+</section>
+{% endblock %}
