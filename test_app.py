@@ -141,6 +141,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn(codes[0], " ".join(row["code_hash"] for row in stored))
 
         self.client.post("/logout", data={"csrf_token": self.csrf()})
+        # Explicitly remove the trusted-device cookie so this test exercises recovery-code login.
+        self.client.delete_cookie("ip_management_2fa")
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "recovery-user", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
@@ -395,6 +397,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(archive.two_factor_mode(), "shared")
         self.client.post("/logout", data={"csrf_token": self.csrf()})
+        # This assertion verifies mandatory enrollment, not trusted-device behavior.
+        self.client.delete_cookie("ip_management_2fa")
         self.client.get("/login")
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
