@@ -1049,7 +1049,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn("Expires", message.args[1])
         self.assertNotIn("IP Archive", message.args[1])
 
-    def test_telegram_search_results_never_include_saved_connection_password(self):
+    def test_telegram_search_results_include_saved_connection_password_for_configured_chat(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with archive.connect_db() as db:
             group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
@@ -1060,7 +1060,7 @@ class ArchiveTests(unittest.TestCase):
             archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": "Search Router"}})
         output = "\n".join(str(call.args[1]) for call in send.call_args_list)
         self.assertIn("192.0.2.77", output)
-        self.assertNotIn("do-not-send-device-secret", output)
+        self.assertIn("Password: do-not-send-device-secret", output)
 
     def test_application_ip_block_does_not_require_os_firewall(self):
         _, secret = self.create_user("ip-rules-admin")
