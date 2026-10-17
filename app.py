@@ -717,16 +717,25 @@ def two_factor_required():
 
 
 def remembered_two_factor(user_id):
-    if two_factor_mode() != "off":
-        return False
+    """Check the signed, device-local 24-hour second-factor trust cookie."""
     token = request.cookies.get(REMEMBER_2FA_COOKIE, "")
     if not token:
         return False
     try:
         payload = two_factor_serializer.loads(token, max_age=REMEMBER_2FA_SECONDS)
-        return payload.get("uid") == user_id
+        return payload.get("uid") == user_id and payload.get("v") == 1
     except (BadSignature, SignatureExpired, AttributeError):
         return False
+
+
+def remember_two_factor_response(response, user_id):
+    """Trust this browser for 24 hours without making the login session persistent."""
+    token = two_factor_serializer.dumps({"uid": user_id, "v": 1})
+    response.set_cookie(
+        REMEMBER_2FA_COOKIE, token, max_age=REMEMBER_2FA_SECONDS,
+        httponly=True, secure=request.is_secure, samesite="Lax", path="/",
+    )
+    return response
 
 
 def establish_login(user):
@@ -893,7 +902,10 @@ def login():
                     audit("telegram_login_recovery_code_used")
                 send_login_success_alert(user["username"], client_ip())
                 flash(f"Welcome back, {user['username']}!", "welcome")
-                return redirect(safe_login_target())
+                response = redirect(safe_login_target())
+                if totp_ok:
+                    remember_two_factor_response(response, user["id"])
+                return response
             time.sleep(0.35)
             security_event("two_factor_login", user["username"] if user else "", "failed", "Invalid or unavailable authenticator code")
             send_telegram_security_alert(
@@ -913,6 +925,12 @@ def login():
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
         if user and len(password) <= 1024 and password_matches(password, user["password_hash"]):
+            if user_requires_two_factor(user) and remembered_two_factor(user["id"]):
+                establish_login(user)
+                session["two_factor_verified"] = True
+                send_login_success_alert(user["username"], client_ip())
+                flash(f"Welcome back, {user['username']}!", "welcome")
+                return redirect(safe_login_target())
             if user_requires_two_factor(user):
                 mode = two_factor_mode()
                 if mode == "shared" and not user["two_factor_enrolled"]:
@@ -1018,7 +1036,9 @@ def setup_2fa():
             audit("two_factor_enabled")
             security_event("two_factor_enrollment", user["username"], "success", "Authenticator enrollment completed")
             flash(f"Welcome back, {user['username']}! Two-factor authentication is enabled.", "welcome")
-            return redirect(url_for("index"))
+            response = redirect(url_for("index"))
+            remember_two_factor_response(response, user_id)
+            return response
         time.sleep(0.35)
         security_event("two_factor_enrollment", user["username"], "failed", "Invalid authenticator enrollment code")
         flash("The authenticator code is invalid. Try again.", "error")
