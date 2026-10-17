@@ -1,3 +1,8 @@
+## Version 2.9.1 release notes
+
+- Fixed the sidebar toggle button to stay at a consistent top-left position when the sidebar is expanded or collapsed, on desktop and mobile.
+- Kept the toggle icon-only, removed layout-dependent centering, and updated the stylesheet cache key.
+
 ## Version 2.9.0 release notes
 
 - Added a Telegram **Display all groups** menu with inline buttons for every group.
