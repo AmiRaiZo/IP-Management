@@ -415,6 +415,85 @@ def telegram_send(chat_id, text, reply_markup=None, parse_mode=None, delete_afte
     return result
 
 
+def telegram_replace_message(chat_id, message_id, text, reply_markup=None, parse_mode=None):
+    """Replace the current bot screen instead of stacking another page in the chat."""
+    payload = {"chat_id": str(chat_id), "message_id": int(message_id), "text": str(text)[:3900],
+               "disable_web_page_preview": True}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if message_id:
+        result = telegram_api("editMessageText", payload)
+        if result:
+            return result
+        telegram_delete_message(chat_id, message_id)
+    return telegram_send(chat_id, text, reply_markup, parse_mode, delete_after=0)
+
+
+def telegram_browse_groups(chat_id, message_id):
+    with connect_db() as db:
+        groups = db.execute("SELECT id,name FROM groups ORDER BY sort_order,id").fetchall()
+    keyboard = [[{"text": str(group["name"])[:60], "callback_data": f"ip_browse_group:{group['id']}"}]
+                for group in groups]
+    keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+    telegram_set_state({"mode": "browse_groups"})
+    text = "Choose a group to view its IP records:" if groups else "No groups are available yet."
+    telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
+
+
+def telegram_browse_group(chat_id, message_id, group_id):
+    with connect_db() as db:
+        group = db.execute("SELECT id,name FROM groups WHERE id=?", (group_id,)).fetchone()
+        if not group:
+            telegram_browse_groups(chat_id, message_id)
+            return
+        rows = db.execute("SELECT id,name FROM ips WHERE group_id=? ORDER BY name,id", (group_id,)).fetchall()
+    keyboard = [[{"text": str(row["name"])[:60], "callback_data": f"ip_browse_ip:{group_id}:{row['id']}"}]
+                for row in rows]
+    keyboard.append([{"text": "⬅️ Groups", "callback_data": "ip_groups"}])
+    keyboard.append([{"text": "⌂ Menu", "callback_data": "menu"}])
+    telegram_set_state({"mode": "browse_ips", "group_id": int(group["id"]), "group_name": group["name"]})
+    text = f"Group: {group['name']}\nChoose an IP record:" if rows else f"Group: {group['name']}\nNo IP records in this group."
+    telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
+
+
+def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
+    state = telegram_get_state()
+    if state.get("mode") != "browse_ips" or str(state.get("group_id")) != str(group_id):
+        telegram_browse_groups(chat_id, message_id)
+        return
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT ips.id,ips.name,ips.ip_address,ips.port,ips.username,ips.password_enc,ips.notes,groups.name AS group_name "
+            "FROM ips JOIN groups ON groups.id=ips.group_id WHERE ips.id=? AND ips.group_id=?",
+            (ip_id, group_id),
+        ).fetchone()
+    if not row:
+        telegram_browse_group(chat_id, message_id, group_id)
+        return
+    try:
+        password = vault.decrypt((row["password_enc"] or "").encode()).decode() if row["password_enc"] else "-"
+    except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+        password = "-"
+    detail = (
+        f"📌 Name: {row['name']}\n"
+        f"🌐 IP: {row['ip_address']}\n"
+        f"🔌 Port: {row['port'] or '-'}\n"
+        f"👤 Username: {row['username'] or '-'}\n"
+        f"🔑 Password: {password}\n"
+        f"📁 Group: {row['group_name']}\n"
+        f"📝 Notes: {(row['notes'] or '-')[:1000]}"
+    )
+    keyboard = [
+        [{"text": "⬅️ IP names", "callback_data": f"ip_browse_group:{group_id}"}],
+        [{"text": "⬅️ All groups", "callback_data": "ip_groups"},
+         {"text": "⌂ Menu", "callback_data": "menu"}],
+    ]
+    telegram_set_state({"mode": "browse_detail", "group_id": int(group_id), "group_name": row["group_name"]})
+    telegram_replace_message(chat_id, message_id, detail, {"inline_keyboard": keyboard})
+
+
 def telegram_set_state(state):
     save_secure_setting("telegram_conversation_state_enc", json.dumps(state, ensure_ascii=False))
 
@@ -434,13 +513,14 @@ def telegram_menu(chat_id, message_id=None):
             {"text": "➕ Add IP", "callback_data": "ip_add"},
             {"text": "🔎 Search", "callback_data": "ip_search"},
         ],
+        [{"text": "📂 Display all groups", "callback_data": "ip_groups"}],
         [{"text": "🔐 2FA code", "callback_data": "telegram_2fa_code"}],
     ]}
     if message_id:
         telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
                          "text": "IP Management — choose an option:", "reply_markup": markup})
     else:
-        telegram_send(chat_id, "IP Management — choose an option:", markup)
+        telegram_send(chat_id, "IP Management — choose an option:", markup, delete_after=0)
 
 
 def handle_telegram_update(update):
@@ -459,6 +539,23 @@ def handle_telegram_update(update):
         if action == "menu":
             telegram_set_state({})
             telegram_menu(chat_id, message.get("message_id"))
+        elif action == "ip_groups":
+            telegram_browse_groups(chat_id, message.get("message_id"))
+        elif action.startswith("ip_browse_group:"):
+            try:
+                selected_group_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                telegram_browse_groups(chat_id, message.get("message_id"))
+                return
+            telegram_browse_group(chat_id, message.get("message_id"), selected_group_id)
+        elif action.startswith("ip_browse_ip:"):
+            try:
+                _, selected_group_id, selected_ip_id = action.split(":", 2)
+                selected_group_id, selected_ip_id = int(selected_group_id), int(selected_ip_id)
+            except (TypeError, ValueError):
+                telegram_browse_groups(chat_id, message.get("message_id"))
+                return
+            telegram_browse_ip(chat_id, message.get("message_id"), selected_group_id, selected_ip_id)
         elif action == "telegram_2fa_code":
             telegram_set_state({})
             code = issue_telegram_login_code()
