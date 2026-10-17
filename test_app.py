@@ -197,14 +197,66 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"verification code is invalid", response.data)
 
+    def test_telegram_menu_includes_display_all_groups_button(self):
+        with patch.object(archive, "telegram_send") as send:
+            archive.telegram_menu("12345")
+        markup = send.call_args.args[2]
+        self.assertEqual(markup["inline_keyboard"][1][0]["text"], "📂 Display all groups")
+        self.assertEqual(markup["inline_keyboard"][1][0]["callback_data"], "ip_groups")
+
+    def test_telegram_group_browser_replaces_screens_and_shows_ip_details_only_on_selection(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        encrypted = archive.vault.encrypt(b"Router-Secret-9").decode()
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups LIMIT 1").fetchone()[0]
+            db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES(?,?,?,?)",
+                       ("Remote Sites", "Remote network devices", archive.now(), 1))
+            remote_id = db.execute("SELECT id FROM groups WHERE name='Remote Sites'").fetchone()[0]
+            db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("Branch Router", "192.0.2.77", "8291", "netadmin", encrypted, "Branch office", remote_id, "test", archive.now(), archive.now()))
+            ip_id = db.execute("SELECT id FROM ips WHERE name='Branch Router'").fetchone()[0]
+            db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("Core Switch", "192.0.2.88", "22", "admin", "", "Core network", group_id, "test", archive.now(), archive.now()))
+        with patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 501}}) as api:
+            archive.handle_telegram_update({"callback_query": {"id": "browse-groups", "data": "ip_groups",
+                "message": {"message_id": 101, "chat": {"id": 12345, "type": "private"}}}})
+            group_calls = [call.args[1] for call in api.call_args_list if call.args[0] == "editMessageText"]
+            self.assertEqual(len(group_calls), 1)
+            self.assertIn("Choose a group", group_calls[-1]["text"])
+            group_buttons = group_calls[-1]["reply_markup"]["inline_keyboard"]
+            self.assertIn("Remote Sites", [button["text"] for row in group_buttons for button in row])
+            self.assertEqual(archive.telegram_get_state()["mode"], "browse_groups")
+
+            archive.handle_telegram_update({"callback_query": {"id": "browse-ips", "data": f"ip_browse_group:{remote_id}",
+                "message": {"message_id": 101, "chat": {"id": 12345, "type": "private"}}}})
+            ip_calls = [call.args[1] for call in api.call_args_list if call.args[0] == "editMessageText"]
+            ip_screen = ip_calls[-1]
+            self.assertIn("Branch Router", [button["text"] for row in ip_screen["reply_markup"]["inline_keyboard"] for button in row])
+            self.assertNotIn("192.0.2.77", ip_screen["text"])
+            self.assertNotIn("192.0.2.77", str(ip_screen["reply_markup"]))
+            self.assertEqual(archive.telegram_get_state()["mode"], "browse_ips")
+
+            archive.handle_telegram_update({"callback_query": {"id": "browse-details", "data": f"ip_browse_ip:{remote_id}:{ip_id}",
+                "message": {"message_id": 101, "chat": {"id": 12345, "type": "private"}}}})
+            detail_calls = [call.args[1] for call in api.call_args_list if call.args[0] == "editMessageText"]
+            detail = detail_calls[-1]
+            self.assertIn("Branch Router", detail["text"])
+            self.assertIn("192.0.2.77", detail["text"])
+            self.assertIn("8291", detail["text"])
+            self.assertIn("netadmin", detail["text"])
+            self.assertIn("Router-Secret-9", detail["text"])
+            self.assertIn("Branch office", detail["text"])
+            self.assertEqual(detail["message_id"], 101)
+            self.assertEqual(archive.telegram_get_state()["mode"], "browse_detail")
+
     def test_telegram_menu_has_english_2fa_button_and_callback_issues_code(self):
         user_id, _ = self.create_user("telegram-button-admin", role="superadmin")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
             archive.telegram_menu("12345")
             menu_markup = send.call_args.args[2]
-            self.assertEqual(menu_markup["inline_keyboard"][1][0]["text"], "🔐 2FA code")
-            self.assertEqual(menu_markup["inline_keyboard"][1][0]["callback_data"], "telegram_2fa_code")
+            self.assertEqual(menu_markup["inline_keyboard"][2][0]["text"], "🔐 2FA code")
+            self.assertEqual(menu_markup["inline_keyboard"][2][0]["callback_data"], "telegram_2fa_code")
             archive.handle_telegram_update({"callback_query": {
                 "id": "callback-2fa", "data": "telegram_2fa_code",
                 "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
