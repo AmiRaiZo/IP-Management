@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+if [[ \${EUID} -ne 0 ]]; then
+  echo "Run with sudo: sudo ip-management-recover-access" >&2
+  exit 1
+fi
+
+ENV_FILE=/etc/station-archive/env
+DATA_DIR=/var/lib/station-archive
+if [[ -f "$ENV_FILE" ]]; then
+  # Read only this non-secret path setting; do not source the environment file as shell code.
+  configured_data_dir="$(sed -n 's/^STATION_ARCHIVE_DATA=//p' "$ENV_FILE" | tail -n 1)"
+  configured_data_dir="\${configured_data_dir%\"}"; configured_data_dir="\${configured_data_dir#\"}"
+  configured_data_dir="\${configured_data_dir%\'}"; configured_data_dir="\${configured_data_dir#\'}"
+  [[ -z "$configured_data_dir" ]] || DATA_DIR="$configured_data_dir"
+fi
+DB_PATH="\${IP_MANAGEMENT_DB_PATH:-$DATA_DIR/archive.sqlite3}"
+[[ -f "$DB_PATH" ]] || { echo "Database not found: $DB_PATH" >&2; echo "Set IP_MANAGEMENT_DB_PATH if this installation uses a custom database path." >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 is required." >&2; exit 1; }
+
+SSH_CONNECTION_VALUE="\${SSH_CONNECTION:-}"
+SSH_CLIENT_IP="\${SSH_CONNECTION_VALUE%% *}"
+if [[ -n "$SSH_CONNECTION_VALUE" && "$SSH_CLIENT_IP" != "$SSH_CONNECTION_VALUE" ]]; then
+  python3 - "$SSH_CLIENT_IP" <<'PY' >/dev/null 2>&1 || SSH_CLIENT_IP=""
+import ipaddress, sys
+ipaddress.ip_address(sys.argv[1])
+PY
+else
+  SSH_CLIENT_IP=""
+fi
+
+echo "IP Management access recovery"
+echo "Database: $DB_PATH"
+if [[ -n "$SSH_CLIENT_IP" ]]; then
+  echo "SSH client address detected: $SSH_CLIENT_IP"
+else
+  echo "SSH client address was not detected; use option 1 or 3."
+fi
+echo
+echo "1) Disable the application allowlist (keeps existing block rules)"
+echo "2) Allow this SSH client's IP and remove any block rule matching it"
+echo "3) Emergency reset: remove all IP rules and disable the allowlist"
+echo "4) Cancel"
+read -r -p "Choose 1-4: " CHOICE
+case "$CHOICE" in
+  1) MODE=disable_allowlist ;;
+  2)
+    [[ -n "$SSH_CLIENT_IP" ]] || { echo "Cannot use option 2 without a detected SSH client IP." >&2; exit 1; }
+    MODE=allow_ssh_ip
+    ;;
+  3)
+    echo "This removes all application IP access rules. It does not change the OS firewall."
+    read -r -p "Type RESET to confirm: " CONFIRM
+    [[ "$CONFIRM" == RESET ]] || { echo "Cancelled."; exit 0; }
+    MODE=reset_policy
+    ;;
+  4) echo "Cancelled."; exit 0 ;;
+  *) echo "Invalid choice." >&2; exit 1 ;;
+esac
+
+python3 - "$DB_PATH" "$MODE" "$SSH_CLIENT_IP" <<'PY'
+import ipaddress
+import os
+import sqlite3
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+db_path, mode, ssh_ip = sys.argv[1:]
+db_path = Path(db_path)
+stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+backup_dir = Path("/var/backups/ip-management-access-recovery")
+backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+backup_path = backup_dir / f"archive-{stamp}.sqlite3"
+os.chmod(backup_dir, 0o700)
+
+with sqlite3.connect(f"file:{db_path}?mode=rw", uri=True, timeout=30) as source:
+    with sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+os.chmod(backup_path, 0o600)
+
+with sqlite3.connect(db_path, timeout=30) as db:
+    db.execute("PRAGMA foreign_keys=ON")
+    db.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
+    db.execute("CREATE TABLE IF NOT EXISTS ip_access_rules (id INTEGER PRIMARY KEY, network TEXT NOT NULL UNIQUE, rule_type TEXT NOT NULL CHECK(rule_type IN ('block','allow')), note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if mode == "disable_allowlist":
+        db.execute("INSERT INTO app_settings(key,value) VALUES('ip_allowlist_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'")
+        message = "Application allowlist disabled. Existing block rules still apply."
+    elif mode == "allow_ssh_ip":
+        address = ipaddress.ip_address(ssh_ip)
+        # Block rules take precedence, so remove any block network containing this SSH source.
+        for row_id, raw_network in db.execute("SELECT id,network FROM ip_access_rules WHERE rule_type='block'").fetchall():
+            try:
+                if address in ipaddress.ip_network(raw_network, strict=False):
+                    db.execute("DELETE FROM ip_access_rules WHERE id=?", (row_id,))
+            except ValueError:
+                continue
+        host_network = f"{address}/{address.max_prefixlen}"
+        db.execute("INSERT INTO ip_access_rules(network,rule_type,note,created_by,created_at) VALUES(?,'allow','Added by SSH recovery tool','ssh-recovery',?) ON CONFLICT(network) DO UPDATE SET rule_type='allow',note=excluded.note,created_by=excluded.created_by,created_at=excluded.created_at", (host_network, now))
+        db.execute("INSERT INTO app_settings(key,value) VALUES('ip_allowlist_enabled','1') ON CONFLICT(key) DO UPDATE SET value='1'")
+        message = f"Allowed SSH client {host_network}; removed any matching block rules and enabled the allowlist."
+    elif mode == "reset_policy":
+        db.execute("DELETE FROM ip_access_rules")
+        db.execute("INSERT INTO app_settings(key,value) VALUES('ip_allowlist_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'")
+        message = "All application IP rules removed and allowlist disabled."
+    else:
+        raise SystemExit("Unsupported recovery mode")
+    db.commit()
+
+print(message)
+print(f"Database backup: {backup_path}")
+print("No OS firewall, SSH configuration, or other services were changed.")
+PY
+
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet station-archive.service; then
+  echo "The application service is running; the new IP policy applies on the next request."
+else
+  echo "Note: station-archive.service is not currently active. Check it with: systemctl status station-archive --no-pager"
+fi

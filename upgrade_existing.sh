@@ -123,7 +123,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static reconfigure_server.sh; do
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
@@ -131,6 +131,7 @@ done
 DEPLOYED=1
 systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
+install -o root -g root -m 0750 "$APP_DIR/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
 find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
@@ -260,7 +261,7 @@ git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
 git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static reconfigure_server.sh; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup" "$TMP/venv-backup"
 # Preserve exact dependencies so rollback never relies on PyPI or network access.
@@ -270,6 +271,7 @@ DEPLOYED=1
 	echo "PROGRESS:32:Preparing the application backup"
 	echo "PROGRESS:35:Installing application files while the current worker stays online"
 	rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+	install -o root -g root -m 0750 "$TMP/source/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
 	echo "PROGRESS:50:Installing privileged helper and server service configuration"
 install -o root -g root -m 0750 "$TMP/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
 cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'

@@ -63,6 +63,22 @@ sudo /usr/local/sbin/station-archive-update
 
 For a manual update, run the same command as an administrator. The updater fetches the configured repository, checks for required application files, synchronizes the application code, installs updated Python dependencies, validates Nginx configuration, and restarts the service. It does not reinstall Ubuntu packages, regenerate secrets, or intentionally remove runtime data.
 
+## Recovering access if an IP rule locks you out
+
+If an application allowlist or block rule prevents access to the website, SSH to the VPS (or use the VPS provider's console) and run:
+
+```bash
+sudo ip-management-recover-access
+```
+
+The tool makes a private SQLite backup first. Option 1 disables only the application allowlist while preserving block rules. Option 2 detects the source IP of the current SSH connection, adds an allow rule for it, and removes any block rule that matches it. Option 3 removes all application IP rules and disables the allowlist; it requires typing `RESET`. The tool changes only IP Management's database policy, not Ubuntu's firewall, SSH settings, or other services. If the command is not installed yet, download and install it over SSH:
+
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/ip-management-recover-access -o /usr/local/sbin/ip-management-recover-access
+sudo chmod 0750 /usr/local/sbin/ip-management-recover-access
+sudo /usr/local/sbin/ip-management-recover-access
+```
+
 ## Persistent files and service operations
 
 - Application code: `/opt/station-archive`
@@ -71,9 +87,10 @@ For a manual update, run the same command as an administrator. The updater fetch
 - Nginx site configuration: `/etc/nginx/sites-available/`
 - Service logs: `sudo journalctl -u station-archive -f`
 - Service status: `sudo systemctl status station-archive`
+- Emergency application IP access recovery: `sudo ip-management-recover-access`
 - Certificate renewal check: `sudo certbot renew --dry-run`
 
-The updater preserves `/var/lib/station-archive` and `/etc/station-archive/env`. Back up both securely. The environment file contains encryption and session secrets; losing them may make stored encrypted values unrecoverable. The GitHub repository must contain `app.py`, `setup_admin.py`, `requirements.txt`, `templates/`, and `static/`. Review repository changes before updating production, because the updater executes the application code supplied by that repository.
+The updater preserves `/var/lib/station-archive` and `/etc/station-archive/env`. Back up both securely. The environment file contains encryption and session secrets; losing them may make stored encrypted values unrecoverable. The GitHub repository must contain `app.py`, `setup_admin.py`, `requirements.txt`, `templates/`,  `static/`, and `ip-management-recover-access`. Review repository changes before updating production, because the updater executes the application code supplied by that repository.
 
 ## Network and TLS notes
 
