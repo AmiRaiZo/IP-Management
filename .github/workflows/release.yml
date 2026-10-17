@@ -28,7 +28,7 @@ jobs:
 
       - name: Validate deployment shell scripts
         shell: bash
-        run: bash -n install.sh upgrade_existing.sh update.sh uninstall.sh reconfigure_server.sh
+        run: bash -n install.sh station-archive-update upgrade_existing.sh update.sh uninstall.sh reconfigure_server.sh
 
       - name: Run application tests
         shell: bash
@@ -90,7 +90,7 @@ jobs:
           version=sys.argv[1]
           root=pathlib.Path(".")
           output=pathlib.Path(f"station-archive-v{version}.zip")
-          include=["app.py","requirements.txt","setup_admin.py","install.sh","upgrade_existing.sh","reconfigure_server.sh","update.sh","uninstall.sh","VERSION","README.md"]
+          include=["app.py","requirements.txt","setup_admin.py","install.sh","station-archive-update","upgrade_existing.sh","reconfigure_server.sh","update.sh","uninstall.sh","VERSION","README.md"]
           with zipfile.ZipFile(output,"w",zipfile.ZIP_DEFLATED) as archive:
               for item in include:
                   path=root/item
@@ -101,7 +101,7 @@ jobs:
                       if path.is_file():
                           archive.write(path, path.relative_to(root).as_posix())
           with zipfile.ZipFile(output) as archive:
-              required={"app.py","requirements.txt","VERSION","reconfigure_server.sh","update.sh","templates","static"}
+              required={"app.py","requirements.txt","VERSION","station-archive-update","reconfigure_server.sh","update.sh","templates","static"}
               names=set(archive.namelist())
               missing=[name for name in required if not any(n==name or n.startswith(name+"/") for n in names)]
               if missing:

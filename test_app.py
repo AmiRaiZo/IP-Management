@@ -1043,12 +1043,20 @@ if __name__ == "__main__":
 
 
 class ReleaseScriptSyntaxTests(unittest.TestCase):
-    def test_generated_updater_has_valid_bash_syntax(self):
+    def test_deployment_shell_scripts_have_valid_bash_syntax(self):
         bash = shutil.which("bash")
         if not bash:
             self.skipTest("bash is not installed on this platform")
-        installer = Path(__file__).with_name("install.sh").read_text(encoding="utf-8")
-        match = re.search(r"cat > /usr/local/sbin/station-archive-update <<'UPDATER'\n(.*?)\nUPDATER", installer, re.S)
-        self.assertIsNotNone(match, "installer must contain the updater heredoc")
-        result = subprocess.run([bash, "-n"], input=match.group(1), text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        root = Path(__file__).resolve().parent
+        for name in ("install.sh", "station-archive-update"):
+            with self.subTest(script=name):
+                script = root / name
+                self.assertTrue(script.is_file(), f"missing deployment script: {name}")
+                result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+
+    def test_updater_refreshes_installed_helper_after_validation(self):
+        updater = Path(__file__).with_name("station-archive-update").read_text(encoding="utf-8")
+        self.assertIn('bash -n "$TMP/station-archive-update.new"', updater)
+        self.assertIn('install -o root -g root -m 0750 "$TMP/station-archive-update.new" /usr/local/sbin/station-archive-update', updater)
+        self.assertIn("station-archive-update; do", updater)
