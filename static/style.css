@@ -207,5 +207,10 @@ html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 /* Keep the record avatar separate from its name and align the Name column to the left. */
 .inventory-panel .table-scroll table th:first-child,.inventory-panel .table-scroll table td:first-child{text-align:left}
 .inventory-panel .table-scroll .record-name{justify-content:flex-start}
+/* Center the label within the full Name cell while keeping the avatar anchored at the left edge. */
+.inventory-panel .table-scroll .record-name{position:relative;width:100%;min-height:32px;justify-content:flex-start}
+.inventory-panel .table-scroll .record-name>span:last-child{position:absolute;inset:0;display:grid;align-content:center;justify-items:center;text-align:center;pointer-events:none}
+.inventory-panel .table-scroll .record-name>span:last-child strong,.inventory-panel .table-scroll .record-name>span:last-child small{text-align:center;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.inventory-panel .table-scroll .record-avatar{position:relative;z-index:1}
 .login-user-avatar-image{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .login-user-avatar-fallback[hidden]{display:none!important}
