@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-if [[ \${EUID} -ne 0 ]]; then
+if [[ ${EUID} -ne 0 ]]; then
   echo "Run with sudo: sudo ip-management-recover-access" >&2
   exit 1
 fi
@@ -12,16 +12,16 @@ DATA_DIR=/var/lib/station-archive
 if [[ -f "$ENV_FILE" ]]; then
   # Read only this non-secret path setting; do not source the environment file as shell code.
   configured_data_dir="$(sed -n 's/^STATION_ARCHIVE_DATA=//p' "$ENV_FILE" | tail -n 1)"
-  configured_data_dir="\${configured_data_dir%\"}"; configured_data_dir="\${configured_data_dir#\"}"
-  configured_data_dir="\${configured_data_dir%\'}"; configured_data_dir="\${configured_data_dir#\'}"
+  configured_data_dir="${configured_data_dir%\"}"; configured_data_dir="${configured_data_dir#\"}"
+  configured_data_dir="${configured_data_dir%\'}"; configured_data_dir="${configured_data_dir#\'}"
   [[ -z "$configured_data_dir" ]] || DATA_DIR="$configured_data_dir"
 fi
-DB_PATH="\${IP_MANAGEMENT_DB_PATH:-$DATA_DIR/archive.sqlite3}"
+DB_PATH="${IP_MANAGEMENT_DB_PATH:-$DATA_DIR/archive.sqlite3}"
 [[ -f "$DB_PATH" ]] || { echo "Database not found: $DB_PATH" >&2; echo "Set IP_MANAGEMENT_DB_PATH if this installation uses a custom database path." >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 is required." >&2; exit 1; }
 
-SSH_CONNECTION_VALUE="\${SSH_CONNECTION:-}"
-SSH_CLIENT_IP="\${SSH_CONNECTION_VALUE%% *}"
+SSH_CONNECTION_VALUE="${SSH_CONNECTION:-}"
+SSH_CLIENT_IP="${SSH_CONNECTION_VALUE%% *}"
 if [[ -n "$SSH_CONNECTION_VALUE" && "$SSH_CLIENT_IP" != "$SSH_CONNECTION_VALUE" ]]; then
   python3 - "$SSH_CLIENT_IP" <<'PY' >/dev/null 2>&1 || SSH_CLIENT_IP=""
 import ipaddress, sys
