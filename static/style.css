@@ -228,3 +228,14 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 
 /* Align the Name header with the IP name text, not the avatar. */
 .inventory-panel .table-scroll table thead th:first-child{padding-left:60px}
+
+
+/* v2.6.3: keep the profile avatar in its own table column, separate from Name. */
+.inventory-panel .table-scroll table{table-layout:auto}
+.inventory-panel .table-scroll table thead th:first-child{width:54px;min-width:54px;max-width:54px;padding:13px 8px;text-align:center}
+.inventory-panel .table-scroll table tbody td.avatar-cell{width:54px;min-width:54px;max-width:54px;padding:10px 8px;text-align:center}
+.inventory-panel .table-scroll table tbody td.name-cell{min-width:150px;text-align:left;padding-left:18px;padding-right:18px}
+.inventory-panel .table-scroll .record-name{justify-content:flex-start;width:auto;min-height:0}
+.inventory-panel .table-scroll .record-avatar{position:static;transform:none;margin:0 auto;border-radius:50%}
+.inventory-panel .table-scroll .record-name>span:last-child{width:auto;max-width:100%;margin-left:0;justify-items:start;text-align:left}
+.inventory-panel .table-scroll table tbody td.name-cell strong{display:block;text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis}
