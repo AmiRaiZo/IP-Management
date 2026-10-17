@@ -1,5 +1,9 @@
 import os
 import tempfile
+import re
+import shutil
+import subprocess
+from pathlib import Path
 import unittest
 from io import BytesIO
 from unittest.mock import patch
