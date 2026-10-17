@@ -7,7 +7,7 @@
   {% if stage == 'verify' %}
   {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
   <h1>Verification code</h1>
-  <p class="login-description verify-description">Enter the 6-digit code from your authenticator, or one unused recovery code.</p>
+  <p class="login-description verify-description">Enter the 6-digit code from your authenticator, a one-time recovery code, or the temporary Telegram fallback code for the superadmin account.</p>
   <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="code">Authenticator or recovery code</label><input class="login-input otp-input" id="code" name="code" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="40" required autofocus placeholder="000 000 or recovery code">
