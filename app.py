@@ -524,7 +524,7 @@ def handle_telegram_update(update):
                               (f"%{term}%", f"%{term}%")).fetchall()
         if not rows:
             # Keep the search state active so the user can try another name without restarting.
-            telegram_send(chat_id, "No record matched that name or IP.\\nPlease send another name or IP address, or use /menu to cancel.",
+            telegram_send(chat_id, "No record matched that name or IP.\nPlease send another name or IP address, or use /menu to cancel.",
                           {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
             return
         telegram_set_state({})
@@ -534,8 +534,8 @@ def handle_telegram_update(update):
                 password = vault.decrypt((row["password_enc"] or "").encode()).decode() if row["password_enc"] else "-"
             except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
                 password = "-"
-            lines.append(f"\\n📌 {row['name']}\\n🌐 IP: {row['ip_address']}\\n🔌 Port: {row['port'] or '-'}\\n👤 Username: {row['username'] or '-'}\\n🔑 Password: {password}\\n📝 Notes: {(row['notes'] or '-')[:300]}")
-        telegram_send(chat_id, "\\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
+            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 Username: {row['username'] or '-'}\n🔑 Password: {password}\n📝 Notes: {(row['notes'] or '-')[:300]}")
+        telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
         return
     if state.get("mode") == "add":
         # Best-effort deletion also removes submitted passwords from the private bot chat.
