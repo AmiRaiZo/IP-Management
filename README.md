@@ -1,3 +1,7 @@
+## Version 2.6.1 release notes
+
+- Fixed the IP list `Name` column header alignment so it starts above the IP name text rather than the avatar.
+
 ## Version 2.6.0 release notes
 
 - Added a hide/show control for the left navigation sidebar; the preference is remembered in the browser.
