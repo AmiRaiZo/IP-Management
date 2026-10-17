@@ -239,3 +239,5 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 .inventory-panel .table-scroll .record-avatar{position:static;transform:none;margin:0 auto;border-radius:50%}
 .inventory-panel .table-scroll .record-name>span:last-child{width:auto;max-width:100%;margin-left:0;justify-items:start;text-align:left}
 .inventory-panel .table-scroll table tbody td.name-cell strong{display:block;text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+
+/* UI-only release marker: v2.6.3 avatar/name column separation. */
