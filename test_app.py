@@ -234,6 +234,18 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("Username: admin", result_text)
         self.assertEqual(archive.telegram_get_state(), {})
 
+    def test_telegram_add_flow_deletes_user_input_messages(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.telegram_set_state({"mode": "add", "step": "password", "data": {
+            "name": "Router", "ip_address": "192.0.2.2", "port": "22", "username": "admin"
+        }})
+        with patch.object(archive, "telegram_api", return_value={}) as api, patch.object(archive, "telegram_send"):
+            archive.handle_telegram_update({"message": {
+                "message_id": 81, "chat": {"id": 12345, "type": "private"}, "text": "sensitive-password"
+            }})
+        self.assertTrue(any(call.args[0] == "deleteMessage" and call.args[1].get("message_id") == 81
+                            for call in api.call_args_list))
+
     def test_telegram_search_miss_prompts_for_another_query(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         archive.telegram_set_state({"mode": "search", "step": "query"})
