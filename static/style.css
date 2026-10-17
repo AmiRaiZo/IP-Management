@@ -227,4 +227,4 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 
 
 /* Align the Name header with the IP name text, not the avatar. */
-.inventory-panel .table-scroll table thead th:first-child{padding-left:132px}
+.inventory-panel .table-scroll table thead th:first-child{padding-left:60px}
