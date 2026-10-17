@@ -521,7 +521,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('<th>Name</th>', page)
         stylesheet = (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8')
         self.assertIn('.inventory-panel .table-scroll table th:first-child{text-align:center;padding-left:18px}', stylesheet)
-        self.assertIn('.inventory-panel .table-scroll .record-name{position:relative;display:flex;align-items:center;justify-content:center;gap:100px;width:100%;min-height:32px}', stylesheet)
+        self.assertIn('.inventory-panel .table-scroll .record-name{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:32px}', stylesheet)
+        self.assertIn('width:calc(100% - 132px);margin-left:132px', stylesheet)
         self.assertIn('.inventory-panel .table-scroll .record-avatar{position:absolute;left:0;top:50%;transform:translateY(-50%);border-radius:50%}', stylesheet)
         self.assertIn('.profile-info{display:grid;gap:3px;min-width:0;flex:1}', stylesheet)
     def test_update_success_button_says_ok(self):
