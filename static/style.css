@@ -248,7 +248,7 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 .inventory-panel .table-scroll table thead th.avatar-column,
 .inventory-panel .table-scroll table tbody td.avatar-cell{width:76px;min-width:76px;max-width:76px;text-align:center;padding-left:10px;padding-right:10px}
 .inventory-panel .table-scroll table thead th.avatar-column{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:var(--surface-2, #f8faff)}
-.inventory-panel .table-scroll table tbody td.avatar-cell{background:var(--surface, #f7f8fc);vertical-align:middle}
+.inventory-panel .table-scroll table tbody td.avatar-cell{background:transparent;vertical-align:middle}
 .inventory-panel .table-scroll table thead th.name-column,
 .inventory-panel .table-scroll table tbody td.name-cell{padding-left:22px!important;text-align:left;min-width:180px}
 .inventory-panel .table-scroll table tbody td.name-cell strong{display:block;text-align:left;white-space:nowrap}
