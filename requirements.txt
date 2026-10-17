@@ -3,3 +3,4 @@ gunicorn>=23,<24
 cryptography>=45,<46
 pyotp>=2.9,<3
 qrcode[pil]>=8,<9
+Pillow>=11,<13

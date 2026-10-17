@@ -28,7 +28,12 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM groups")
             db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
-            db.execute("DELETE FROM app_settings WHERE key IN ('public_domain','public_port','update_repository')")
+            db.execute("DELETE FROM user_recovery_codes")
+            db.execute("DELETE FROM telegram_login_codes")
+            db.execute("DELETE FROM security_events")
+            db.execute("DELETE FROM ip_access_rules")
+            db.execute("DELETE FROM app_settings WHERE key='ip_allowlist_enabled'")
+            db.execute("DELETE FROM app_settings WHERE key IN ('public_domain','public_port','update_repository', 'telegram_bot_token_enc', 'telegram_chat_id_enc', 'telegram_webhook_secret_enc', 'telegram_conversation_state_enc')")
             db.execute("INSERT INTO app_settings(key,value) VALUES('two_factor_mode','per_user') ON CONFLICT(key) DO UPDATE SET value='per_user'")
 
     def csrf(self):
@@ -79,14 +84,16 @@ class ArchiveTests(unittest.TestCase):
             self.assertFalse(sess.permanent, "Login session must expire when the browser session ends")
         with archive.connect_db() as db:
             user = db.execute("SELECT totp_secret FROM users WHERE username='firstadmin'").fetchone()
-        self.assertEqual(user["totp_secret"], secret)
+        self.assertTrue(user["totp_secret"].startswith("fernet:"))
+        self.assertNotEqual(user["totp_secret"], secret)
+        self.assertEqual(archive.decrypt_authenticator_secret(user["totp_secret"]), secret)
 
     def test_password_then_totp_and_remember_2fa_for_one_day(self):
         _, secret = self.create_user("two-step")
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Authenticator code', response.data)
+        self.assertIn(b'Authenticator or recovery code', response.data)
         self.assertIn(b'WELCOME BACK', response.data)
         self.assertIn(b'two-step', response.data)
         self.assertIn(b'ID #', response.data)
@@ -101,7 +108,104 @@ class ArchiveTests(unittest.TestCase):
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Authenticator code', response.data)
+        self.assertIn(b'Authenticator or recovery code', response.data)
+
+    def test_recovery_codes_are_shown_once_hashed_and_single_use(self):
+        user_id, secret = self.create_user("recovery-user")
+        self.assertEqual(self.login("recovery-user", secret).status_code, 302)
+        response = self.client.post("/profile/recovery-codes", data={
+            "csrf_token": self.csrf(), "current_password": "test-pass", "current_code": pyotp.TOTP(secret).now(),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
+        import re
+        codes = re.findall(r"<code>([A-F0-9]{20})</code>", response.get_data(as_text=True))
+        self.assertEqual(len(codes), 10)
+        with archive.connect_db() as db:
+            stored = db.execute("SELECT code_hash FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchall()
+        self.assertEqual(len(stored), 10)
+        self.assertNotIn(codes[0], " ".join(row["code_hash"] for row in stored))
+
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "recovery-user", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": codes[0]})
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchone()[0], 9)
+
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        self.client.post("/login", data={"csrf_token": self.csrf(), "username": "recovery-user", "password": "test-pass"})
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": codes[0]})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"verification code is invalid", response.data)
+
+    def test_recovery_code_generation_requires_current_authenticator(self):
+        _, secret = self.create_user("recovery-reauth")
+        self.assertEqual(self.login("recovery-reauth", secret).status_code, 302)
+        response = self.client.post("/profile/recovery-codes", data={
+            "csrf_token": self.csrf(), "current_password": "test-pass", "current_code": "000000",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            count = db.execute("SELECT COUNT(*) FROM user_recovery_codes").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_telegram_command_issues_two_minute_single_use_superadmin_code(self):
+        user_id, secret = self.create_user("telegram-code-admin", role="superadmin")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {
+                "chat": {"id": 12345, "type": "private"}, "text": "/login_code"
+            }})
+        self.assertTrue(send.called)
+        message = send.call_args.args[1]
+        import re
+        match = re.search(r"(?<!\d)(\d{6})(?!\d)", message)
+        self.assertIsNotNone(match)
+        code = match.group(1)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT code_hash,expires_at FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()
+        self.assertIsNotNone(row)
+        self.assertNotIn(code, row["code_hash"])
+
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        self.assertEqual(response.status_code, 302)
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"verification code is invalid", response.data)
+
+    def test_telegram_login_code_expired_code_is_rejected(self):
+        user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
+        code = "123456"
+        with archive.connect_db() as db:
+            db.execute("INSERT INTO telegram_login_codes(user_id,code_hash,expires_at,created_at) VALUES(?,?,?,?)",
+                       (user_id, archive.telegram_login_code_hash(user_id, code), "2000-01-01T00:00:00+00:00", archive.now()))
+        self.assertFalse(archive.consume_telegram_login_code(user_id, code))
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes").fetchone()[0], 0)
+
+    def test_authenticated_session_without_verified_2fa_is_rejected_server_side(self):
+        user_id, _ = self.create_user("cannot-skip-2fa")
+        self.client.get("/login")
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = user_id
+            sess["username"] = "cannot-skip-2fa"
+            sess["csrf_token"] = "test-csrf"
+            sess.pop("two_factor_verified", None)
+        response = self.client.get("/settings")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("user_id", sess)
 
     def test_global_two_factor_policy_is_superadmin_controlled(self):
         _, secret = self.create_user("policyadmin", role="superadmin")
@@ -146,7 +250,9 @@ class ArchiveTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 302)
         with archive.connect_db() as db:
-            shared = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()["value"]
+            shared_stored = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()["value"]
+        self.assertTrue(shared_stored.startswith("fernet:"))
+        shared = archive.decrypt_authenticator_secret(shared_stored)
         response = self.client.post("/settings/security", data={
             "csrf_token": self.csrf(), "two_factor_mode": "shared",
         })
@@ -174,7 +280,7 @@ class ArchiveTests(unittest.TestCase):
             "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
         })
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Authenticator code", response.data)
+        self.assertIn(b"Authenticator or recovery code", response.data)
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
         })
@@ -327,7 +433,6 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
         self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
-
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
         self.assertEqual(self.login("update-success-user", secret).status_code, 302)
@@ -444,9 +549,12 @@ class ArchiveTests(unittest.TestCase):
     def test_profile_avatar_upload_renders_in_sidebar_and_is_served(self):
         user_id, secret = self.create_user("avatar-user", role="admin")
         self.assertEqual(self.login("avatar-user", secret).status_code, 302)
+        image_data = BytesIO()
+        archive.Image.new("RGB", (2, 2), (20, 120, 220)).save(image_data, format="PNG")
+        image_data.seek(0)
         response = self.client.post("/profile", data={
             "csrf_token": self.csrf(),
-            "avatar": (BytesIO(b"test-image-bytes"), "avatar.png"),
+            "avatar": (image_data, "avatar.png"),
         }, content_type="multipart/form-data")
         self.assertEqual(response.status_code, 302)
         with archive.connect_db() as db:
@@ -459,7 +567,9 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('id="avatar"', profile_page)
         image_response = self.client.get("/media/" + user["profile_image"])
         self.assertEqual(image_response.status_code, 200)
-        self.assertEqual(image_response.data, b"test-image-bytes")
+        with archive.Image.open(BytesIO(image_response.data)) as sanitized:
+            self.assertEqual(sanitized.format, "PNG")
+            self.assertEqual(sanitized.size, (2, 2))
 
     def test_legacy_database_migrates_records_and_promotes_first_user(self):
         with archive.connect_db() as db:
@@ -550,7 +660,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.login("repository-settings", secret).status_code, 302)
         payload = {
             "csrf_token": self.csrf(), "action": "repository",
-            "update_repository": "https://github.com/example/private-archive",
+            "update_repository": "https://github.com/AmiRaiZo/IP-Management",
         }
         payload["current_password"] = "wrong-password"
         response = self.client.post("/settings/deployment", data=payload)
@@ -562,7 +672,299 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         with archive.connect_db() as db:
             saved = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
-        self.assertEqual(saved["value"], "https://github.com/example/private-archive")
+        self.assertEqual(saved["value"], "https://github.com/amiraizo/ip-management")
+
+    def test_untrusted_update_repository_is_rejected(self):
+        _, secret = self.create_user("repository-allowlist")
+        self.assertEqual(self.login("repository-allowlist", secret).status_code, 302)
+        response = self.client.post("/settings/deployment", data={
+            "csrf_token": self.csrf(), "action": "repository",
+            "update_repository": "https://github.com/someone-else/malicious-repo",
+            "current_password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            saved = db.execute("SELECT value FROM app_settings WHERE key='update_repository'").fetchone()
+        self.assertIsNone(saved)
+
+    def test_new_accounts_require_strong_password_and_default_to_per_user_mfa(self):
+        _, secret = self.create_user("account-policy-admin")
+        self.assertEqual(self.login("account-policy-admin", secret).status_code, 302)
+        self.client.post("/users", data={
+            "csrf_token": self.csrf(), "username": "weak-new-user", "password": "short", "role": "admin",
+        })
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM users WHERE username='weak-new-user'").fetchone())
+        self.client.post("/users", data={
+            "csrf_token": self.csrf(), "username": "strong-new-user", "password": "correct-horse-battery", "role": "admin",
+        })
+        with archive.connect_db() as db:
+            row = db.execute("SELECT two_factor_enabled FROM users WHERE username='strong-new-user'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["two_factor_enabled"], 1)
+
+    def test_failed_login_is_logged_without_storing_password(self):
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "attacker-name", "password": "do-not-store-this-secret",
+        })
+        self.assertEqual(response.status_code, 200)
+        with archive.connect_db() as db:
+            event = db.execute("SELECT * FROM security_events WHERE event_type='login' ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(event["attempted_username"], "attacker-name")
+        self.assertEqual(event["result"], "failed")
+        self.assertEqual(event["remote_ip"], "127.0.0.1")
+        self.assertNotIn("do-not-store-this-secret", str(dict(event)))
+        self.assertRegex(event["detail"], r"guess fingerprint=[0-9a-f]{16}")
+
+    @patch.object(archive, "send_telegram_security_alert", return_value=True)
+    def test_failed_login_sends_only_metadata_and_guess_fingerprint_to_telegram(self, telegram):
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "telegram-guess", "password": "never-send-this-password",
+        })
+        self.assertEqual(response.status_code, 200)
+        telegram.assert_called_once()
+        alert = telegram.call_args.args[0]
+        self.assertIn("telegram-guess", alert)
+        self.assertIn("127.0.0.1", alert)
+        self.assertIn("شناسه اثرانگشت رمز حدس‌زده‌شده:", alert)
+        self.assertIn("ورود به پنل ناموفق", alert)
+        self.assertIn("نام‌میزبان:", alert)
+        self.assertIn("زمان:", alert)
+        self.assertNotIn("never-send-this-password", alert)
+
+    @patch.object(archive, "send_telegram_security_alert", return_value=True)
+    def test_failed_2fa_sends_alert_without_authenticator_code(self, telegram):
+        _, secret = self.create_user("bad-2fa-alert")
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "bad-2fa-alert", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "code": "123456",
+        })
+        self.assertEqual(response.status_code, 200)
+        telegram.assert_called_once()
+        alert = telegram.call_args.args[0]
+        self.assertIn("ورود به پنل ناموفق", alert)
+        self.assertIn("علت: کد 2FA اشتباه است", alert)
+        self.assertIn("bad-2fa-alert", alert)
+        self.assertNotIn("123456", alert)
+
+    def test_telegram_credentials_are_encrypted_and_superadmin_only(self):
+        _, secret = self.create_user("telegram-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-admin", secret).status_code, 302)
+        response = self.client.post("/settings/telegram", data={
+            "csrf_token": self.csrf(), "telegram_bot_token": "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345",
+            "telegram_chat_id": "-1001234567890", "action": "save",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            token_row = db.execute("SELECT value FROM app_settings WHERE key='telegram_bot_token_enc'").fetchone()
+            chat_row = db.execute("SELECT value FROM app_settings WHERE key='telegram_chat_id_enc'").fetchone()
+        self.assertNotIn("123456:abcdefghijklmnopqrstuvwxyzABCDE_12345", token_row["value"])
+        self.assertNotIn("-1001234567890", chat_row["value"])
+        self.assertEqual(archive.secure_setting("telegram_chat_id_enc"), "-1001234567890")
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        _, user_secret = self.create_user("telegram-regular", role="admin")
+        with patch.object(archive, "send_telegram_security_alert", return_value=True):
+            self.assertEqual(self.login("telegram-regular", user_secret).status_code, 302)
+        response = self.client.post("/settings/telegram", data={"csrf_token": self.csrf(), "action": "save"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_shared_2fa_seed_is_not_repeatedly_disclosed_by_settings(self):
+        _, secret = self.create_user("one-time-secret-admin", role="superadmin")
+        self.assertEqual(self.login("one-time-secret-admin", secret).status_code, 302)
+        response = self.client.post("/settings/security", data={
+            "csrf_token": self.csrf(), "action": "generate_shared_secret",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            seed_stored = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()["value"]
+        seed = archive.decrypt_authenticator_secret(seed_stored)
+        self.assertTrue(seed_stored.startswith("fernet:"))
+        first_view = self.client.get("/settings")
+        self.assertEqual(first_view.status_code, 200)
+        self.assertIn(seed.encode(), first_view.data)
+        second_view = self.client.get("/settings")
+        self.assertEqual(second_view.status_code, 200)
+        self.assertNotIn(seed.encode(), second_view.data)
+
+    def test_legacy_plaintext_totp_seeds_are_readable_for_migration_and_encrypt_on_write(self):
+        legacy_seed = pyotp.random_base32()
+        self.assertEqual(archive.decrypt_authenticator_secret(legacy_seed), legacy_seed)
+        encrypted = archive.encrypt_authenticator_secret(legacy_seed)
+        self.assertTrue(encrypted.startswith("fernet:"))
+        self.assertNotIn(legacy_seed, encrypted)
+        self.assertEqual(archive.decrypt_authenticator_secret(encrypted), legacy_seed)
+
+    def test_database_startup_migrates_legacy_plaintext_totp_seeds(self):
+        user_seed = pyotp.random_base32()
+        shared_seed = pyotp.random_base32()
+        with archive.connect_db() as db:
+            db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)",
+                       ("legacy-seed-user", archive.password_hash("test-pass"), archive.now(), "admin", user_seed))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (shared_seed,))
+        archive.init_db()
+        with archive.connect_db() as db:
+            stored_user_seed = db.execute("SELECT totp_secret FROM users WHERE username='legacy-seed-user'").fetchone()["totp_secret"]
+            stored_shared_seed = db.execute("SELECT value FROM app_settings WHERE key='shared_two_factor_secret'").fetchone()["value"]
+        self.assertTrue(stored_user_seed.startswith("fernet:"))
+        self.assertTrue(stored_shared_seed.startswith("fernet:"))
+        self.assertEqual(archive.decrypt_authenticator_secret(stored_user_seed), user_seed)
+        self.assertEqual(archive.decrypt_authenticator_secret(stored_shared_seed), shared_seed)
+
+    def test_readable_txt_backup_requires_password_and_contains_data_without_auth_secrets(self):
+        _, secret = self.create_user("backup-admin", role="superadmin")
+        self.assertEqual(self.login("backup-admin", secret).status_code, 302)
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("Router A", "192.0.2.10", 22, "root", archive.vault.encrypt(b"device-secret").decode(), "test-note", group_id, "backup-admin", archive.now(), archive.now()))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("TOPSECRETSEED",))
+        bad = self.client.post("/settings/export.txt", data={"csrf_token": self.csrf(), "current_password": "wrong-password"})
+        self.assertEqual(bad.status_code, 403)
+        response = self.client.post("/settings/export.txt", data={"csrf_token": self.csrf(), "current_password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/plain", response.content_type)
+        self.assertIn("attachment;", response.headers.get("Content-Disposition", ""))
+        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
+        body = response.data.decode("utf-8-sig")
+        self.assertIn("READABLE TEXT DATA BACKUP", body)
+        self.assertIn("192.0.2.10", body)
+        self.assertIn("device-secret", body)
+        self.assertIn("[REDACTED: secret]", body)
+        self.assertNotIn("TOPSECRETSEED", body)
+        self.assertNotIn("test-pass", body)
+        with archive.connect_db() as db:
+            account_hash = db.execute("SELECT password_hash FROM users WHERE username='backup-admin'").fetchone()["password_hash"]
+        self.assertNotIn(account_hash, body)
+        self.assertIn("--- FILE: app.py ---", body)
+        self.assertIn("--- FILE: templates/settings.html ---", body)
+
+    def test_security_and_backup_routes_reject_regular_user_and_missing_csrf(self):
+        _, secret = self.create_user("route-guard-admin", role="admin")
+        self.assertEqual(self.login("route-guard-admin", secret).status_code, 302)
+        self.assertEqual(self.client.get("/security").status_code, 403)
+        self.assertEqual(self.client.get("/settings").status_code, 403)
+        self.assertEqual(self.client.post("/settings/export.txt", data={"current_password": "test-pass"}).status_code, 400)
+
+    def test_protected_json_endpoints_and_security_headers(self):
+        response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("X-Frame-Options"), "DENY")
+        self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn("default-src 'self'", response.headers.get("Content-Security-Policy", ""))
+        for path in ("/security", "/settings/deployment/status", "/update/check", "/update/status"):
+            with self.subTest(path=path):
+                guarded = self.client.get(path)
+                self.assertIn(guarded.status_code, (302, 403))
+                self.assertNotIn(b"shared_two_factor_secret", guarded.data)
+
+    def test_repeated_failed_logins_are_rate_limited(self):
+        self.client.get("/login")
+        for _ in range(8):
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "unknown-account", "password": "wrong",
+            })
+            self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "unknown-account", "password": "wrong",
+        })
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers.get("Retry-After"), "900")
+
+    def test_2fa_enrollment_guesses_are_rate_limited_too(self):
+        user_id, _ = self.create_user("enrollment-throttle")
+        self.client.get("/login")
+        with self.client.session_transaction() as sess:
+            sess["pending_2fa_user_id"] = user_id
+            sess["pending_2fa_secret"] = pyotp.random_base32()
+            sess["csrf_token"] = "enrollment-csrf"
+        for _ in range(8):
+            response = self.client.post("/setup-2fa", data={"csrf_token": "enrollment-csrf", "code": "not-a-code"})
+            self.assertEqual(response.status_code, 200)
+        response = self.client.post("/setup-2fa", data={"csrf_token": "enrollment-csrf", "code": "not-a-code"})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers.get("Retry-After"), "900")
+
+    def test_telegram_webhook_rejects_missing_or_wrong_secret(self):
+        with archive.app.test_request_context("/telegram/webhook"):
+            archive.save_secure_setting("telegram_webhook_secret_enc", "expected-secret")
+        response = self.client.post("/telegram/webhook", json={"message": {"text": "ربات"}})
+        self.assertEqual(response.status_code, 403)
+        response = self.client.post("/telegram/webhook", json={"message": {"text": "ربات"}},
+                                    headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_telegram_webhook_rejects_unconfigured_chat(self):
+        archive.save_secure_setting("telegram_webhook_secret_enc", "expected-secret")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "telegram_menu") as menu:
+            response = self.client.post("/telegram/webhook", json={
+                "message": {"chat": {"id": 99999, "type": "private"}, "text": "ربات"}
+            }, headers={"X-Telegram-Bot-Api-Secret-Token": "expected-secret"})
+        self.assertEqual(response.status_code, 200)
+        menu.assert_not_called()
+
+    def test_telegram_add_flow_creates_record_without_connection_password(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        callback = {"callback_query": {"id": "cb1", "data": "ip_add", "message": {
+            "message_id": 1, "chat": {"id": 12345, "type": "private"}}}}
+        with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
+            archive.handle_telegram_update(callback)
+            for value in ("Router via bot", "192.0.2.55", "22", "admin", "test record"):
+                archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": value}})
+        with archive.connect_db() as db:
+            row = db.execute("SELECT name,ip_address,port,username,password_enc,notes,created_by FROM ips WHERE ip_address='192.0.2.55'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["name"], "Router via bot")
+        self.assertEqual(row["port"], 22)
+        self.assertEqual(row["username"], "admin")
+        self.assertEqual(row["password_enc"], "")
+        self.assertEqual(row["created_by"], "telegram-bot")
+        self.assertTrue(any("IP ثبت شد" in call.args[1] for call in send.call_args_list))
+
+    def test_telegram_search_results_never_include_saved_connection_password(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("Search Router", "192.0.2.77", 22, "root", archive.vault.encrypt(b"do-not-send-device-secret").decode(), "sample", group_id, "test", archive.now(), archive.now()))
+        archive.telegram_set_state({"mode": "search", "step": "query"})
+        with patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": "Search Router"}})
+        output = "\n".join(str(call.args[1]) for call in send.call_args_list)
+        self.assertIn("192.0.2.77", output)
+        self.assertNotIn("do-not-send-device-secret", output)
+
+    def test_application_ip_block_does_not_require_os_firewall(self):
+        _, secret = self.create_user("ip-rules-admin")
+        self.assertEqual(self.login("ip-rules-admin", secret).status_code, 302)
+        response = self.client.post("/security/rules", data={
+            "csrf_token": self.csrf(), "rule_type": "block", "network": "203.0.113.55", "note": "test rule",
+        })
+        self.assertEqual(response.status_code, 302)
+        blocked = self.client.get("/login", environ_overrides={"REMOTE_ADDR": "203.0.113.55"})
+        self.assertEqual(blocked.status_code, 403)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT network,rule_type FROM ip_access_rules WHERE network='203.0.113.55/32'").fetchone()
+        self.assertEqual((row["network"], row["rule_type"]), ("203.0.113.55/32", "block"))
+
+    def test_security_center_is_superadmin_only_and_shows_jalali_time(self):
+        _, secret = self.create_user("security-admin")
+        self.assertEqual(self.login("security-admin", secret).status_code, 302)
+        with archive.app.test_request_context("/", environ_overrides={"REMOTE_ADDR": "127.0.0.1"}):
+            archive.security_event("login", "sample-user", "failed", "test event")
+        response = self.client.get("/security")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Security & login logs", response.data)
+        self.assertIn(b"Not stored by design", response.data)
+        with archive.app.test_request_context("/", environ_overrides={"REMOTE_ADDR": "127.0.0.1"}):
+            self.assertEqual(archive.jalali_datetime("2026-03-21T00:00:00+00:00")[:10], "1405/01/01")
 
 if __name__ == "__main__":
     unittest.main()

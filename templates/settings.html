@@ -9,6 +9,8 @@
     <a href="#directory" data-settings-tab="directory">IP Directory</a>
     <a href="#general" data-settings-tab="general">Public address</a>
     <a href="#security" data-settings-tab="security">Two-factor authentication</a>
+    <a href="#notifications" data-settings-tab="notifications">Security notifications</a>
+    <a href="#backup" data-settings-tab="backup">Backup / export TXT</a>
   </nav>
   <div class="settings-content">
     <form class="panel form-panel settings-section is-active" id="branding" data-settings-section="branding" method="post" enctype="multipart/form-data">
@@ -46,7 +48,7 @@
 
     <section class="panel form-panel settings-section" id="directory" data-settings-section="directory">
       <div class="panel-heading"><div><h2>IP Directory display</h2><p>Password visibility and copying.</p></div></div>
-      <div class="setting-row"><div><strong>Saved connection passwords</strong><p class="muted">Super administrators always have access. To choose which other accounts can see and copy saved device passwords, open Users, select an account, and enable “Can view saved IP passwords”. This permission is managed separately for each user. Passwords remain encrypted in the database.</p></div><a class="btn btn-secondary" href="{{ url_for('users') }}">Manage users &amp; permissions</a></div>
+      <div class="setting-row"><div><strong>Saved connection passwords</strong><p class="muted">Super administrators always have access. To choose which other accounts can see and copy saved device passwords, open Users, select an account, and enable “Can view saved IP passwords”. This permission is managed separately for each user. Passwords remain encrypted in the database.</p></div><a class="btn btn-secondary" href="{{ url_for('users') }}">Manage users & permissions</a></div>
     </section>
 
     <section class="panel form-panel settings-section" id="general" data-settings-section="general">
@@ -59,13 +61,13 @@
         <button class="btn btn-primary" type="submit">Apply domain and port to server</button>
       </form>
       <p class="helper-note">Saving updates Nginx, the SSL certificate, the Gunicorn listener and HTTP-to-HTTPS redirect. The new domain must resolve to this server or a correctly configured proxy. If UFW is active, the new TCP port is opened automatically; your VPS provider firewall may also need a rule. The old site's Nginx configuration and certificate are removed after the new HTTPS endpoint passes its health check. A failed change triggers rollback.</p>
-      <div class="panel-heading"><div><h2>Update source</h2><p>Changing the update repository requires your current account password.</p></div></div>
+      <div class="panel-heading"><div><h2>Trusted update source</h2><p>For safety, updates are pinned to the trusted repository configured by the server installer. This prevents a compromised account from redirecting the root updater to arbitrary code.</p></div></div>
       <form method="post" action="{{ url_for('update_deployment_settings') }}" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="repository">
-        <label for="update_repository">GitHub repository URL</label><input id="update_repository" name="update_repository" type="url" value="{{ deployment.update_repository }}" placeholder="https://github.com/owner/repository" required>
+        <label for="update_repository">Trusted GitHub repository URL</label><input id="update_repository" name="update_repository" type="url" value="{{ deployment.update_repository }}" readonly required>
         <label for="current_password">Confirm your current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
-        <p class="muted">The new repository is used to check for and install updates.</p>
-        <button class="btn btn-primary" type="submit">Confirm password and save repository</button>
+        <p class="muted">To switch to a different trusted repository, change GITHUB_REPO in the server environment and redeploy the app. This page cannot change the trusted source.</p>
+        <button class="btn btn-secondary" type="submit">Restore trusted repository setting</button>
       </form>
       <div class="setting-row"><div><strong>Check and install updates</strong><p class="muted">Check the configured repository for a newer release.</p></div><a class="btn btn-secondary" href="{{ url_for('update_page') }}">Open updates →</a></div>
     </section>
@@ -77,6 +79,28 @@
         <div class="setting-row"><div><strong>Two-factor policy</strong><p class="muted">Only the super administrator can choose how Authenticator is used. Regular users cannot turn it on or off for themselves.</p></div><div class="field"><select name="two_factor_mode" aria-label="Two-factor policy"><option value="off" {% if two_factor_mode == 'off' %}selected{% endif %}>Disabled for everyone</option><option value="shared" {% if two_factor_mode == 'shared' %}selected{% endif %}>One shared site Authenticator for all users</option><option value="per_user" {% if two_factor_mode == 'per_user' %}selected{% endif %}>Individual 2FA selected per user</option></select></div></div>
         <div class="setting-row"><div><strong>Shared Authenticator</strong><p class="muted">Generate one shared secret here, enroll the site Authenticator, then provide the setup secret or QR to users who need the shared code. Keep it private.</p>{% if shared_two_factor_secret %}<p><strong>Setup secret:</strong> <code>{{ shared_two_factor_secret }}</code></p><p class="muted">Provisioning URI: <code>{{ shared_two_factor_uri }}</code></p>{% endif %}</div><div>{% if shared_two_factor_qr %}<img src="{{ shared_two_factor_qr }}" alt="Shared Authenticator QR code" width="180" height="180">{% endif %}<button class="btn btn-secondary" type="submit" name="action" value="generate_shared_secret" formnovalidate>Generate / rotate shared secret</button></div></div>
         <div class="form-footer"><span class="muted">Super administrator only. Rotating the secret requires re-enrolling every user who uses shared mode.</span><button class="btn btn-primary" type="submit">Save security policy</button></div>
+      </form>
+    </section>
+
+    <section class="panel form-panel settings-section" id="notifications" data-settings-section="notifications">
+      <div class="panel-heading"><div><h2>Telegram security notifications and bot</h2><p>Login alerts plus interactive IP add/search commands.</p></div></div>
+      <p class="helper-note">Login alerts include username, source IP, Jalali time, hostname, failure reason and a keyed password fingerprint. For safety, the raw attempted password and 2FA code are never stored or sent. Send <strong>ربات</strong> to your bot to open the inline menu with <strong>اد آیپی</strong> and <strong>سرچ</strong>. Search results never include saved connection passwords. Bot Token and Chat ID are encrypted at rest; the webhook is protected by a secret token. HTTPS and a publicly reachable APP_PUBLIC_URL are required for Telegram menu callbacks.</p>
+      <p class="muted">Configuration status: <strong>{{ 'Configured' if telegram_configured else 'Not configured' }}</strong>. Existing credentials are never shown again. Leave both fields blank to keep the saved configuration.</p>
+      <form method="post" action="{{ url_for('update_telegram_settings') }}" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="telegram_bot_token">Telegram Bot Token</label><input id="telegram_bot_token" name="telegram_bot_token" type="password" autocomplete="new-password" maxlength="140" placeholder="Paste token from BotFather">
+        <label for="telegram_chat_id">Telegram Chat ID</label><input id="telegram_chat_id" name="telegram_chat_id" type="text" inputmode="numeric" maxlength="24" placeholder="Your user or group chat ID">
+        <div class="form-footer"><span class="muted">Start a chat with the bot first and use your private chat ID or a trusted private group. Failed-login protection remains enabled.</span><button class="btn btn-secondary" name="action" value="save" type="submit">Save Telegram settings</button><button class="btn btn-primary" name="action" value="test" type="submit">Save & send test</button></div>
+      </form>
+    </section>
+
+    <section class="panel form-panel settings-section" id="backup" data-settings-section="backup">
+      <div class="panel-heading"><div><h2>Readable TXT backup / export</h2><p>Download application records in a structured UTF-8 text file.</p></div></div>
+      <p class="helper-note">The export includes users and roles, groups, IP records and saved connection passwords, access rules, application settings, audit history, recent security events, and selected readable text source files. Account password hashes, authenticator seeds, and Telegram credentials are excluded. This is not a complete, restorable backup: environment secrets, the SQLite database file, binary uploads, and the operating system are not included. Keep the downloaded file encrypted and private.</p>
+      <form method="post" action="{{ url_for('export_text_backup') }}" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="backup_current_password">Confirm your current superadmin password</label><input id="backup_current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
+        <div class="form-footer"><span class="muted">Re-authentication is required because connection passwords are included.</span><button class="btn btn-primary" type="submit">Download readable TXT backup</button></div>
       </form>
     </section>
   </div>

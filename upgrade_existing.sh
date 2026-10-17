@@ -204,6 +204,9 @@ if [[ -f /var/lib/station-archive/update-repository ]]; then
   UPDATE_REPO="$(cat /var/lib/station-archive/update-repository)"
 fi
 [[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
+TRUSTED_REPO="${GITHUB_REPO:-${APP_REPO_URL:-https://github.com/AmiRaiZo/IP-Management}}"
+normalize_repo() { local value="${1%/}"; value="${value%.git}"; printf '%s' "${value,,}"; }
+[[ "$(normalize_repo "$UPDATE_REPO")" == "$(normalize_repo "$TRUSTED_REPO")" ]] || { echo "Update refused: repository differs from the trusted repository configured by the installer." >&2; exit 1; }
 [[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
 VERSION_FILE=/var/lib/station-archive/version
 TARGET_FILE=/var/lib/station-archive/update-target

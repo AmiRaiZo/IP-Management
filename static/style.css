@@ -147,8 +147,6 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 .reconfigure-progress-fill.is-error{width:0}
 .login-card.verify-stage>h1{margin:0 0 6px!important;font-size:21px!important;letter-spacing:-.4px!important}
 
-.login-user-avatar-wrap{position:relative;overflow:hidden;padding:0;border-radius:50%!important}.login-user-avatar-wrap>.login-user-avatar-image{border-radius:50%!important}.login-user-avatar-wrap>span{border-radius:50%}.login-user-avatar-wrap>.login-user-avatar-image{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}.login-user-avatar-wrap>[hidden]{display:none!important}
-
 /* Keep hidden avatar fallbacks hidden despite avatar display styles. */
 .welcome-toast [hidden],.profile-dot [hidden],.profile-avatar-large [hidden]{display:none!important}
 .profile-dot{overflow:hidden;flex:0 0 35px}
@@ -156,6 +154,26 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 .profile-avatar-large{overflow:hidden}
 .profile-avatar-large>img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .profile-avatar-form{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+
+/* The login-success notification avatar must stay circular at every size. */
+.welcome-toast-avatar{border-radius:50%!important;overflow:hidden;object-fit:cover}
+.welcome-toast-avatar img{display:block;width:100%;height:100%;border-radius:50%!important;object-fit:cover}
+
+/* Security center tables and IP access controls. */
+.security-rule-panel,.security-log-panel{margin-bottom:22px;min-width:0}
+.security-current-ip{padding:11px 13px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);overflow-wrap:anywhere}
+.security-checkbox{display:flex;align-items:flex-start;gap:9px;margin:16px 0 8px;font-weight:650}
+.security-checkbox input{width:auto;margin-top:3px;accent-color:var(--primary)}
+.security-privacy-note{padding:13px 15px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);line-height:1.65}
+.security-result{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.03em;white-space:nowrap;background:#8a94a61c;color:var(--muted)}
+.security-result.success{background:#18a66a1c;color:#15965d}
+.security-result.failed{background:#e5484d1c;color:#df4148}
+.security-result.info{background:#4569e81c;color:var(--primary)}
+.security-date{white-space:nowrap;font-variant-numeric:tabular-nums}
+.security-agent{max-width:240px;overflow-wrap:anywhere;font-size:11px;color:var(--muted)}
+.security-rule-panel table,.security-log-panel table{min-width:850px}
+.security-log-panel table{min-width:1350px}
+.security-rule-panel .table-scroll,.security-log-panel .table-scroll{max-width:100%;overflow-x:auto}
 
 .group-order-actions{gap:4px}.group-order-actions form{margin:0}.group-order-actions .icon-button{width:29px;height:29px;padding:0;font-size:14px}.group-order-actions .icon-button:disabled{opacity:.3;cursor:not-allowed}
 
@@ -168,7 +186,6 @@ html[data-theme="dark"]{--scroll-track:#151d2b;--scroll-thumb:#46577f;--scroll-t
 [hidden]{display:none!important}
 .password-copy-button{margin-top:8px}
 
-
 /* Native checkboxes follow the active light/dark palette. */
 input[type="checkbox"]{accent-color:var(--primary);color-scheme:light}
 html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
@@ -178,196 +195,11 @@ html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
 .permission-setting .permission-option small{color:var(--muted);font-size:12px;line-height:1.6}
 
 
-/* Keep the update-complete check badge dark-theme friendly. */
-html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
-
-
-/* Center each directory value beneath its matching heading. */
+/* Center each directory value directly under its column heading. */
 .inventory-panel .table-scroll table th,.inventory-panel .table-scroll table td{text-align:center;vertical-align:middle}
-/* Keep the profile/avatar pinned left in its own separate column. */
-.inventory-panel .table-scroll th.avatar-column,.inventory-panel .table-scroll td.avatar-cell{width:56px;min-width:56px;padding-left:18px;padding-right:0}
-.inventory-panel .table-scroll td.avatar-cell{text-align:left}
-.inventory-panel .table-scroll td.avatar-cell .record-avatar{margin:0}
-/* Center the Name heading and the actual name text inside the full Name cell. */
-.inventory-panel .table-scroll th:nth-child(2),.inventory-panel .table-scroll td:nth-child(2){text-align:center;padding-left:12px;padding-right:12px}
-.inventory-panel .table-scroll td:nth-child(2) .record-name{display:flex;width:100%;justify-content:center;align-items:center;text-align:center}
-.inventory-panel .table-scroll td:nth-child(2) .record-name>span{display:block;width:100%;text-align:center}
-.inventory-panel .table-scroll td:nth-child(2) .record-name strong{display:block;width:100%;text-align:center}
+.inventory-panel .table-scroll .record-name{justify-content:center}
 .inventory-panel .table-scroll .actions{justify-content:center}
 
 
-
-/* Collapsible navigation and responsive layout across desktop, tablet, and phones. */
-.sidebar{transition:transform .28s ease,width .28s ease;will-change:transform}
-.sidebar-toggle{position:fixed;top:16px;left:198px;z-index:1100;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:17px;line-height:1;transition:left .28s ease,background .15s}
-.sidebar-toggle:hover{background:var(--surface-2)}
-.sidebar-backdrop{display:none}
-.main-column{transition:margin-left .28s ease;min-width:0}
-body.sidebar-collapsed .sidebar{transform:translateX(-100%)}
-body.sidebar-collapsed .main-column{margin-left:0}
-body.sidebar-collapsed .sidebar-toggle{left:12px}
-@media(min-width:721px){
-  .sidebar-toggle{left:198px}
-  body.sidebar-collapsed .sidebar-toggle{left:12px}
-  .main-column{margin-left:246px}
-}
-@media(max-width:1050px) and (min-width:721px){
-  .sidebar-toggle{left:167px}
-  body.sidebar-collapsed .sidebar-toggle{left:12px}
-}
-@media(max-width:720px){
-  .sidebar{position:fixed!important;inset:0 auto 0 0!important;width:min(300px,86vw)!important;height:100dvh;padding:24px 16px 16px!important;border-right:1px solid var(--border)!important;border-bottom:0!important;overflow-y:auto;transform:translateX(-105%);z-index:1200;box-shadow:16px 0 45px #17233d20}
-  body.sidebar-open .sidebar{transform:translateX(0)}
-  body.sidebar-open{overflow:hidden}
-  .sidebar-toggle{top:11px;left:12px;width:36px;height:36px}
-  body.sidebar-open .sidebar-toggle{left:min(258px,calc(86vw - 42px));z-index:1300}
-  .sidebar-backdrop{position:fixed;inset:0;z-index:1150;background:#11182770;border:0;padding:0}
-  body.sidebar-open .sidebar-backdrop{display:block}
-  .sidebar .brand{padding:0 2px 28px}
-  .sidebar .nav-label,.sidebar .sidebar-bottom{display:flex}
-  .sidebar .nav-label{display:block}
-  .sidebar .nav-links{display:grid;overflow:visible}
-  .sidebar .nav-links a{height:42px;white-space:normal;padding:0 12px;font-size:12px}
-  .sidebar .nav-label-spaced{display:block}
-  .global-theme-toggle{top:11px;right:12px}
-  .main-column{margin-left:0!important;width:100%;min-width:0}
-  .container{width:calc(100% - 28px);max-width:100%;margin:64px auto 28px}
-  .page-heading h1{overflow-wrap:anywhere}
-  .panel,.stat-card,.setup-card,.login-card{min-width:0}
-  .panel-heading{flex-wrap:wrap}
-  .filters{min-width:0}
-  .form-grid,.admin-grid,.settings-layout,.security-setup{min-width:0}
-  input,select,textarea{max-width:100%}
-  .table-scroll{max-width:100%;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
-  .table-scroll table{min-width:760px}
-  .actions{flex-wrap:wrap}
-  .form-footer .actions .btn{max-width:100%;white-space:normal}
-  .update-card{min-width:0}
-}
-@media(max-width:420px){
-  .container{width:calc(100% - 20px);margin-top:60px}
-  .page-heading h1{font-size:23px}
-  .panel-heading{padding:15px 12px}
-  .record-count{white-space:normal}
-  .login-card{padding:20px}
-  .btn{white-space:normal}
-}
-@media(prefers-reduced-motion:reduce){
-  .sidebar,.main-column,.sidebar-toggle{transition:none!important}
-}
-
-
-/* Cross-device layout refinements: centered authentication and adaptive content. */
-html,body{width:100%;min-width:0}
-body{overflow-x:hidden}
-.app-shell,.main-column,.container,.panel,.panel-heading,.form-panel,.settings-content{min-width:0;max-width:100%}
-.auth-column{display:flex;flex-direction:column;align-items:stretch;justify-content:center;width:100%;min-height:100vh;min-height:100dvh;margin:0!important}
-.auth-column .container.login-wrap{box-sizing:border-box;width:100%!important;max-width:none!important;min-height:100vh;min-height:100dvh;margin:0!important;padding:clamp(16px,3.5vw,44px)!important;display:grid!important;place-items:center!important;align-content:center}
-.login-wrap{width:100%;max-width:none;margin:0 auto;justify-items:center;align-items:center}
-.login-card{width:min(100%,450px);max-width:100%;margin:auto;overflow-wrap:anywhere}
-.login-card.verify-stage{width:min(100%,450px)}
-.login-card form,.login-card label,.login-card input,.password-field{min-width:0;max-width:100%}
-.login-card input{box-sizing:border-box}
-.password-field{position:relative;display:flex;align-items:center}
-.password-field input{width:100%;padding-right:48px}
-.login-user-card{min-width:0;max-width:100%;overflow-wrap:anywhere}
-.login-user-copy{min-width:0;overflow-wrap:anywhere}
-.login-user-copy h2{overflow-wrap:anywhere}
-.login-user-meta{overflow-wrap:anywhere}
-.security-setup{width:100%;max-width:1000px;margin-inline:auto;grid-template-columns:repeat(2,minmax(0,1fr))}
-.security-setup>*{min-width:0}
-.setup-card{min-width:0;overflow-wrap:anywhere}
-.setup-card code,.uri-box,.secret-details code{max-width:100%;overflow-wrap:anywhere;white-space:normal}
-.qr-code{max-width:100%;height:auto;aspect-ratio:1}
-.page-heading,.panel-heading,.form-footer,.setting-row,.update-card{min-width:0;flex-wrap:wrap}
-.form-grid,.admin-grid,.settings-layout,.permission-grid{min-width:0}
-.field,.field input,.field textarea,.field select,.stack-form input,.stack-form textarea{min-width:0;max-width:100%}
-.table-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
-table{max-width:none}
-img,video,canvas,svg{max-width:100%}
-button,a,input,select,textarea{touch-action:manipulation}
-@media(min-width:1600px){
-  .container:not(.login-wrap){width:min(1360px,calc(100% - 112px))}
-  .security-setup{max-width:1100px}
-}
-@media(max-width:1050px){
-  .container:not(.login-wrap){width:calc(100% - 48px)}
-  .topbar{gap:12px}
-  .settings-layout{grid-template-columns:minmax(130px,190px) minmax(0,1fr)}
-  .admin-grid{grid-template-columns:minmax(0,1fr)}
-  .update-info{min-width:0}
-}
-@media(max-width:800px){
-  .security-setup{grid-template-columns:minmax(0,1fr);max-width:620px}
-  .setup-card{padding:clamp(17px,4vw,26px)}
-  .form-grid{grid-template-columns:minmax(0,1fr)}
-  .full-field{grid-column:auto}
-  .settings-layout{grid-template-columns:minmax(0,1fr)}
-  .settings-nav{display:flex;overflow-x:auto;gap:6px;max-width:100%;white-space:nowrap}
-  .settings-nav a{flex:0 0 auto}
-  .permission-grid{grid-template-columns:minmax(0,1fr)}
-  .form-footer{align-items:stretch;flex-direction:column}
-  .form-footer .actions{flex-wrap:wrap}
-}
-@media(max-width:720px){
-  .auth-column .container.login-wrap{padding:20px 14px!important}
-  .login-card{border-radius:20px;padding:clamp(21px,6vw,32px)}
-  .login-card h1{font-size:clamp(22px,6vw,27px)}
-  .login-card.verify-stage>h1{font-size:22px!important}
-  .login-user-card{gap:12px}
-  .login-user-avatar,.login-user-avatar-image{flex:0 0 42px;width:42px;height:42px}
-  .container:not(.login-wrap){width:calc(100% - 28px);margin:22px auto 30px}
-  .topbar{height:auto;min-height:56px;padding:10px 14px;flex-wrap:wrap}
-  .topbar-title{min-width:0;flex-wrap:wrap}
-  .topbar-actions{margin-left:auto;flex-wrap:wrap}
-  .page-heading{align-items:flex-start;flex-direction:column;gap:12px}
-  .page-heading h1{font-size:clamp(22px,5vw,28px);overflow-wrap:anywhere}
-  .stats{grid-template-columns:minmax(0,1fr)}
-  .stat-card{padding:16px}
-  .filters{flex-direction:column;padding:0 14px 14px}
-  .search-input{width:100%;max-width:none}
-  .select-wrap,.select-wrap select{width:100%;min-width:0}
-  .panel-heading{padding:16px}
-  .form-panel{padding:0 16px 18px}
-  .form-heading{margin-inline:-16px}
-  .directory-heading-actions{width:100%;align-items:stretch}
-  .directory-heading-actions .btn{max-width:100%}
-  .update-card{padding:18px}
-  .update-card>form{width:100%}
-  .update-card>form .btn{flex:1 1 auto}
-  .login-wrap{padding-inline:0}
-}
-@media(max-width:480px){
-  .auth-column .container.login-wrap{padding:14px 10px!important}
-  .login-card{padding:22px 18px;border-radius:18px}
-  .login-brand{margin-bottom:24px}
-  .login-card form{margin-top:20px}
-  .login-card .btn{width:100%;white-space:normal;line-height:1.4}
-  .login-user-meta{font-size:10px}
-  .otp-input,.totp-input{letter-spacing:5px!important}
-  .container:not(.login-wrap){width:calc(100% - 20px);margin-top:18px}
-  .topbar{padding:9px 10px}
-  .panel-heading{padding:14px 11px}
-  .form-panel{padding-inline:12px}
-  .form-heading{margin-inline:-12px}
-  .setup-card{padding:17px}
-  .qr-code,.qr-placeholder{width:min(180px,65vw);height:auto;aspect-ratio:1}
-  .form-footer .actions,.actions{flex-wrap:wrap}
-  .form-footer .actions .btn,.actions .btn{max-width:100%}
-}
-@media(max-height:560px) and (min-width:481px){
-  .auth-column .container.login-wrap{align-content:start;padding-block:14px!important}
-  .login-card{padding:22px 30px}
-  .login-brand{margin-bottom:18px}
-  .login-card form{margin-top:15px}
-  .login-card label{margin-top:12px}
-}
-@media(orientation:landscape) and (max-height:500px) and (max-width:900px){
-  .auth-column .container.login-wrap{align-content:start;padding-block:10px!important}
-  .login-card{padding:18px 24px}
-  .login-brand{margin-bottom:14px}
-  .login-card form{margin-top:12px}
-}
-@media(prefers-reduced-motion:reduce){
-  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
-}
+/* Keep the update-complete check badge dark-theme friendly. */
+html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
