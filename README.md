@@ -8,7 +8,7 @@ IP Archive is an English-language web application for storing and managing IP co
 
 - Added ten one-time 2FA recovery codes per user. They are generated after password and current-authenticator re-authentication, stored only as keyed hashes, shown once with no-store headers, and consumed atomically on use.
 - Login accepts an unused recovery code if the authenticator app is unavailable. Regenerating codes invalidates the previous set.
-- The configured private Telegram chat can request `/login_code` for a separate six-digit superadmin fallback code. It expires after two minutes, is stored only as a keyed hash, works once, and is accepted only after the superadmin password is verified. It is not the authenticator's TOTP value.
+- The configured Telegram chat menu is in English and includes an inline `2FA code` button below `Search`. Pressing it (or sending `/login_code`) issues a separate six-digit superadmin fallback code. It expires after two minutes, is stored only as a keyed hash, works once, and is accepted only after the superadmin password is verified. It is not the authenticator's TOTP value.
 - Failed password guesses are never sent as raw text to Telegram; alerts contain security metadata and a keyed fingerprint only.
 
 ## Version 2.0.0 release notes
