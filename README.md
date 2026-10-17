@@ -1,12 +1,18 @@
+## Version 2.6.0 release notes
+
+- Added a hide/show control for the left navigation sidebar; the preference is remembered in the browser.
+- Improved responsive layout behavior for mobile phones and narrow screens while keeping wide tables horizontally scrollable.
+- Restored the IP-row avatar to its original rounded-square style and made the avatar in the authentication/login user card circular.
+
 ## Version 2.5.9 release notes
 
 - Remember a successful authenticator-code verification on that browser/device for 24 hours using a signed, HTTP-only cookie, while keeping the login session itself as a browser-session cookie.
-- Center IP record names under the Name heading, make the record avatar circular, and keep a 100px gap between the avatar and the name text.
+- Center IP record names under the Name heading and keep a 100px gap between the IP-row avatar and name text.
 - Restore the bottom-left signed-in account label to its previous left-aligned layout; these styles are separate from IP-row avatars.
 
 # IP Management
 
-**Current release: 2.5.9**
+**Current release: 2.6.0**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
 
