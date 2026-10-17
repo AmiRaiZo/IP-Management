@@ -331,7 +331,7 @@ chmod -R g+rX /opt/station-archive/.venv
 HTTP_CODE=000
 for attempt in $(seq 1 30); do
   if systemctl is-active --quiet station-archive.service; then
-    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: $DOMAIN" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
     if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
       break
     fi
@@ -422,7 +422,7 @@ systemctl restart station-archive.service
 HTTP_CODE=000
 for attempt in $(seq 1 30); do
   if systemctl is-active --quiet station-archive.service; then
-    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: $DOMAIN" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
     if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
       break
     fi
