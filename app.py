@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import base64
 import json
+import html
 from io import BytesIO
 import os
 import re
@@ -1943,7 +1944,19 @@ def update_finish():
 @app.errorhandler(400)
 def bad_request(error):
     security_event("http_400", session.get("username", ""), "blocked", f"Bad request or CSRF check failed: {request.method} {request.path}")
-    return render_template("error.html", code=400, message=getattr(error, "description", "Invalid request.")), 400
+    # A rejected Host header can fail while Flask is creating the URL adapter.
+    # In that case url_for() inside error.html raises a second exception and turns
+    # the intended 400 into a 500. Keep this handler independent of routing.
+    message = html.escape(str(getattr(error, "description", "Invalid request.")))
+    body = (
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>400 Bad Request</title><body><main>"
+        "<h1>400 — Bad Request</h1><p>"
+        + message
+        + "</p></main></body></html>"
+    )
+    return body, 400, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
 
 @app.errorhandler(403)
