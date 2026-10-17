@@ -1055,13 +1055,14 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
                 result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
 
-    def test_updater_refreshes_installed_helper_after_validation(self):
+    def test_updater_bootstraps_before_deploy_and_never_overwrites_its_running_file(self):
         updater = Path(__file__).with_name("station-archive-update").read_text(encoding="utf-8")
-        self.assertIn('bash -n "$TMP/station-archive-update.new"', updater)
-        self.assertIn('install -o root -g root -m 0750 "$TMP/station-archive-update.new" /usr/local/sbin/station-archive-update', updater)
+        self.assertIn('bash -n "$BOOTSTRAP_TMP/updater.new"', updater)
+        self.assertIn('install -o root -g root -m 0750 "$BOOTSTRAP_TMP/updater.new" /usr/local/sbin/station-archive-update', updater)
         self.assertIn("station-archive-update; do", updater)
         bootstrap = updater.index('Refreshing the privileged updater from the verified release')
         deploy = updater.index("rsync -a --delete --exclude='.git/'")
-        self.assertLess(bootstrap, deploy, "updater must refresh itself before deployment steps")
+        self.assertLess(bootstrap, deploy, "updater bootstrap must precede deployment")
         self.assertIn('UPDATER_BOOTSTRAPPED=1 exec /usr/local/sbin/station-archive-update', updater)
-        self.assertIn('bash -n "$BOOTSTRAP_TMP/updater.new"', updater)
+        self.assertNotIn('install -o root -g root -m 0750 "$TMP/station-archive-update.new" /usr/local/sbin/station-archive-update', updater)
+        self.assertIn("Never overwrite the executable currently being interpreted", updater)
