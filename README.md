@@ -1,3 +1,11 @@
+## Version 2.9.0 release notes
+
+- Added a Telegram **Display all groups** menu with inline buttons for every group.
+- Selecting a group shows only the names of its IP records; selecting a name replaces the current screen with the full connection details.
+- Group browsing uses one edited Telegram message for each stage, with back buttons to IP names, all groups, or the main menu instead of stacking old screens.
+- Kept the sidebar toggle icon-only and added smooth collapse/expand transitions, with reduced-motion support.
+- Updated the stylesheet cache key for the new interface.
+
 ## Version 2.6.14 release notes
 
 - Changed the sidebar hide/show control to a three-line hamburger button.
@@ -23,7 +31,7 @@
 
 # IP Management
 
-**Current release: 2.6.14**
+**Current release: 2.9.0**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
 
