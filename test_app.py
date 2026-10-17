@@ -29,6 +29,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
             db.execute("DELETE FROM user_recovery_codes")
+            db.execute("DELETE FROM telegram_login_codes")
             db.execute("DELETE FROM security_events")
             db.execute("DELETE FROM ip_access_rules")
             db.execute("DELETE FROM app_settings WHERE key='ip_allowlist_enabled'")
@@ -151,6 +152,46 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             count = db.execute("SELECT COUNT(*) FROM user_recovery_codes").fetchone()[0]
         self.assertEqual(count, 0)
+
+    def test_telegram_command_issues_two_minute_single_use_superadmin_code(self):
+        user_id, secret = self.create_user("telegram-code-admin", role="superadmin")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {
+                "chat": {"id": 12345, "type": "private"}, "text": "/login_code"
+            }})
+        self.assertTrue(send.called)
+        message = send.call_args.args[1]
+        import re
+        match = re.search(r"(?<!\d)(\d{6})(?!\d)", message)
+        self.assertIsNotNone(match)
+        code = match.group(1)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT code_hash,expires_at FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()
+        self.assertIsNotNone(row)
+        self.assertNotIn(code, row["code_hash"])
+
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        self.assertEqual(response.status_code, 302)
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"verification code is invalid", response.data)
+
+    def test_telegram_login_code_expired_code_is_rejected(self):
+        user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
+        code = "123456"
+        with archive.connect_db() as db:
+            db.execute("INSERT INTO telegram_login_codes(user_id,code_hash,expires_at,created_at) VALUES(?,?,?,?)",
+                       (user_id, archive.telegram_login_code_hash(user_id, code), "2000-01-01T00:00:00+00:00", archive.now()))
+        self.assertFalse(archive.consume_telegram_login_code(user_id, code))
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes").fetchone()[0], 0)
 
     def test_authenticated_session_without_verified_2fa_is_rejected_server_side(self):
         user_id, _ = self.create_user("cannot-skip-2fa")
