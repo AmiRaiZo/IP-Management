@@ -518,7 +518,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
         self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
-        self.assertIn('<th>Name</th>', page)
+        self.assertIn('<th class="name-column">Name</th>', page)
         stylesheet = (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8')
         self.assertIn('.inventory-panel .table-scroll table th:first-child{text-align:center;padding-left:18px}', stylesheet)
         self.assertIn('.inventory-panel .table-scroll .record-name{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:32px}', stylesheet)
