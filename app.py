@@ -538,6 +538,9 @@ def handle_telegram_update(update):
         telegram_send(chat_id, "\\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
         return
     if state.get("mode") == "add":
+        # Best-effort deletion also removes submitted passwords from the private bot chat.
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
         step = state.get("step")
         data = state.get("data") or {}
         prompts = {
