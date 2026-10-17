@@ -5,14 +5,14 @@
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}IP Archive{% endblock %}</title>
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.6.14">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.6.15">
 </head>
 <body>
 <div class="app-shell">
   <button type="button" class="theme-toggle global-theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button>
   {% if current_user %}
   <aside class="sidebar">
-    <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-controls="primary-navigation" aria-expanded="true" title="Hide sidebar"><span class="sidebar-toggle-icon" aria-hidden="true">☰</span><span class="sidebar-toggle-label">Hide sidebar</span></button>
+    <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-controls="primary-navigation" aria-expanded="true" title="Toggle sidebar"><span class="sidebar-toggle-icon" aria-hidden="true">☰</span><span class="sidebar-toggle-label">Hide sidebar</span></button>
     <a class="brand" href="{{ url_for('index') }}"><span class="brand-symbol">IP</span><span>IP Archive<small>NETWORK DIRECTORY</small></span></a>
     <nav class="nav-links" id="primary-navigation">
       <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon">▦</span>IP addresses</a>
