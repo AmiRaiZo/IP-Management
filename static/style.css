@@ -205,7 +205,7 @@ html[data-theme="dark"] input[type="checkbox"]{color-scheme:dark}
 html[data-theme="dark"] .update-success-icon{background:#18382f;color:#69d9ae}
 
 /* Align the Name heading with the name text, after the 32px avatar and 10px gap. */
-.inventory-panel .table-scroll table th:first-child{text-align:left;padding-left:60px}
+.inventory-panel .table-scroll table th:first-child{text-align:left;padding-left:78px}
 .inventory-panel .table-scroll table td:first-child{text-align:left}
 .inventory-panel .table-scroll .record-name{justify-content:flex-start;position:static;width:auto;min-height:32px}
 .inventory-panel .table-scroll .record-name>span:last-child{position:static;inset:auto;display:grid;align-content:center;justify-items:start;text-align:left;pointer-events:auto;min-width:0}
