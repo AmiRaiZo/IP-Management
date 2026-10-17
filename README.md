@@ -1,8 +1,13 @@
 # IP Management
 
-**Current release: 2.5.4**
+**Current release: 2.5.5**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+
+## Version 2.5.5 release notes
+
+- Fixed a recurring in-site updater failure by removing the late self-replacement of the currently executing privileged shell script.
+- Added regression coverage for early bootstrap ordering and confirmed the updater does not overwrite its running executable.
 
 ## Version 2.5.4 release notes
 
