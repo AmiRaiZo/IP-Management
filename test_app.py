@@ -1061,7 +1061,7 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         self.assertIn('install -o root -g root -m 0750 "$TMP/station-archive-update.new" /usr/local/sbin/station-archive-update', updater)
         self.assertIn("station-archive-update; do", updater)
         bootstrap = updater.index('Refreshing the privileged updater from the verified release')
-        deploy = updater.index('rsync -a --delete --exclude=.git/')
+        deploy = updater.index("rsync -a --delete --exclude='.git/'")
         self.assertLess(bootstrap, deploy, "updater must refresh itself before deployment steps")
         self.assertIn('UPDATER_BOOTSTRAPPED=1 exec /usr/local/sbin/station-archive-update', updater)
         self.assertIn('bash -n "$BOOTSTRAP_TMP/updater.new"', updater)
