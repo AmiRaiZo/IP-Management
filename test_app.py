@@ -183,6 +183,26 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"verification code is invalid", response.data)
 
+    def test_telegram_menu_has_english_2fa_button_and_callback_issues_code(self):
+        user_id, _ = self.create_user("telegram-button-admin", role="superadmin")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
+            archive.telegram_menu("12345")
+            menu_markup = send.call_args.args[2]
+            self.assertEqual(menu_markup["inline_keyboard"][1][0]["text"], "🔐 2FA code")
+            self.assertEqual(menu_markup["inline_keyboard"][1][0]["callback_data"], "telegram_2fa_code")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "callback-2fa", "data": "telegram_2fa_code",
+                "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
+            }})
+        messages = [str(call.args[1]) for call in send.call_args_list]
+        code_messages = [message for message in messages if "temporary superadmin login code" in message]
+        self.assertEqual(len(code_messages), 1)
+        self.assertRegex(code_messages[0], r"\b\d{6}\b")
+        self.assertIn("2 minutes", code_messages[0])
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 1)
+
     def test_telegram_login_code_expired_code_is_rejected(self):
         user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
         code = "123456"
@@ -728,10 +748,10 @@ class ArchiveTests(unittest.TestCase):
         alert = telegram.call_args.args[0]
         self.assertIn("telegram-guess", alert)
         self.assertIn("127.0.0.1", alert)
-        self.assertIn("شناسه اثرانگشت رمز حدس‌زده‌شده:", alert)
-        self.assertIn("ورود به پنل ناموفق", alert)
-        self.assertIn("نام‌میزبان:", alert)
-        self.assertIn("زمان:", alert)
+        self.assertIn("Password guess fingerprint:", alert)
+        self.assertIn("Failed sign-in to IP Archive", alert)
+        self.assertIn("Host:", alert)
+        self.assertIn("Time (Iran):", alert)
         self.assertNotIn("never-send-this-password", alert)
 
     @patch.object(archive, "send_telegram_security_alert", return_value=True)
@@ -748,8 +768,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         telegram.assert_called_once()
         alert = telegram.call_args.args[0]
-        self.assertIn("ورود به پنل ناموفق", alert)
-        self.assertIn("علت: کد 2FA اشتباه است", alert)
+        self.assertIn("Failed second-factor verification", alert)
+        self.assertIn("Reason: Invalid 2FA code", alert)
         self.assertIn("bad-2fa-alert", alert)
         self.assertNotIn("123456", alert)
 
@@ -926,7 +946,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(row["username"], "admin")
         self.assertEqual(row["password_enc"], "")
         self.assertEqual(row["created_by"], "telegram-bot")
-        self.assertTrue(any("IP ثبت شد" in call.args[1] for call in send.call_args_list))
+        self.assertTrue(any("IP record saved" in call.args[1] for call in send.call_args_list))
 
     def test_telegram_search_results_never_include_saved_connection_password(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")

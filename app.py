@@ -410,15 +410,18 @@ def telegram_get_state():
 
 
 def telegram_menu(chat_id, message_id=None):
-    markup = {"inline_keyboard": [[
-        {"text": "➕ اد آیپی", "callback_data": "ip_add"},
-        {"text": "🔎 سرچ", "callback_data": "ip_search"},
-    ]]}
+    markup = {"inline_keyboard": [
+        [
+            {"text": "➕ Add IP", "callback_data": "ip_add"},
+            {"text": "🔎 Search", "callback_data": "ip_search"},
+        ],
+        [{"text": "🔐 2FA code", "callback_data": "telegram_2fa_code"}],
+    ]}
     if message_id:
         telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
-                         "text": "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", "reply_markup": markup})
+                         "text": "IP Archive — choose an option:", "reply_markup": markup})
     else:
-        telegram_send(chat_id, "منوی IP Archive — یکی از گزینه‌ها را انتخاب کن:", markup)
+        telegram_send(chat_id, "IP Archive — choose an option:", markup)
 
 
 def handle_telegram_update(update):
@@ -437,25 +440,36 @@ def handle_telegram_update(update):
         if action == "menu":
             telegram_set_state({})
             telegram_menu(chat_id, message.get("message_id"))
+        elif action == "telegram_2fa_code":
+            telegram_set_state({})
+            code = issue_telegram_login_code()
+            if not code:
+                telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
+                return
+            telegram_send(chat_id,
+                          "IP Archive temporary superadmin login code:\n"
+                          f"{code}\n\n"
+                          "Expires in 2 minutes and can be used once, after the superadmin password is verified. "
+                          "This is a separate fallback code, not your authenticator's TOTP. Keep it private.")
         elif action == "ip_add":
             telegram_set_state({"mode": "add", "step": "name", "data": {}})
-            telegram_send(chat_id, "مرحله ۱ از ۵ — نام این IP/سرور را وارد کن:")
+            telegram_send(chat_id, "Step 1 of 5 — enter a name for this IP/server:")
         elif action == "ip_search":
             telegram_set_state({"mode": "search", "step": "query"})
-            telegram_send(chat_id, "نام ثبت‌شده یا آدرس IP را بفرست:")
+            telegram_send(chat_id, "Send the saved name or IP address to search:")
         return
     text = str(message.get("text", "")).strip()
     if text.lower() in ("/login_code", "/login-code", "/کدورود", "کد ورود", "کدورود"):
         telegram_set_state({})
         code = issue_telegram_login_code()
         if not code:
-            telegram_send(chat_id, "❌ حساب مدیر ارشد فعالی برای بازیابی ورود پیدا نشد.")
+            telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
             return
         telegram_send(chat_id,
-                      "🔐 کد جایگزین ورود IP Archive:\n"
-                      f"`{code}`\n\n"
-                      "اعتبار: ۲ دقیقه؛ فقط یک‌بار قابل استفاده است و فقط برای حساب مدیر ارشد، پس از تأیید رمز عبور.\n"
-                      "این کد، کد برنامه Authenticator نیست. آن را با کسی به اشتراک نگذار.")
+                      "IP Archive temporary superadmin login code:\n"
+                      f"{code}\n\n"
+                      "Expires in 2 minutes and can be used once, after the superadmin password is verified. "
+                      "This is a separate fallback code, not your authenticator's TOTP. Keep it private.")
         return
     if text.lower() in ("ربات", "/start", "/menu"):
         telegram_set_state({})
@@ -471,21 +485,21 @@ def handle_telegram_update(update):
                               (f"%{term}%", f"%{term}%")).fetchall()
         telegram_set_state({})
         if not rows:
-            telegram_send(chat_id, "رکوردی با این نام یا IP پیدا نشد.", {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+            telegram_send(chat_id, "No record matched that name or IP.", {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
             return
-        lines = ["نتیجه جست‌وجو:"]
+        lines = ["Search results:"]
         for row in rows:
-            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 نام‌کاربری اتصال: {row['username'] or '-'}\n📝 توضیحات: {(row['notes'] or '-')[:300]}")
-        telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 Username: {row['username'] or '-'}\n📝 Notes: {(row['notes'] or '-')[:300]}")
+        telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
         return
     if state.get("mode") == "add":
         step = state.get("step")
         data = state.get("data") or {}
         prompts = {
-            "name": ("name", "نام", "مرحله ۲ از ۵ — آدرس IP یا hostname را وارد کن:"),
-            "ip": ("ip_address", "IP", "مرحله ۳ از ۵ — پورت را وارد کن (مثلاً 22 یا 443):"),
-            "port": ("port", "port", "مرحله ۴ از ۵ — نام کاربری اتصال را وارد کن:"),
-            "username": ("username", "username", "مرحله ۵ از ۵ — توضیحات را وارد کن یا - بفرست:"),
+            "name": ("name", "Name", "Step 2 of 5 — enter the IP address or hostname:"),
+            "ip": ("ip_address", "IP", "Step 3 of 5 — enter the port (for example, 22 or 443):"),
+            "port": ("port", "Port", "Step 4 of 5 — enter the connection username:"),
+            "username": ("username", "Username", "Step 5 of 5 — enter notes, or send - to skip:"),
         }
         if step == "name":
             data["name"] = text[:120]
@@ -517,15 +531,15 @@ def handle_telegram_update(update):
             data["group_id"] = ""
             clean, error = validate_ip(MultiDict(data))
             if error:
-                telegram_send(chat_id, f"❌ اطلاعات معتبر نیست: {error}\nبرای شروع دوباره «ربات» را بفرست.")
+                telegram_send(chat_id, f"Invalid information: {error}\nSend /start to begin again.")
                 telegram_set_state({})
                 return
             with connect_db() as db:
                 cur = db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                                  (clean["name"], clean["ip"], clean["port"], clean["username"], clean["password"] or "", clean["notes"], clean["group_id"], "telegram-bot", now(), now()))
             telegram_set_state({})
-            telegram_send(chat_id, f"✅ IP ثبت شد.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port']}\nشناسه رکورد: {cur.lastrowid}",
-                          {"inline_keyboard": [[{"text": "⬅️ منو", "callback_data": "menu"}]]})
+            telegram_send(chat_id, f"IP record saved.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port']}\nRecord ID: {cur.lastrowid}",
+                          {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
 def telegram_hostname():
     """Return a short configured host label without exposing local machine details."""
     return (os.environ.get("APP_HOSTNAME", "").strip() or socket.gethostname() or "IP Archive")[:80]
@@ -537,11 +551,11 @@ def safe_telegram_username(value):
 
 def send_login_success_alert(username, remote_ip):
     return send_telegram_security_alert(
-        "✅ با موفقیت به پنل وارد شدید.\n"
-        f"💻 نام‌میزبان: {telegram_hostname()}\n"
-        f"👤 نام‌کاربری: {safe_telegram_username(username)}\n"
-        f"🌐 آدرس‌آی‌پی: {remote_ip}\n"
-        f"⏰ زمان: {jalali_datetime(now())}"
+        "Successful sign-in to IP Archive.\n"
+        f"💻 Host: {telegram_hostname()}\n"
+        f"👤 Username: {safe_telegram_username(username)}\n"
+        f"🌐 IP address: {remote_ip}\n"
+        f"⏰ Time (Iran): {jalali_datetime(now())}"
     )
 
 
@@ -549,14 +563,14 @@ def send_login_failure_alert(username, remote_ip, reason, password=""):
     """Alert on failure without disclosing raw credentials to Telegram or app logs."""
     guess_id = failed_password_fingerprint(password) if password else "not-applicable"
     return send_telegram_security_alert(
-        "❗️ ورود به پنل ناموفق‌بود\n"
-        f"علت: {reason}\n"
-        f"💻 نام‌میزبان: {telegram_hostname()}\n"
-        f"👤 نام‌کاربری: {safe_telegram_username(username)}\n"
-        f"🌐 آدرس‌آی‌پی: {remote_ip}\n"
-        f"⏰ زمان: {jalali_datetime(now())}\n"
-        f"شناسه اثرانگشت رمز حدس‌زده‌شده: {guess_id}\n"
-        "رمز خام برای حفظ امنیت ارسال یا ذخیره نشده است."
+        "Failed sign-in to IP Archive.\n"
+        f"Reason: {reason}\n"
+        f"💻 Host: {telegram_hostname()}\n"
+        f"👤 Username: {safe_telegram_username(username)}\n"
+        f"🌐 IP address: {remote_ip}\n"
+        f"⏰ Time (Iran): {jalali_datetime(now())}\n"
+        f"Password guess fingerprint: {guess_id}\n"
+        "The raw password was not sent or stored."
     )
 
 
@@ -824,13 +838,13 @@ def login():
             time.sleep(0.35)
             security_event("two_factor_login", user["username"] if user else "", "failed", "Invalid or unavailable authenticator code")
             send_telegram_security_alert(
-                "❗️ ورود به پنل ناموفق‌بود\n"
-                "علت: کد 2FA اشتباه است\n"
-                f"💻 نام‌میزبان: {telegram_hostname()}\n"
-                f"👤 نام‌کاربری: {safe_telegram_username(user['username'] if user else '')}\n"
-                f"🌐 آدرس‌آی‌پی: {client_ip()}\n"
-                f"⏰ زمان: {jalali_datetime(now())}\n"
-                "کد 2FA خام ذخیره یا ارسال نشده است."
+                "Failed second-factor verification for IP Archive.\n"
+                "Reason: Invalid 2FA code\n"
+                f"💻 Host: {telegram_hostname()}\n"
+                f"👤 Username: {safe_telegram_username(user['username'] if user else '')}\n"
+                f"🌐 IP address: {client_ip()}\n"
+                f"⏰ Time (Iran): {jalali_datetime(now())}\n"
+                "The raw 2FA code was not stored or sent."
             )
             flash("The verification code is invalid. Try again.", "error")
             return render_template("login.html", stage="verify", login_user=dict(user) if user else None)
@@ -873,7 +887,7 @@ def login():
         time.sleep(0.35)
         guess_id = failed_password_fingerprint(password)
         security_event("login", username, "failed", f"Invalid username/password or disabled account; password not stored; guess fingerprint={guess_id}")
-        send_login_failure_alert(username, client_ip(), "رمز و نام کاربری اشتباه است", password)
+        send_login_failure_alert(username, client_ip(), "Invalid username or password", password)
         flash("Invalid username or password.", "error")
     pending_user = None
     if session.get("pending_2fa_user_id"):
