@@ -26,6 +26,13 @@
   <p class="muted">Allowlist status: <strong>{{ 'ENABLED' if allowlist_enabled else 'disabled' }}</strong></p>
 </section>
 
+<section class="panel form-panel">
+  <div class="panel-heading"><div><h2>Emergency recovery through SSH</h2><p>If an IP rule locks you out of the website, recover access from your VPS console or an existing SSH session.</p></div></div>
+  <p class="muted">Run the following command on the server. It creates a private database backup before changing application IP rules and never changes the operating-system firewall.</p>
+  <pre><code>sudo ip-management-recover-access</code></pre>
+  <p class="muted">Choose option 1 to disable the allowlist while keeping block rules, option 2 to allow the IP of your current SSH connection, or option 3 to reset all application IP rules. Option 3 requires typing RESET.</p>
+</section>
+
 <section class="panel form-panel security-log-panel">
   <div class="panel-heading"><div><h2>Authentication & security events</h2><p>Latest 250 events, newest first. Dates are shown in the Iranian/Jalali calendar and Iran local time.</p></div></div>
   <p class="security-privacy-note"><strong>Password privacy:</strong> Submitted passwords and authenticator codes are never stored in these logs. Logs contain the attempted username, source IP, time, result, user agent and a short reason only. Storing real passwords would put every account at risk if logs were exposed.</p>
