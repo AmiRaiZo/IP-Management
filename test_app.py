@@ -217,6 +217,55 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 1)
 
+    def test_telegram_search_shows_decrypted_saved_password(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        encrypted = archive.vault.encrypt(b"Saved-Pass-42").decode()
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups LIMIT 1").fetchone()[0]
+            db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("Office Router", "192.0.2.10", "8291", "admin", encrypted, "Core router", group_id, "test", archive.now(), archive.now()))
+        archive.telegram_set_state({"mode": "search", "step": "query"})
+        with patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {
+                "message_id": 77, "chat": {"id": 12345, "type": "private"}, "text": "Office Router"
+            }})
+        result_text = send.call_args.args[1]
+        self.assertIn("Password: Saved-Pass-42", result_text)
+        self.assertIn("Username: admin", result_text)
+        self.assertEqual(archive.telegram_get_state(), {})
+
+    def test_telegram_add_flow_deletes_user_input_messages(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.telegram_set_state({"mode": "add", "step": "password", "data": {
+            "name": "Router", "ip_address": "192.0.2.2", "port": "22", "username": "admin"
+        }})
+        with patch.object(archive, "telegram_api", return_value={}) as api, patch.object(archive, "telegram_send"):
+            archive.handle_telegram_update({"message": {
+                "message_id": 81, "chat": {"id": 12345, "type": "private"}, "text": "sensitive-password"
+            }})
+        self.assertTrue(any(call.args[0] == "deleteMessage" and call.args[1].get("message_id") == 81
+                            for call in api.call_args_list))
+
+    def test_telegram_search_miss_prompts_for_another_query(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.telegram_set_state({"mode": "search", "step": "query"})
+        with patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {
+                "message_id": 78, "chat": {"id": 12345, "type": "private"}, "text": "no-such-record"
+            }})
+        self.assertEqual(archive.telegram_get_state().get("mode"), "search")
+        self.assertIn("send another name or IP address", send.call_args.args[1])
+
+    def test_telegram_sent_messages_are_scheduled_for_deletion_after_two_minutes(self):
+        with patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 909}}), \
+             patch.object(archive.threading, "Timer") as timer:
+            archive.telegram_send("12345", "Temporary 2FA code")
+        timer.assert_called_once()
+        self.assertEqual(timer.call_args.args[0], 120)
+        self.assertEqual(timer.call_args.args[1], archive.telegram_delete_message)
+        self.assertEqual(timer.call_args.kwargs["args"], ("12345", 909))
+        timer.return_value.start.assert_called_once()
+
     def test_telegram_login_code_expired_code_is_rejected(self):
         user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
         code = "123456"
@@ -1000,7 +1049,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn("Expires", message.args[1])
         self.assertNotIn("IP Archive", message.args[1])
 
-    def test_telegram_search_results_never_include_saved_connection_password(self):
+    def test_telegram_search_results_include_saved_connection_password_for_configured_chat(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with archive.connect_db() as db:
             group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
@@ -1011,7 +1060,7 @@ class ArchiveTests(unittest.TestCase):
             archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": "Search Router"}})
         output = "\n".join(str(call.args[1]) for call in send.call_args_list)
         self.assertIn("192.0.2.77", output)
-        self.assertNotIn("do-not-send-device-secret", output)
+        self.assertIn("Password: do-not-send-device-secret", output)
 
     def test_application_ip_block_does_not_require_os_firewall(self):
         _, secret = self.create_user("ip-rules-admin")

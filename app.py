@@ -11,6 +11,7 @@ import sqlite3
 import socket
 import subprocess
 import time
+import threading
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from contextlib import contextmanager
@@ -390,13 +391,28 @@ def telegram_api(method, payload):
         return {}
 
 
-def telegram_send(chat_id, text, reply_markup=None, parse_mode=None):
+def telegram_delete_message(chat_id, message_id):
+    """Best-effort cleanup for a bot message; Telegram may reject expired or unavailable messages."""
+    try:
+        telegram_api("deleteMessage", {"chat_id": str(chat_id), "message_id": int(message_id)})
+    except (TypeError, ValueError):
+        return
+
+
+def telegram_send(chat_id, text, reply_markup=None, parse_mode=None, delete_after=120):
+    """Send a bot message and schedule it for cleanup after two minutes by default."""
     payload = {"chat_id": str(chat_id), "text": str(text)[:3900], "disable_web_page_preview": True}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    return telegram_api("sendMessage", payload)
+    result = telegram_api("sendMessage", payload)
+    message_id = (result.get("result") or {}).get("message_id") if isinstance(result, dict) else None
+    if delete_after and message_id:
+        cleanup = threading.Timer(float(delete_after), telegram_delete_message, args=(str(chat_id), message_id))
+        cleanup.daemon = True
+        cleanup.start()
+    return result
 
 
 def telegram_set_state(state):
@@ -496,20 +512,35 @@ def handle_telegram_update(update):
     if not state:
         return
     if state.get("mode") == "search":
+        # Search input can contain sensitive hostnames; remove it from the chat when possible.
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
         term = text[:100]
-        with connect_db() as db:
-            rows = db.execute("SELECT name,ip_address,port,username,notes FROM ips WHERE ip_address LIKE ? OR name LIKE ? ORDER BY name LIMIT 10",
-                              (f"%{term}%", f"%{term}%")).fetchall()
-        telegram_set_state({})
-        if not rows:
-            telegram_send(chat_id, "No record matched that name or IP.", {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
+        if not term:
+            telegram_send(chat_id, "Please enter a name or IP address to search again.")
             return
+        with connect_db() as db:
+            rows = db.execute("SELECT name,ip_address,port,username,password_enc,notes FROM ips WHERE ip_address LIKE ? OR name LIKE ? ORDER BY name LIMIT 10",
+                              (f"%{term}%", f"%{term}%")).fetchall()
+        if not rows:
+            # Keep the search state active so the user can try another name without restarting.
+            telegram_send(chat_id, "No record matched that name or IP.\nPlease send another name or IP address, or use /menu to cancel.",
+                          {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
+            return
+        telegram_set_state({})
         lines = ["Search results:"]
         for row in rows:
-            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 Username: {row['username'] or '-'}\n📝 Notes: {(row['notes'] or '-')[:300]}")
+            try:
+                password = vault.decrypt((row["password_enc"] or "").encode()).decode() if row["password_enc"] else "-"
+            except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+                password = "-"
+            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 Username: {row['username'] or '-'}\n🔑 Password: {password}\n📝 Notes: {(row['notes'] or '-')[:300]}")
         telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
         return
     if state.get("mode") == "add":
+        # Best-effort deletion also removes submitted passwords from the private bot chat.
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
         step = state.get("step")
         data = state.get("data") or {}
         prompts = {
