@@ -23,6 +23,26 @@ VERSION_FILE=/var/lib/station-archive/version
 TARGET_FILE=/var/lib/station-archive/update-target
 TARGET_SHA="$(cat "$TARGET_FILE" 2>/dev/null || true)"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Update failed: no verified target commit was provided. Check for updates in the web interface first." >&2; exit 1; }
+
+# Self-heal a legacy/broken installed updater before entering its update logic.
+# The old helper may fail later in this run, so refresh it immediately from the
+# exact commit SHA already verified by the web application.
+if [[ "${UPDATER_BOOTSTRAPPED:-0}" != "1" ]]; then
+  echo "PROGRESS:2:Refreshing the privileged updater from the verified release"
+  BOOTSTRAP_TMP="$(mktemp -d /tmp/ip-management-updater-bootstrap.XXXXXX)"
+  git init -q "$BOOTSTRAP_TMP/source"
+  git -C "$BOOTSTRAP_TMP/source" remote add origin "${UPDATE_REPO%/}"
+  git -C "$BOOTSTRAP_TMP/source" fetch --depth 1 origin "$TARGET_SHA"
+  git -C "$BOOTSTRAP_TMP/source" checkout --quiet --detach FETCH_HEAD
+  BOOTSTRAP_SHA="$(git -C "$BOOTSTRAP_TMP/source" rev-parse HEAD)"
+  [[ "$BOOTSTRAP_SHA" == "$TARGET_SHA" ]] || { echo "Updater bootstrap refused: downloaded commit does not match target." >&2; exit 1; }
+  [[ -f "$BOOTSTRAP_TMP/source/station-archive-update" ]] || { echo "Updater bootstrap failed: release does not contain station-archive-update." >&2; exit 1; }
+  install -o root -g root -m 0600 "$BOOTSTRAP_TMP/source/station-archive-update" "$BOOTSTRAP_TMP/updater.new"
+  bash -n "$BOOTSTRAP_TMP/updater.new"
+  install -o root -g root -m 0750 "$BOOTSTRAP_TMP/updater.new" /usr/local/sbin/station-archive-update
+  rm -rf -- "$BOOTSTRAP_TMP"
+  UPDATER_BOOTSTRAPPED=1 exec /usr/local/sbin/station-archive-update
+fi
 echo "PROGRESS:5:Preparing update"
 TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
 DEPLOYED=0
