@@ -1,3 +1,10 @@
+## Version 2.6.14 release notes
+
+- Changed the sidebar hide/show control to a three-line hamburger button.
+- Hiding the sidebar now collapses the entire navigation, leaving only the floating hamburger control.
+- Kept the main content full-width while the sidebar is hidden and preserved the saved collapse preference.
+- Bumped the stylesheet cache version to ensure browsers load the updated sidebar styles.
+
 ## Version 2.6.1 release notes
 
 - Fixed the IP list `Name` column header alignment so it starts above the IP name text rather than the avatar.
@@ -16,7 +23,7 @@
 
 # IP Management
 
-**Current release: 2.6.0**
+**Current release: 2.6.14**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
 
