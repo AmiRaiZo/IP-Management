@@ -1044,7 +1044,7 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         if not bash:
             self.skipTest("bash is not installed on this platform")
         installer = Path(__file__).with_name("install.sh").read_text(encoding="utf-8")
-        match = re.search(r"cat > /usr/local/sbin/station-archive-update <<'UPDATER'\\n(.*?)\\nUPDATER", installer, re.S)
+        match = re.search(r"cat > /usr/local/sbin/station-archive-update <<'UPDATER'\n(.*?)\nUPDATER", installer, re.S)
         self.assertIsNotNone(match, "installer must contain the updater heredoc")
         result = subprocess.run([bash, "-n"], input=match.group(1), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
