@@ -1,8 +1,14 @@
 # IP Management
 
-**Current release: 2.5.5**
+**Current release: 2.5.6**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+
+## Version 2.5.6 release notes
+
+- Fixed Name-column heading alignment so it begins after the record avatar, and restored the record name text to its normal position instead of overlaying the avatar.
+- Telegram search now includes the saved decrypted connection password for the configured private chat, keeps the search flow active after a miss, and prompts for another name or IP.
+- Telegram bot messages are scheduled for deletion after two minutes; active conversation inputs are deleted on a best-effort basis to reduce chat clutter and avoid leaving sensitive inputs behind.
 
 ## Version 2.5.5 release notes
 
