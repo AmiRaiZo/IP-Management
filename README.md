@@ -1,8 +1,15 @@
 # IP Archive
 
-**Current release: 2.1.0**
+**Current release: 2.2.0**
 
 IP Archive is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+
+## Version 2.2.0 release notes
+
+- Made in-site updates failure-safe: the updater snapshots the exact Python virtual environment before changing dependencies and restores it together with the previous application files if the new version fails.
+- Rollback explicitly restarts the prior service and checks readiness; if recovery still fails, it retains the recovery backup and prints actionable diagnostics instead of deleting the only recovery copy.
+- Health checks require a successful/redirect response (HTTP 2xx/3xx), rather than treating HTTP 4xx as a healthy deployment.
+- Corrected the health-check Host fallback so an unset DOMAIN environment variable cannot abort the updater under strict shell mode.
 
 ## Version 2.1.0 release notes
 

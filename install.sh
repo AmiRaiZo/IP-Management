@@ -240,32 +240,41 @@ TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
 DEPLOYED=0
 SUCCESS=0
 cleanup() {
+  # Roll back even when the updater exits under set -e.
+  set +e
+  KEEP_TMP=0
   if (( DEPLOYED == 1 && SUCCESS == 0 )); then
-    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/; then
+    echo "Update failed; restoring the last known-good application and Python environment." >&2
+    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/ && [[ -d "$TMP/venv-backup" ]] && rsync -a --delete "$TMP/venv-backup/" /opt/station-archive/.venv/; then
       chown -R root:www-data /opt/station-archive
-      chown root:www-data /opt/station-archive
-      find /opt/station-archive -type d -exec chmod 0750 {} +
-      find /opt/station-archive -type f -exec chmod 0640 {} +
-      chown -R root:www-data /opt/station-archive/.venv || true
-      chmod -R g+rX /opt/station-archive/.venv || true
-      /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt >/dev/null 2>&1 || true
-	      /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' >/dev/null 2>&1 || true
-	      if ! (cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run') >/dev/null 2>&1; then
-	        mv /opt/station-archive/.venv "$TMP/venv-rollback-broken" || true
-	        python3 -m venv /opt/station-archive/.venv || true
-	        /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt || true
-	        /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24' || true
-	        chown -R root:www-data /opt/station-archive/.venv || true
-	        chmod -R g+rX /opt/station-archive/.venv || true
-	      fi
-      systemctl restart station-archive >/dev/null 2>&1 || true
-      echo "Update failed; previous application files were restored." >&2
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
+      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
+      chown -R root:www-data /opt/station-archive/.venv
+      chmod -R g+rX /opt/station-archive/.venv
+      if ! systemctl restart station-archive.service; then systemctl start station-archive.service; fi
+      HTTP_CODE=000
+      for attempt in $(seq 1 30); do
+        if systemctl is-active --quiet station-archive.service; then
+          HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: ${APP_DOMAIN:-${DOMAIN:-localhost}}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/" 2>/dev/null || true)"
+          if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then break; fi
+        fi
+        sleep 1
+      done
+      if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
+        echo "Rollback succeeded; previous version is serving requests (HTTP $HTTP_CODE)." >&2
+      else
+        systemctl start station-archive.service >/dev/null 2>&1 || true
+        KEEP_TMP=1
+        echo "CRITICAL: restored files but health check still fails (HTTP $HTTP_CODE). Recovery backup retained at $TMP. Run: systemctl status station-archive; journalctl -u station-archive -n 100 --no-pager" >&2
+      fi
     else
-      echo "Update failed and automatic rollback could not restore the previous files. Inspect /opt/station-archive and the service logs." >&2
+      KEEP_TMP=1
+      echo "CRITICAL: rollback could not restore app and venv. Recovery backup retained at $TMP; do not delete it." >&2
+      systemctl start station-archive.service >/dev/null 2>&1 || true
     fi
   fi
-  if (( SUCCESS == 0 && DEPLOYED == 0 )); then echo "Update process failed before deployment." >&2; fi
-  rm -rf -- "$TMP"
+  if (( SUCCESS == 0 && DEPLOYED == 0 )); then echo "Update failed before deployment; running application files were not changed." >&2; fi
+  if (( KEEP_TMP == 0 )); then rm -rf -- "$TMP"; fi
 }
 trap cleanup EXIT
 echo "PROGRESS:12:Downloading repository and checking target version"
@@ -277,8 +286,10 @@ SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
 for required in app.py requirements.txt templates static reconfigure_server.sh; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
-mkdir -p "$TMP/backup"
+mkdir -p "$TMP/backup" "$TMP/venv-backup"
+# Preserve exact dependencies so rollback never relies on PyPI or network access.
 rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
+rsync -a /opt/station-archive/.venv/ "$TMP/venv-backup/"
 DEPLOYED=1
 	echo "PROGRESS:32:Preparing the application backup"
 	echo "PROGRESS:35:Installing application files while the current worker stays online"
@@ -359,14 +370,14 @@ chmod -R g+rX /opt/station-archive/.venv
 HTTP_CODE=000
 for attempt in $(seq 1 30); do
   if systemctl is-active --quiet station-archive; then
-    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: $DOMAIN" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
-    if [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: ${APP_DOMAIN:-${DOMAIN:-localhost}}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
+    if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
       break
     fi
   fi
   sleep 1
 done
-if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ && "$HTTP_CODE" != 000 && "$HTTP_CODE" -lt 500 ]]; then
+if ! [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
   echo "Application health check failed after 30 seconds (HTTP $HTTP_CODE)." >&2
   journalctl -u station-archive.service -n 60 --no-pager >&2 || true
   exit 1
