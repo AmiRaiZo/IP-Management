@@ -65,6 +65,13 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.location)
 
+    def test_untrusted_host_returns_400_without_error_template_routing(self):
+        with patch.dict(archive.app.config, {"TRUSTED_HOSTS": ["archive.example.com"]}):
+            response = self.client.get("/", headers={"Host": "127.0.0.1:443"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"400", response.data)
+        self.assertNotIn(b"Internal Server Error", response.data)
+
     def test_first_login_requires_enrollment_and_enables_totp(self):
         with archive.connect_db() as db:
             db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)",
