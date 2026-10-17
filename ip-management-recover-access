@@ -30,13 +30,22 @@ PY
 else
   SSH_CLIENT_IP=""
 fi
+if [[ -z "$SSH_CLIENT_IP" ]]; then
+  read -r -p "SSH client public IP for option 2 (leave blank to skip): " SSH_CLIENT_IP
+  if [[ -n "$SSH_CLIENT_IP" ]]; then
+    python3 - "$SSH_CLIENT_IP" <<'PY' >/dev/null 2>&1 || { echo "Invalid IP address; option 2 will be unavailable." >&2; SSH_CLIENT_IP=""; }
+import ipaddress, sys
+ipaddress.ip_address(sys.argv[1])
+PY
+  fi
+fi
 
 echo "IP Management access recovery"
 echo "Database: $DB_PATH"
 if [[ -n "$SSH_CLIENT_IP" ]]; then
   echo "SSH client address detected: $SSH_CLIENT_IP"
 else
-  echo "SSH client address was not detected; use option 1 or 3."
+  echo "SSH client address was not detected; option 2 requires a manually entered valid IP."
 fi
 echo
 echo "1) Disable the application allowlist (keeps existing block rules)"
