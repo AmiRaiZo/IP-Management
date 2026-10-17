@@ -415,6 +415,8 @@ class ArchiveTests(unittest.TestCase):
             enrolled = db.execute("SELECT two_factor_enrolled FROM users WHERE username='shared-admin'").fetchone()
         self.assertEqual(enrolled["two_factor_enrolled"], 1)
         self.client.post("/logout", data={"csrf_token": self.csrf()})
+        # Remove the trusted-device cookie to verify the normal second-factor prompt.
+        self.client.delete_cookie("ip_management_2fa")
         self.client.get("/login")
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
