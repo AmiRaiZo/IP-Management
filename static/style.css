@@ -286,3 +286,18 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 .inventory-panel .table-scroll table td code{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .inventory-panel .table-scroll table td .copy-value{max-width:100%;overflow:hidden;vertical-align:middle}
 .inventory-panel .table-scroll table td .actions{justify-content:center;gap:4px;flex-wrap:wrap}
+
+
+/* v2.6.14: collapse the navigation completely and keep only a compact hamburger control. */
+body.sidebar-collapsed .sidebar{width:0!important;min-width:0!important;padding:0!important;margin:0!important;border:0!important;overflow:visible!important;background:transparent!important;box-shadow:none!important}
+body.sidebar-collapsed .sidebar>*:not(#sidebar-toggle){display:none!important}
+body.sidebar-collapsed .sidebar #sidebar-toggle{position:fixed;top:14px;left:14px;z-index:1000;width:42px;height:42px;min-height:42px;margin:0!important;padding:0!important;display:flex!important;align-items:center;justify-content:center!important;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 4px 16px #1d2e5012;color:var(--text)}
+.sidebar-toggle-icon{font-size:0!important;transform:none!important;flex:0 0 18px;width:18px;height:18px}
+.sidebar-toggle-icon::before{content:"☰";display:block;font-family:Arial,sans-serif;font-size:21px;font-weight:400;line-height:18px}
+body.sidebar-collapsed .sidebar .sidebar-toggle-label{display:none!important}
+body.sidebar-collapsed .main-column{margin-left:0!important}
+@media(max-width:720px){
+  body.sidebar-collapsed .sidebar{width:0!important;min-height:0!important;padding:0!important;border:0!important}
+  body.sidebar-collapsed .sidebar #sidebar-toggle{top:8px;left:8px}
+  body.sidebar-collapsed .main-column{margin-left:0!important}
+}
