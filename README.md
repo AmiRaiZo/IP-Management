@@ -1,12 +1,18 @@
 # IP Management
 
-**Current release: 2.5.3**
+**Current release: 2.5.4**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
 
+## Version 2.5.4 release notes
+
+- Prevented the updater from replacing its own executable while the current shell is still running, eliminating a class of mid-update shell parse failures.
+- Added regression coverage for early bootstrap ordering and to ensure the running updater is never overwritten during deployment.
+- Kept the helper bootstrap syntax-validated before installation.
+
 ## Version 2.5.3 release notes
 
-- Fixed in-site updates on existing installations by refreshing the privileged updater from the verified target commit before legacy update logic runs. This removes the need for a manual SSH bootstrap.
+- Added early updater self-refresh from the verified target commit for installations whose privileged helper already supports the bootstrap flow. Legacy helpers with a parse-time/runtime failure may still require one-time recovery.
 - Added regression coverage that asserts updater self-refresh happens before application deployment.
 
 ## Version 2.5.2 release notes
