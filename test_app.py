@@ -100,7 +100,8 @@ class ArchiveTests(unittest.TestCase):
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Authenticator or recovery code', response.data)
+        self.assertIn(b'Authenticator code', response.data)
+        self.assertNotIn(b'or recovery code', response.data)
         self.assertIn(b'WELCOME BACK', response.data)
         self.assertIn(b'two-step', response.data)
         self.assertIn(b'ID #', response.data)
@@ -115,7 +116,8 @@ class ArchiveTests(unittest.TestCase):
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'Authenticator or recovery code', response.data)
+        self.assertIn(b'Authenticator code', response.data)
+        self.assertNotIn(b'or recovery code', response.data)
 
     def test_recovery_codes_are_shown_once_hashed_and_single_use(self):
         user_id, secret = self.create_user("recovery-user")
@@ -203,10 +205,11 @@ class ArchiveTests(unittest.TestCase):
                 "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
             }})
         messages = [str(call.args[1]) for call in send.call_args_list]
-        code_messages = [message for message in messages if "temporary superadmin login code" in message]
+        code_messages = [message for message in messages if "Login code for IP Management" in message]
         self.assertEqual(len(code_messages), 1)
         self.assertRegex(code_messages[0], r"\b\d{6}\b")
-        self.assertIn("2 minutes", code_messages[0])
+        self.assertIn("<code>", code_messages[0])
+        self.assertNotIn("2 minutes", code_messages[0])
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 1)
 
@@ -307,7 +310,8 @@ class ArchiveTests(unittest.TestCase):
             "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
         })
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Authenticator or recovery code", response.data)
+        self.assertIn(b"Authenticator code", response.data)
+        self.assertNotIn(b"or recovery code", response.data)
         response = self.client.post("/login", data={
             "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
         })
@@ -460,6 +464,9 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
         self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
+        self.assertIn('<th>Name</th>', page)
+        self.assertIn('.inventory-panel .table-scroll table th:first-child,.inventory-panel .table-scroll table td:first-child{text-align:left}', (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8'))
+        self.assertIn('.inventory-panel .table-scroll .record-name{justify-content:flex-start}', (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8'))
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
         self.assertEqual(self.login("update-success-user", secret).status_code, 302)
@@ -756,7 +763,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("telegram-guess", alert)
         self.assertIn("127.0.0.1", alert)
         self.assertIn("Password guess fingerprint:", alert)
-        self.assertIn("Failed sign-in to IP Archive", alert)
+        self.assertIn("Failed sign-in to IP Management", alert)
         self.assertIn("Host:", alert)
         self.assertIn("Time (Iran):", alert)
         self.assertNotIn("never-send-this-password", alert)
@@ -937,23 +944,57 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         menu.assert_not_called()
 
-    def test_telegram_add_flow_creates_record_without_connection_password(self):
+    def test_telegram_add_flow_requests_password_and_selects_group_with_buttons(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         callback = {"callback_query": {"id": "cb1", "data": "ip_add", "message": {
             "message_id": 1, "chat": {"id": 12345, "type": "private"}}}}
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
         with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
             archive.handle_telegram_update(callback)
-            for value in ("Router via bot", "192.0.2.55", "22", "admin", "test record"):
+            for value in ("Router via bot", "192.0.2.55", "22", "admin", "device-secret",):
                 archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": value}})
+            group_prompt = next(call for call in send.call_args_list if "choose a group" in call.args[1])
+            self.assertEqual(group_prompt.args[2]["inline_keyboard"][0][0]["callback_data"], f"ip_group:{group_id}")
+            archive.handle_telegram_update({"callback_query": {"id": "cb2", "data": f"ip_group:{group_id}", "message": {
+                "message_id": 2, "chat": {"id": 12345, "type": "private"}}}})
+            archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": "test record"}})
         with archive.connect_db() as db:
-            row = db.execute("SELECT name,ip_address,port,username,password_enc,notes,created_by FROM ips WHERE ip_address='192.0.2.55'").fetchone()
+            row = db.execute("SELECT name,ip_address,port,username,password_enc,notes,group_id,created_by FROM ips WHERE ip_address='192.0.2.55'").fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row["name"], "Router via bot")
         self.assertEqual(row["port"], 22)
         self.assertEqual(row["username"], "admin")
-        self.assertEqual(row["password_enc"], "")
+        self.assertEqual(archive.vault.decrypt(row["password_enc"].encode()).decode(), "device-secret")
+        self.assertEqual(row["group_id"], group_id)
+        self.assertEqual(row["notes"], "test record")
         self.assertEqual(row["created_by"], "telegram-bot")
-        self.assertTrue(any("IP record saved" in call.args[1] for call in send.call_args_list))
+        self.assertTrue(any("IP record saved in IP Management" in call.args[1] for call in send.call_args_list))
+
+    def test_authenticator_page_loads_profile_image_with_initial_fallback(self):
+        with archive.connect_db() as db:
+            user_id = db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled,profile_image) VALUES(?,?,?,?,?,1,1,?)",
+                                 ("avatar-login", archive.password_hash("test-pass"), archive.now(), "superadmin", pyotp.random_base32(), "avatars/missing-profile.png")).lastrowid
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "avatar-login", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'login-user-avatar-image', response.data)
+        self.assertIn(b'login-user-avatar-fallback', response.data)
+        self.assertIn(b'Authenticator code', response.data)
+        self.assertNotIn(b'or recovery code', response.data)
+
+    def test_telegram_login_code_message_is_minimal_and_formatted_for_copying(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("telegram-code-admin", role="superadmin")
+        callback = {"callback_query": {"id": "cb-code", "data": "telegram_2fa_code", "message": {
+            "message_id": 1, "chat": {"id": 12345, "type": "private"}}}}
+        with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
+            archive.handle_telegram_update(callback)
+        message = next(call for call in send.call_args_list if "Login code for IP Management" in call.args[1])
+        self.assertRegex(message.args[1], r"^Login code for IP Management:\n<code>\d{6}</code>$")
+        self.assertEqual(message.kwargs.get("parse_mode"), "HTML")
+        self.assertNotIn("Expires", message.args[1])
+        self.assertNotIn("IP Archive", message.args[1])
 
     def test_telegram_search_results_never_include_saved_connection_password(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")

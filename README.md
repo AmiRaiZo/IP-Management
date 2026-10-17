@@ -1,8 +1,16 @@
-# IP Archive
+# IP Management
 
-**Current release: 2.2.0**
+**Current release: 2.3.0**
 
-IP Archive is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+
+## Version 2.3.0 release notes
+
+- Aligned IP record names under the Name column and separated each record's initial avatar from the name text.
+- Fixed the two-factor authentication screen label and placeholder; the account avatar now loads the profile image when available and falls back to the user's initial.
+- Simplified Telegram sign-in code delivery to a single IP Management label and a formatted six-digit code that is easy to copy, without extra explanatory text.
+- Renamed Telegram bot branding from IP Archive to IP Management.
+- Updated the Telegram Add IP flow to request the connection password and choose the target group using inline buttons; saved passwords remain encrypted.
 
 ## Version 2.2.0 release notes
 
@@ -71,7 +79,7 @@ If an application allowlist or block rule prevents access to the website, SSH to
 sudo ip-management-recover-access
 ```
 
-The tool makes a private SQLite backup first. Option 1 disables only the application allowlist while preserving block rules. Option 2 uses the detected SSH source IP, or asks you to enter your public client IP if `sudo` did not preserve the SSH environment; it adds an allow rule and removes any block rule that matches that IP. Option 3 removes all application IP rules and disables the allowlist; it requires typing `RESET`. The tool changes only IP Management's database policy, not Ubuntu's firewall, SSH settings, or other services. If the command is not installed yet, download and install it over SSH:
+The tool makes a private SQLite backup first. Option 1 disables only the application allowlist while preserving block rules. Option 2 detects the source IP of the current SSH connection, adds an allow rule for it, and removes any block rule that matches it. Option 3 removes all application IP rules and disables the allowlist; it requires typing `RESET`. The tool changes only IP Management's database policy, not Ubuntu's firewall, SSH settings, or other services. If the command is not installed yet, download it over SSH, then run it:
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/ip-management-recover-access -o /usr/local/sbin/ip-management-recover-access
@@ -90,7 +98,7 @@ sudo /usr/local/sbin/ip-management-recover-access
 - Emergency application IP access recovery: `sudo ip-management-recover-access`
 - Certificate renewal check: `sudo certbot renew --dry-run`
 
-The updater preserves `/var/lib/station-archive` and `/etc/station-archive/env`. Back up both securely. The environment file contains encryption and session secrets; losing them may make stored encrypted values unrecoverable. The GitHub repository must contain `app.py`, `setup_admin.py`, `requirements.txt`, `templates/`,  `static/`, and `ip-management-recover-access`. Review repository changes before updating production, because the updater executes the application code supplied by that repository.
+The updater preserves `/var/lib/station-archive` and `/etc/station-archive/env`. Back up both securely. The environment file contains encryption and session secrets; losing them may make stored encrypted values unrecoverable. The GitHub repository must contain `app.py`, `setup_admin.py`, `requirements.txt`, `templates/`, `static/`, and `ip-management-recover-access`. Review repository changes before updating production, because the updater executes the application code supplied by that repository.
 
 ## Network and TLS notes
 

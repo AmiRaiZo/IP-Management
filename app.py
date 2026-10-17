@@ -390,10 +390,12 @@ def telegram_api(method, payload):
         return {}
 
 
-def telegram_send(chat_id, text, reply_markup=None):
+def telegram_send(chat_id, text, reply_markup=None, parse_mode=None):
     payload = {"chat_id": str(chat_id), "text": str(text)[:3900], "disable_web_page_preview": True}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     return telegram_api("sendMessage", payload)
 
 
@@ -420,9 +422,9 @@ def telegram_menu(chat_id, message_id=None):
     ]}
     if message_id:
         telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
-                         "text": "IP Archive — choose an option:", "reply_markup": markup})
+                         "text": "IP Management — choose an option:", "reply_markup": markup})
     else:
-        telegram_send(chat_id, "IP Archive — choose an option:", markup)
+        telegram_send(chat_id, "IP Management — choose an option:", markup)
 
 
 def handle_telegram_update(update):
@@ -447,14 +449,32 @@ def handle_telegram_update(update):
             if not code:
                 telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
                 return
-            telegram_send(chat_id,
-                          "IP Archive temporary superadmin login code:\n"
-                          f"{code}\n\n"
-                          "Expires in 2 minutes and can be used once, after the superadmin password is verified. "
-                          "This is a separate fallback code, not your authenticator's TOTP. Keep it private.")
+            telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
+        elif action.startswith("ip_group:"):
+            state = telegram_get_state()
+            if state.get("mode") != "add" or state.get("step") != "group":
+                return
+            try:
+                selected_group_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                telegram_send(chat_id, "Invalid group. Send /start to begin again.")
+                telegram_set_state({})
+                return
+            with connect_db() as db:
+                selected_group = db.execute("SELECT id,name FROM groups WHERE id=?", (selected_group_id,)).fetchone()
+            if not selected_group:
+                telegram_send(chat_id, "That group no longer exists. Send /start to begin again.")
+                telegram_set_state({})
+                return
+            data = state.get("data") or {}
+            data["group_id"] = str(selected_group["id"])
+            data["group_name"] = selected_group["name"]
+            state.update(step="notes", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, f"Selected group: {selected_group['name']}\nStep 7 of 7 — enter notes, or send - to skip:")
         elif action == "ip_add":
             telegram_set_state({"mode": "add", "step": "name", "data": {}})
-            telegram_send(chat_id, "Step 1 of 5 — enter a name for this IP/server:")
+            telegram_send(chat_id, "Step 1 of 7 — enter a name for this IP/server:")
         elif action == "ip_search":
             telegram_set_state({"mode": "search", "step": "query"})
             telegram_send(chat_id, "Send the saved name or IP address to search:")
@@ -466,11 +486,7 @@ def handle_telegram_update(update):
         if not code:
             telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
             return
-        telegram_send(chat_id,
-                      "IP Archive temporary superadmin login code:\n"
-                      f"{code}\n\n"
-                      "Expires in 2 minutes and can be used once, after the superadmin password is verified. "
-                      "This is a separate fallback code, not your authenticator's TOTP. Keep it private.")
+        telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
         return
     if text.lower() in ("ربات", "/start", "/menu"):
         telegram_set_state({})
@@ -497,39 +513,50 @@ def handle_telegram_update(update):
         step = state.get("step")
         data = state.get("data") or {}
         prompts = {
-            "name": ("name", "Name", "Step 2 of 5 — enter the IP address or hostname:"),
-            "ip": ("ip_address", "IP", "Step 3 of 5 — enter the port (for example, 22 or 443):"),
-            "port": ("port", "Port", "Step 4 of 5 — enter the connection username:"),
-            "username": ("username", "Username", "Step 5 of 5 — enter notes, or send - to skip:"),
+            "name": "Step 2 of 7 — enter the IP address or hostname:",
+            "ip": "Step 3 of 7 — enter the port (for example, 22 or 443):",
+            "port": "Step 4 of 7 — enter the connection username:",
+            "username": "Step 5 of 7 — enter the connection password, or send - if there is no password:",
         }
         if step == "name":
             data["name"] = text[:120]
             state.update(step="ip", data=data)
             telegram_set_state(state)
-            telegram_send(chat_id, prompts["name"][2])
+            telegram_send(chat_id, prompts["name"])
             return
         if step == "ip":
             data["ip_address"] = text[:255]
             state.update(step="port", data=data)
             telegram_set_state(state)
-            telegram_send(chat_id, prompts["ip"][2])
+            telegram_send(chat_id, prompts["ip"])
             return
         if step == "port":
             data["port"] = text[:10]
             state.update(step="username", data=data)
             telegram_set_state(state)
-            telegram_send(chat_id, prompts["port"][2])
+            telegram_send(chat_id, prompts["port"])
             return
         if step == "username":
             data["username"] = text[:120]
-            state.update(step="notes", data=data)
+            state.update(step="password", data=data)
             telegram_set_state(state)
-            telegram_send(chat_id, prompts["username"][2])
+            telegram_send(chat_id, prompts["username"])
+            return
+        if step == "password":
+            data["password"] = "" if text == "-" else text[:500]
+            with connect_db() as db:
+                groups = db.execute("SELECT id,name FROM groups ORDER BY sort_order,id").fetchall()
+            if not groups:
+                telegram_send(chat_id, "No groups are available. Create a group in IP Management first.")
+                telegram_set_state({})
+                return
+            state.update(step="group", data=data)
+            telegram_set_state(state)
+            markup = {"inline_keyboard": [[{"text": str(group["name"])[:60], "callback_data": f"ip_group:{group['id']}"}] for group in groups]}
+            telegram_send(chat_id, "Step 6 of 7 — choose a group:", markup)
             return
         if step == "notes":
             data["notes"] = "" if text == "-" else text[:3000]
-            data["password"] = ""
-            data["group_id"] = ""
             clean, error = validate_ip(MultiDict(data))
             if error:
                 telegram_send(chat_id, f"Invalid information: {error}\nSend /start to begin again.")
@@ -539,11 +566,11 @@ def handle_telegram_update(update):
                 cur = db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                                  (clean["name"], clean["ip"], clean["port"], clean["username"], clean["password"] or "", clean["notes"], clean["group_id"], "telegram-bot", now(), now()))
             telegram_set_state({})
-            telegram_send(chat_id, f"IP record saved.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port']}\nRecord ID: {cur.lastrowid}",
+            telegram_send(chat_id, f"IP record saved in IP Management.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port'] or '-'}\n📁 Group: {data.get('group_name', 'Default')}\nRecord ID: {cur.lastrowid}",
                           {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
 def telegram_hostname():
     """Return a short configured host label without exposing local machine details."""
-    return (os.environ.get("APP_HOSTNAME", "").strip() or socket.gethostname() or "IP Archive")[:80]
+    return (os.environ.get("APP_HOSTNAME", "").strip() or socket.gethostname() or "IP Management")[:80]
 
 
 def safe_telegram_username(value):
@@ -552,7 +579,7 @@ def safe_telegram_username(value):
 
 def send_login_success_alert(username, remote_ip):
     return send_telegram_security_alert(
-        "Successful sign-in to IP Archive.\n"
+        "Successful sign-in to IP Management.\n"
         f"💻 Host: {telegram_hostname()}\n"
         f"👤 Username: {safe_telegram_username(username)}\n"
         f"🌐 IP address: {remote_ip}\n"
@@ -564,7 +591,7 @@ def send_login_failure_alert(username, remote_ip, reason, password=""):
     """Alert on failure without disclosing raw credentials to Telegram or app logs."""
     guess_id = failed_password_fingerprint(password) if password else "not-applicable"
     return send_telegram_security_alert(
-        "Failed sign-in to IP Archive.\n"
+        "Failed sign-in to IP Management.\n"
         f"Reason: {reason}\n"
         f"💻 Host: {telegram_hostname()}\n"
         f"👤 Username: {safe_telegram_username(username)}\n"
@@ -839,7 +866,7 @@ def login():
             time.sleep(0.35)
             security_event("two_factor_login", user["username"] if user else "", "failed", "Invalid or unavailable authenticator code")
             send_telegram_security_alert(
-                "Failed second-factor verification for IP Archive.\n"
+                "Failed second-factor verification for IP Management.\n"
                 "Reason: Invalid 2FA code\n"
                 f"💻 Host: {telegram_hostname()}\n"
                 f"👤 Username: {safe_telegram_username(user['username'] if user else '')}\n"
