@@ -162,6 +162,10 @@ def init_db():
           id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           code_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS telegram_login_codes (
+          id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          code_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
@@ -298,6 +302,42 @@ def consume_recovery_code(user_id, submitted):
     return True
 
 
+def telegram_login_code_hash(user_id, code):
+    normalized = re.sub(r"\s", "", str(code or ""))
+    return hmac.new(app.secret_key.encode(), f"telegram-login:{user_id}:{normalized}".encode(), hashlib.sha256).hexdigest()
+
+
+def issue_telegram_login_code():
+    """Issue a two-minute, one-use Telegram fallback code for the superadmin only."""
+    with connect_db() as db:
+        user = db.execute("SELECT id FROM users WHERE role='superadmin' AND enabled=1 ORDER BY id LIMIT 1").fetchone()
+        if not user:
+            return ""
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(timespec="seconds")
+        db.execute("DELETE FROM telegram_login_codes")
+        db.execute("INSERT INTO telegram_login_codes(user_id,code_hash,expires_at,created_at) VALUES(?,?,?,?)",
+                   (user["id"], telegram_login_code_hash(user["id"], code), expires, now()))
+    return code
+
+
+def consume_telegram_login_code(user_id, submitted):
+    """Atomically consume a short-lived Telegram fallback code; never stores it in plaintext."""
+    if not re.fullmatch(r"\d{6}", str(submitted or "").strip()):
+        return False
+    with connect_db() as db:
+        row = db.execute("SELECT id,code_hash,expires_at FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()
+        if not row or row["expires_at"] < now():
+            if row:
+                db.execute("DELETE FROM telegram_login_codes WHERE id=?", (row["id"],))
+            return False
+        candidate = telegram_login_code_hash(user_id, submitted)
+        if not hmac.compare_digest(row["code_hash"], candidate):
+            return False
+        db.execute("DELETE FROM telegram_login_codes WHERE id=?", (row["id"],))
+    return True
+
+
 def secure_setting(key):
     with connect_db() as db:
         row = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
@@ -405,6 +445,18 @@ def handle_telegram_update(update):
             telegram_send(chat_id, "نام ثبت‌شده یا آدرس IP را بفرست:")
         return
     text = str(message.get("text", "")).strip()
+    if text.lower() in ("/login_code", "/login-code", "/کدورود", "کد ورود", "کدورود"):
+        telegram_set_state({})
+        code = issue_telegram_login_code()
+        if not code:
+            telegram_send(chat_id, "❌ حساب مدیر ارشد فعالی برای بازیابی ورود پیدا نشد.")
+            return
+        telegram_send(chat_id,
+                      "🔐 کد جایگزین ورود IP Archive:\n"
+                      f"`{code}`\n\n"
+                      "اعتبار: ۲ دقیقه؛ فقط یک‌بار قابل استفاده است و فقط برای حساب مدیر ارشد، پس از تأیید رمز عبور.\n"
+                      "این کد، کد برنامه Authenticator نیست. آن را با کسی به اشتراک نگذار.")
+        return
     if text.lower() in ("ربات", "/start", "/menu"):
         telegram_set_state({})
         telegram_menu(chat_id)
@@ -755,12 +807,17 @@ def login():
             secret = shared_two_factor_secret() if mode == "shared" else (decrypt_authenticator_secret(user["totp_secret"]) if user else "")
             totp_ok = bool(user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1))
             recovery_ok = bool(user and user_requires_two_factor(user) and not totp_ok and consume_recovery_code(user["id"], code))
-            if user and user_requires_two_factor(user) and (totp_ok or recovery_ok):
+            telegram_code_ok = bool(user and user["role"] == "superadmin" and user_requires_two_factor(user)
+                                    and not totp_ok and not recovery_ok and consume_telegram_login_code(user["id"], code))
+            if user and user_requires_two_factor(user) and (totp_ok or recovery_ok or telegram_code_ok):
                 establish_login(user)
                 session["two_factor_verified"] = True
                 if recovery_ok:
                     security_event("two_factor_recovery", user["username"], "success", "One-time offline recovery code consumed")
                     audit("two_factor_recovery_code_used")
+                if telegram_code_ok:
+                    security_event("two_factor_recovery", user["username"], "success", "Two-minute Telegram fallback code consumed")
+                    audit("telegram_login_recovery_code_used")
                 send_login_success_alert(user["username"], client_ip())
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 return redirect(safe_login_target())
