@@ -288,16 +288,26 @@ img{max-width:100%}input,select,textarea,button{max-width:100%}.panel,.settings-
 .inventory-panel .table-scroll table td .actions{justify-content:center;gap:4px;flex-wrap:wrap}
 
 
-/* v2.6.14: collapse the navigation completely and keep only a compact hamburger control. */
+/* v2.6.15: icon-only sidebar control with smooth collapse/expand motion. */
+.sidebar{transition:width .32s cubic-bezier(.22,.61,.36,1),min-width .32s cubic-bezier(.22,.61,.36,1),padding .32s cubic-bezier(.22,.61,.36,1),border-color .24s ease,background-color .24s ease}
+.main-column{transition:margin-left .32s cubic-bezier(.22,.61,.36,1)}
+.sidebar>*:not(#sidebar-toggle){opacity:1;transform:translateX(0);transition:opacity .18s ease,transform .28s cubic-bezier(.22,.61,.36,1),visibility 0s linear 0s}
+.sidebar-toggle{position:relative;align-self:flex-end;width:38px;height:38px;min-height:38px;margin:0 0 18px;padding:0;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:0 3px 12px #1d2e500a;transition:background-color .2s ease,border-color .2s ease,box-shadow .2s ease,transform .22s ease}
+.sidebar-toggle:hover{background:var(--surface-2);box-shadow:0 5px 16px #1d2e5014;transform:translateY(-1px)}
+.sidebar-toggle-icon{font-size:0!important;transform:none!important;flex:0 0 20px;width:20px;height:20px;display:grid;place-items:center}
+.sidebar-toggle-icon::before{content:"☰";display:block;font-family:Arial,sans-serif;font-size:21px;font-weight:400;line-height:20px;transition:transform .22s ease}
+.sidebar-toggle-label{display:none!important}
 body.sidebar-collapsed .sidebar{width:0!important;min-width:0!important;padding:0!important;margin:0!important;border:0!important;overflow:visible!important;background:transparent!important;box-shadow:none!important}
-body.sidebar-collapsed .sidebar>*:not(#sidebar-toggle){display:none!important}
+body.sidebar-collapsed .sidebar>*:not(#sidebar-toggle){opacity:0;transform:translateX(-14px);visibility:hidden;pointer-events:none;transition:opacity .16s ease,transform .28s cubic-bezier(.22,.61,.36,1),visibility 0s linear .28s}
 body.sidebar-collapsed .sidebar #sidebar-toggle{position:fixed;top:14px;left:14px;z-index:1000;width:42px;height:42px;min-height:42px;margin:0!important;padding:0!important;display:flex!important;align-items:center;justify-content:center!important;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 4px 16px #1d2e5012;color:var(--text)}
-.sidebar-toggle-icon{font-size:0!important;transform:none!important;flex:0 0 18px;width:18px;height:18px}
-.sidebar-toggle-icon::before{content:"☰";display:block;font-family:Arial,sans-serif;font-size:21px;font-weight:400;line-height:18px}
-body.sidebar-collapsed .sidebar .sidebar-toggle-label{display:none!important}
+body.sidebar-collapsed .sidebar #sidebar-toggle .sidebar-toggle-icon::before{transform:rotate(0deg)}
 body.sidebar-collapsed .main-column{margin-left:0!important}
 @media(max-width:720px){
+  .sidebar{transition:width .3s cubic-bezier(.22,.61,.36,1),padding .3s cubic-bezier(.22,.61,.36,1),border-color .2s ease}
   body.sidebar-collapsed .sidebar{width:0!important;min-height:0!important;padding:0!important;border:0!important}
   body.sidebar-collapsed .sidebar #sidebar-toggle{top:8px;left:8px}
   body.sidebar-collapsed .main-column{margin-left:0!important}
+}
+@media(prefers-reduced-motion:reduce){
+  .sidebar,.sidebar>*:not(#sidebar-toggle),.sidebar-toggle,.sidebar-toggle-icon::before,.main-column{transition:none!important}
 }
