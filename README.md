@@ -71,7 +71,7 @@ If an application allowlist or block rule prevents access to the website, SSH to
 sudo ip-management-recover-access
 ```
 
-The tool makes a private SQLite backup first. Option 1 disables only the application allowlist while preserving block rules. Option 2 detects the source IP of the current SSH connection, adds an allow rule for it, and removes any block rule that matches it. Option 3 removes all application IP rules and disables the allowlist; it requires typing `RESET`. The tool changes only IP Management's database policy, not Ubuntu's firewall, SSH settings, or other services. If the command is not installed yet, download and install it over SSH:
+The tool makes a private SQLite backup first. Option 1 disables only the application allowlist while preserving block rules. Option 2 uses the detected SSH source IP, or asks you to enter your public client IP if `sudo` did not preserve the SSH environment; it adds an allow rule and removes any block rule that matches that IP. Option 3 removes all application IP rules and disables the allowlist; it requires typing `RESET`. The tool changes only IP Management's database policy, not Ubuntu's firewall, SSH settings, or other services. If the command is not installed yet, download and install it over SSH:
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/AmiRaiZo/IP-Management/main/ip-management-recover-access -o /usr/local/sbin/ip-management-recover-access
