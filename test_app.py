@@ -518,8 +518,10 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
         self.assertIn('<th>Name</th>', page)
-        self.assertIn('.inventory-panel .table-scroll table th:first-child,.inventory-panel .table-scroll table td:first-child{text-align:left}', (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8'))
-        self.assertIn('.inventory-panel .table-scroll .record-name{justify-content:flex-start}', (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8'))
+        stylesheet = (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('.inventory-panel .table-scroll table th:first-child{text-align:left;padding-left:60px}', stylesheet)
+        self.assertIn('.inventory-panel .table-scroll .record-name{justify-content:flex-start;position:static;width:auto;min-height:32px}', stylesheet)
+        self.assertIn('.profile-info{display:grid;gap:3px;min-width:0;flex:1;text-align:right;justify-items:end}', stylesheet)
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
         self.assertEqual(self.login("update-success-user", secret).status_code, 302)

@@ -1,8 +1,14 @@
 # IP Management
 
-**Current release: 2.5.6**
+**Current release: 2.5.7**
 
 IP Management is an English-language web application for storing and managing IP connection records. It includes a persistent light/dark theme, authenticator-based two-factor authentication (TOTP), searchable IP records, group filtering, superadmin/user roles, group-level visibility, per-IP allow/deny overrides, and an in-site GitHub update action. Public registration is disabled; access is restricted to accounts created by a superadmin.
+
+## Version 2.5.7 release notes
+
+- Fixed malformed sidebar profile CSS so the account name and role align to the right of the avatar rather than sticking against its left edge.
+- Added a 60px left inset to the Name table heading so it aligns with the text after the 32px record avatar and 10px gap; the name text no longer overlays the avatar.
+- Telegram search shows the saved password for the configured private chat, prompts for another query after a miss, and cleans up bot messages after two minutes with best-effort deletion of submitted search/add inputs.
 
 ## Version 2.5.6 release notes
 
