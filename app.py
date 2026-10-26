@@ -1865,8 +1865,8 @@ def users():
             except sqlite3.IntegrityError:
                 flash("That username already exists.", "error")
     with connect_db() as db:
-        rows = db.execute("SELECT id,username,role,enabled,created_at FROM users ORDER BY username").fetchall()
-    return render_template("users.html", users=rows)
+        rows = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,totp_secret FROM users ORDER BY username").fetchall()
+    return render_template("users.html", users=rows, two_factor_mode=two_factor_mode())
 
 
 @app.route("/users/<int:user_id>", methods=["GET", "POST"])
