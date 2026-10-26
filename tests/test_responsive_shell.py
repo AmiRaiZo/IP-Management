@@ -10,6 +10,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
         cls.index = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        cls.groups = (ROOT / "templates" / "groups.html").read_text(encoding="utf-8")
+        cls.users = (ROOT / "templates" / "users.html").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
         cls.js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         cls.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -69,10 +71,23 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertLess(self.js.index("addMobileIpDetail('Group', data.ipGroup, false)"),
                         self.js.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
 
+    def test_return_position_is_preserved_across_edits_and_deletions(self):
+        self.assertIn("ip-archive-return-position", self.js)
+        self.assertIn("function captureReturnPosition(source)", self.js)
+        self.assertIn("function restoreReturnPosition()", self.js)
+        self.assertIn("anchorIndex", self.js)
+        self.assertIn("anchorOffset", self.js)
+        self.assertIn("sessionStorage.removeItem(returnPositionKey)", self.js)
+        self.assertIn('data-scroll-record="ip-{{ ip.id }}"', self.index)
+        self.assertIn('data-scroll-record="group-{{ group.id }}"', self.groups)
+        self.assertIn('data-scroll-record="user-{{ user.id }}"', self.users)
+        self.assertIn("search: search?.value || ''", self.js)
+        self.assertIn("group: group?.value || ''", self.js)
+
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.13")
-        self.assertIn("style.css') }}?v=3.0.13", self.base)
-        self.assertIn("app.js') }}?v=3.0.13", self.base)
+        self.assertEqual(self.version, "3.0.14")
+        self.assertIn("style.css') }}?v=3.0.14", self.base)
+        self.assertIn("app.js') }}?v=3.0.14", self.base)
 
 
 if __name__ == "__main__":
