@@ -351,6 +351,14 @@
       !record.hidden && record.getClientRects().length > 0
     );
   }
+  function currentDirectoryReturnUrl() {
+    const destination = new URL('/', window.location.origin);
+    const query = (search?.value || '').trim();
+    const selectedGroup = group?.value || '';
+    if (query) destination.searchParams.set('q', query);
+    if (selectedGroup) destination.searchParams.set('group', selectedGroup);
+    return destination.pathname + destination.search;
+  }
   function captureReturnPosition(source) {
     if (!isReturnPositionPage()) return;
     try {
@@ -378,6 +386,10 @@
     let destination;
     try { destination = new URL(link.href, window.location.href); } catch (_) { return; }
     if (destination.origin !== window.location.origin) return;
+    if (destination.pathname === '/ips/new' || /^\/ips\/\d+\/edit$/.test(destination.pathname)) {
+      destination.searchParams.set('return_to', currentDirectoryReturnUrl());
+      link.href = destination.toString();
+    }
     if (destination.pathname === window.location.pathname &&
         destination.search === window.location.search && destination.hash === window.location.hash) return;
     captureReturnPosition(link);
@@ -387,6 +399,19 @@
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || form.method.toUpperCase() === 'GET') return;
     if (event.defaultPrevented && !form.matches('#quick-ip-form')) return;
+    const actionPath = (() => {
+      try { return new URL(form.action, window.location.href).pathname; } catch (_) { return ''; }
+    })();
+    if (/^\/ips\/\d+\/delete$/.test(actionPath)) {
+      let returnInput = form.querySelector('input[name="return_to"]');
+      if (!returnInput) {
+        returnInput = document.createElement('input');
+        returnInput.type = 'hidden';
+        returnInput.name = 'return_to';
+        form.appendChild(returnInput);
+      }
+      returnInput.value = currentDirectoryReturnUrl();
+    }
     captureReturnPosition(form);
   });
   function restoreReturnPosition() {
