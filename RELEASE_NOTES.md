@@ -1,3 +1,9 @@
+## Version 3.0.7 release notes
+
+- Move the Group column before IP address in the desktop directory and show Group first in the mobile detail dialog.
+- Center mobile IP names and detail values, improve card sizing, borders and touch states, and add top padding so the first card no longer touches the divider.
+- Update cache-busting keys and add regression assertions for field ordering, centered layout, and spacing.
+
 ## Version 3.0.6 release notes
 
 - Removed the extra explanatory sentence under the IP addresses heading.
