@@ -1,3 +1,10 @@
+## Version 3.0.3 release notes
+
+- Fixed the mobile half-width page: the tablet rule for `body.has-sidebar:not(.sidebar-collapsed) .main-column` had higher CSS specificity than the earlier mobile override, leaving a 215px sidebar gutter on phones.
+- Added a later mobile override with matching specificity so the main column always occupies the full viewport width and the content container uses its parent width rather than forcing `100vw`.
+- Kept the theme toggle and welcome toast constrained within the mobile page width.
+- Bumped CSS/JavaScript cache keys to v3.0.3 and added regression coverage for the exact specificity conflict.
+
 ## Version 3.0.2 release notes
 
 - Stop formatting saved IP record names as Telegram inline-code values. Names stay ordinary readable text and are not presented as tap-to-copy fields.
