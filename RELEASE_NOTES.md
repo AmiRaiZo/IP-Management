@@ -1,10 +1,11 @@
-## Version 3.0.10 release notes
+## Version 3.0.11 release notes
 
 - Remove the password-security helper sentence and the "Copy current password" button from the IP edit form while retaining normal password editing and the show/hide toggle.
 - Add a protected POST delete route for user accounts and a Delete action in the user list.
 - Prevent self-deletion and deletion of the last enabled super administrator. Delete requests use the existing CSRF protection and are limited to super administrators; associated user access rules and temporary login/recovery codes are removed via foreign-key cascades.
 - Add tests for edit-form cleanup, successful user deletion, cascade cleanup, and protection against deleting the current account.
-- Refresh asset cache keys and publish v3.0.10.
+- Update the regression test to verify that copy-password UI is absent from the edit form while copy controls remain available in the directory.
+- Refresh asset cache keys and publish v3.0.11.
 
 ## Version 3.0.9 release notes
 
