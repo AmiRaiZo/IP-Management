@@ -369,3 +369,31 @@ body.has-sidebar .container{margin-top:68px!important}
 .welcome-toast{top:58px;right:10px;left:auto;width:min(390px,calc(100% - 20px));max-width:calc(100% - 20px)}
 html[data-theme="light"] .welcome-toast,html[data-theme="dark"] .welcome-toast{top:58px;right:10px;left:auto;width:min(390px,calc(100% - 20px));max-width:calc(100% - 20px)}
 }
+
+
+/* v3.0.6: name-only mobile IP directory with a blurred, copy-enabled details dialog. */
+.mobile-ip-list{display:none}
+.mobile-ip-card{min-width:0}
+.mobile-ip-details-modal{width:min(560px,calc(100vw - 28px));max-width:calc(100vw - 28px);max-height:min(86vh,760px);padding:22px}
+.mobile-ip-details-modal::backdrop{background:rgba(7,16,29,.52);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.mobile-ip-details-list{display:grid;gap:9px;min-width:0}
+.mobile-ip-detail-row{display:grid;grid-template-columns:minmax(92px,.36fr) minmax(0,1fr);align-items:center;gap:12px;min-width:0;padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2)}
+.mobile-ip-detail-label{font-size:12px;font-weight:700;color:var(--muted)}
+.mobile-ip-detail-value{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px;color:var(--text)}
+.mobile-ip-copy{justify-content:flex-start;min-width:0;max-width:100%;text-align:left;overflow-wrap:anywhere;white-space:normal}
+.mobile-ip-copy code{max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+@media(max-width:720px){
+  .inventory-panel .table-scroll{display:none!important}
+  .mobile-ip-list{display:grid;gap:8px;padding:0 12px 14px}
+  .mobile-ip-card{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:15px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text);text-align:left;font-size:14px;font-weight:650;line-height:1.45;overflow-wrap:anywhere;box-shadow:0 4px 14px rgba(20,35,70,.04)}
+  .mobile-ip-card:active{background:var(--surface);border-color:var(--primary)}
+  .mobile-ip-name{flex:1;min-width:0;overflow-wrap:anywhere;white-space:normal}
+  .mobile-ip-chevron{flex:0 0 auto;color:var(--muted);font-size:24px;line-height:1}
+  .mobile-ip-details-modal{width:calc(100vw - 24px);max-width:calc(100vw - 24px);max-height:86vh;padding:16px;border-radius:17px}
+  .mobile-ip-details-modal .modal-head{margin-bottom:15px;gap:10px}
+  .mobile-ip-details-modal .modal-head h2{font-size:18px;overflow-wrap:anywhere}
+  .mobile-ip-detail-row{grid-template-columns:minmax(72px,.34fr) minmax(0,1fr);gap:8px;padding:10px}
+  .mobile-ip-detail-label{font-size:11px}
+  .mobile-ip-detail-value{font-size:12px}
+  .mobile-ip-copy code{font-size:12px;padding:5px 6px}
+}
