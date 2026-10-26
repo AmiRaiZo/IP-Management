@@ -344,7 +344,7 @@ html,body{width:100%;max-width:100%;overflow-x:clip}
   .sidebar{transition:none!important}
 }
 
-/* v3.0.1: anchor narrow layouts to the visual viewport so the page cannot render in a half-width column. */
+/* v3.0.2: anchor narrow layouts to the visual viewport so the page cannot render in a half-width column. */
 @media(max-width:1050px){
 html,body{width:100vw!important;min-width:100vw!important;max-width:100vw!important;margin:0!important;overflow-x:hidden!important}
 .app-shell{width:100vw!important;min-width:100vw!important;max-width:100vw!important}
