@@ -397,3 +397,19 @@ html[data-theme="light"] .welcome-toast,html[data-theme="dark"] .welcome-toast{t
   .mobile-ip-detail-value{font-size:12px}
   .mobile-ip-copy code{font-size:12px;padding:5px 6px}
 }
+
+/* v3.0.7: center and polish mobile IP cards, details and spacing. */
+@media(max-width:720px){
+  .mobile-ip-list{display:grid;gap:10px;padding:14px 12px 16px}
+  .mobile-ip-card{position:relative;display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:58px;padding:15px 42px;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);text-align:center;font-size:14px;font-weight:700;line-height:1.5;overflow-wrap:anywhere;box-shadow:0 5px 16px rgba(20,35,70,.055);transition:background-color .16s,border-color .16s,box-shadow .16s,transform .16s}
+  .mobile-ip-card:hover,.mobile-ip-card:focus-visible{background:var(--surface-2);border-color:var(--primary);box-shadow:0 6px 18px rgba(20,35,70,.09)}
+  .mobile-ip-card:active{transform:scale(.99)}
+  .mobile-ip-name{display:block;flex:1 1 auto;width:100%;min-width:0;text-align:center;overflow-wrap:anywhere;white-space:normal}
+  .mobile-ip-chevron{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:grid;place-items:center;color:var(--muted);font-size:25px;line-height:1}
+  .mobile-ip-details-list{gap:10px}
+  .mobile-ip-detail-row{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:13px 12px;text-align:center;border-radius:12px}
+  .mobile-ip-detail-label{width:100%;text-align:center;font-size:11px;letter-spacing:.15px}
+  .mobile-ip-detail-value{width:100%;text-align:center;font-size:13px;line-height:1.55;overflow-wrap:anywhere;word-break:break-word}
+  .mobile-ip-copy{display:flex;justify-content:center;width:max-content;min-width:0;max-width:100%;margin:0 auto;text-align:center;overflow-wrap:anywhere;white-space:normal}
+  .mobile-ip-copy code{max-width:100%;text-align:center;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+}
