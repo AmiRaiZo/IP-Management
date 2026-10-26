@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Import Markdown | IP Archive{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">BULK IMPORT</p><h1>Import Markdown file</h1><p class="muted">Import saved IPs, usernames, and connection passwords without typing every record again.</p></div>
+  <a class="btn btn-secondary" href="{{ url_for('index') }}">← Back to directory</a>
+</div>
+
+<section class="panel form-panel">
+  <div class="panel-heading">
+    <div><h2>Choose your file</h2><p>Supports Markdown tables with NAME, IP, USER, and PASS columns.</p></div>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="preview">
+    <label for="markdown-file">Markdown file *</label>
+    <input id="markdown-file" name="file" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" required>
+    <p class="helper-note">Passwords are not shown in the preview. Rows with multiple IPs, usernames, or password lines are held for manual review instead of guessing. Matching IP/port pairs already in the directory are skipped.</p>
+    <div class="form-footer"><span class="muted">The preview expires after 15 minutes.</span><div class="actions"><a class="btn btn-quiet" href="{{ url_for('index') }}">Cancel</a><button class="btn btn-primary" type="submit">Preview file</button></div></div>
+  </form>
+</section>
+
+{% if preview %}
+<section class="panel inventory-panel">
+  <div class="panel-heading"><div><h2>Import preview</h2><p>Only the records marked Ready will be imported. Passwords and usernames are deliberately hidden here.</p></div></div>
+  <div class="import-summary" style="display:flex;gap:18px;flex-wrap:wrap;padding:0 22px 16px">
+    <span><strong>{{ preview.ready_count }}</strong> ready to import</span>
+    <span><strong>{{ preview.duplicate_count }}</strong> duplicates skipped</span>
+    <span><strong>{{ preview.review_count }}</strong> need manual review</span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>File line</th><th>Name</th><th>IP / host</th><th>Port</th><th>Status</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for row in preview.rows %}
+        <tr>
+          <td>{{ row.line }}</td>
+          <td>{{ row.name or '—' }}</td>
+          <td><code>{{ row.ip or '—' }}</code></td>
+          <td>{{ row.port or '—' }}</td>
+          <td>{% if row.status == 'ready' %}Ready{% elif row.status == 'duplicate' %}Duplicate{% else %}Review needed{% endif %}</td>
+          <td>{{ row.reason or 'Will be added to the Default group.' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if import_token and preview.ready_count > 0 %}
+  <form method="post" class="form-footer" style="padding:18px 22px 22px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="import">
+    <input type="hidden" name="import_token" value="{{ import_token }}">
+    <span class="muted">The original file is stored encrypted temporarily and removed after import.</span>
+    <div class="actions"><a class="btn btn-quiet" href="{{ url_for('ip_import') }}">Choose another file</a><button class="btn btn-primary" type="submit" data-confirm="Import all records marked Ready?">Import {{ preview.ready_count }} records</button></div>
+  </form>
+  {% else %}
+    <p class="helper-note">Nothing is ready to import. Correct the marked rows in your file and preview it again.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
