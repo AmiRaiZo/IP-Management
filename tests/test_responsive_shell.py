@@ -36,7 +36,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".app-shell{position:relative;width:100%;max-width:100%;min-width:0}", self.css)
         # Must match the specificity of the tablet selector that sets width: calc(100% - 215px).
         self.assertIn(
-            "body.has-sidebar:not(.sidebar-collapsed) .main-column,body.has-sidebar.sidebar-collapsed .main-column,body.has-sidebar .main-column,body.sidebar-collapsed .main-column,.main-column{width:100%!important;min-width:0!important;max-width:100%!important;margin:0!important}",
+            "body.has-sidebar:not(.sidebar-collapsed).main-column,body.has-sidebar.sidebar-collapsed.main-column,body.has-sidebar.main-column,body.sidebar-collapsed.main-column,.main-column{width:100%!important;min-width:0!important;max-width:100%!important;margin:0!important}",
             "".join(self.css.split())
         )
         self.assertIn(".container{width:calc(100% - 20px)!important;max-width:100%!important", "".join(self.css.split()))
