@@ -315,7 +315,8 @@ class ArchiveTests(unittest.TestCase):
                 "message": {"message_id": 101, "chat": {"id": 12345, "type": "private"}}}})
             detail_calls = [call.args[1] for call in api.call_args_list if call.args[0] == "editMessageText"]
             detail = detail_calls[-1]
-            self.assertIn("Branch Router", detail["text"])
+            self.assertIn("📌 Name: Branch Router", detail["text"])
+            self.assertNotIn("<code>Branch Router</code>", detail["text"])
             self.assertIn("<code>192.0.2.77</code>", detail["text"])
             self.assertIn("<code>8291</code>", detail["text"])
             self.assertIn("<code>netadmin</code>", detail["text"])
@@ -360,6 +361,8 @@ class ArchiveTests(unittest.TestCase):
                 "message_id": 77, "chat": {"id": 12345, "type": "private"}, "text": "Office Router"
             }})
         result_text = send.call_args.args[1]
+        self.assertIn("Name: Office Router", result_text)
+        self.assertNotIn("<code>Office Router</code>", result_text)
         self.assertIn("Password: <code>Saved-Pass-42</code>", result_text)
         self.assertIn("Username: <code>admin</code>", result_text)
         self.assertIn("IP: <code>192.0.2.10</code>", result_text)
