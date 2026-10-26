@@ -344,7 +344,7 @@ html,body{width:100%;max-width:100%;overflow-x:clip}
   .sidebar{transition:none!important}
 }
 
-/* v3.0.4: override tablet sidebar width at mobile specificity from shrinking the mobile content column. */
+/* v3.0.5: override tablet sidebar width at mobile specificity from shrinking the mobile content column. */
 html,body{width:100%;max-width:100%;min-width:0;margin:0;overflow-x:clip}
 .app-shell{position:relative;width:100%;max-width:100%;min-width:0}
 .main-column{box-sizing:border-box;min-width:0;max-width:100%}
