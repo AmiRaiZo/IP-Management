@@ -547,7 +547,7 @@ def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
     except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
         password = "-"
     detail = (
-        f"📌 Name: {telegram_code(row['name'])}\n"
+        f"📌 Name: {html.escape(str(row['name'] or '-'))}\n"
         f"🌐 IP: {telegram_code(row['ip_address'])}\n"
         f"🔌 Port: {telegram_code(row['port'])}\n"
         f"👤 Username: {telegram_code(row['username'])}\n"
@@ -708,7 +708,7 @@ def handle_telegram_update(update):
             except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
                 password = "-"
             block = (
-                f"\n📌 Name: {telegram_code(row['name'])}"
+                f"\n📌 Name: {html.escape(str(row['name'] or '-'))}"
                 f"\n🌐 IP: {telegram_code(row['ip_address'])}"
                 f"\n🔌 Port: {telegram_code(row['port'])}"
                 f"\n👤 Username: {telegram_code(row['username'])}"
