@@ -342,6 +342,88 @@
   }
   search?.addEventListener('input', filterRows);
   group?.addEventListener('change', filterRows);
+  // Preserve a user's place in long lists while edit/delete actions navigate away and back.
+  const returnPositionKey = 'ip-archive-return-position';
+  const returnPositionPages = new Set(['/', '/groups', '/users']);
+  const isReturnPositionPage = () => returnPositionPages.has(window.location.pathname.replace(/\/+$/, '') || '/');
+  function visibleScrollRecords() {
+    return [...document.querySelectorAll('[data-scroll-record]')].filter(record =>
+      !record.hidden && record.getClientRects().length > 0
+    );
+  }
+  function captureReturnPosition(source) {
+    if (!isReturnPositionPage()) return;
+    try {
+      const anchor = source instanceof Element ? source.closest('[data-scroll-record]') : null;
+      const visibleRecords = visibleScrollRecords();
+      const anchorIndex = anchor ? visibleRecords.indexOf(anchor) : -1;
+      const position = {
+        path: window.location.pathname,
+        scrollY: window.scrollY,
+        search: search?.value || '',
+        group: group?.value || '',
+        anchorId: anchor?.dataset.scrollRecord || '',
+        anchorIndex,
+        anchorOffset: anchor && anchorIndex >= 0 ? anchor.getBoundingClientRect().top : null,
+        timestamp: Date.now()
+      };
+      sessionStorage.setItem(returnPositionKey, JSON.stringify(position));
+    } catch (_) {}
+  }
+  document.addEventListener('click', event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!isReturnPositionPage()) return;
+    const link = event.target instanceof Element ? event.target.closest('a.btn[href]') : null;
+    if (!link || (link.target && link.target !== '_self') || event.defaultPrevented) return;
+    let destination;
+    try { destination = new URL(link.href, window.location.href); } catch (_) { return; }
+    if (destination.origin !== window.location.origin) return;
+    if (destination.pathname === window.location.pathname &&
+        destination.search === window.location.search && destination.hash === window.location.hash) return;
+    captureReturnPosition(link);
+  });
+  document.addEventListener('submit', event => {
+    if (!isReturnPositionPage()) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || form.method.toUpperCase() === 'GET') return;
+    if (event.defaultPrevented && !form.matches('#quick-ip-form')) return;
+    captureReturnPosition(form);
+  });
+  function restoreReturnPosition() {
+    let position;
+    try {
+      const raw = sessionStorage.getItem(returnPositionKey);
+      if (!raw) return;
+      position = JSON.parse(raw);
+      if (!position || Date.now() - Number(position.timestamp || 0) > 15 * 60 * 1000) {
+        sessionStorage.removeItem(returnPositionKey);
+        return;
+      }
+      if (position.path !== window.location.pathname || !isReturnPositionPage()) return;
+      if (search) search.value = String(position.search || '');
+      if (group) group.value = String(position.group || '');
+      if (search || group) filterRows();
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        const visibleRecords = visibleScrollRecords();
+        let anchor = position.anchorId
+          ? visibleRecords.find(record => record.dataset.scrollRecord === position.anchorId)
+          : null;
+        if (!anchor && visibleRecords.length && Number(position.anchorIndex) >= 0) {
+          anchor = visibleRecords[Math.min(Number(position.anchorIndex), visibleRecords.length - 1)];
+        }
+        if (anchor && Number.isFinite(Number(position.anchorOffset))) {
+          window.scrollBy(0, anchor.getBoundingClientRect().top - Number(position.anchorOffset));
+        } else {
+          window.scrollTo(0, Math.max(0, Number(position.scrollY) || 0));
+        }
+        try { sessionStorage.removeItem(returnPositionKey); } catch (_) {}
+      }));
+    } catch (_) {
+      try { sessionStorage.removeItem(returnPositionKey); } catch (_) {}
+    }
+  }
+  restoreReturnPosition();
+
   async function copyText(value) {
     try {
       await navigator.clipboard.writeText(value);
