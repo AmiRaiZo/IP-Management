@@ -1256,7 +1256,12 @@ def logout():
 def visible_ips(user):
     with connect_db() as db:
         if user["role"] == "superadmin":
-            return db.execute("SELECT ips.*, groups.name AS group_name FROM ips LEFT JOIN groups ON groups.id=ips.group_id ORDER BY ips.ip_address LIMIT 1000").fetchall()
+            return db.execute(
+                "SELECT ips.*, groups.name AS group_name FROM ips "
+                "LEFT JOIN groups ON groups.id=ips.group_id "
+                "ORDER BY COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE, "
+                "ips.ip_address COLLATE NOCASE LIMIT 1000"
+            ).fetchall()
         rows = db.execute("""
           SELECT DISTINCT ips.*, groups.name AS group_name FROM ips
           LEFT JOIN groups ON groups.id=ips.group_id
@@ -1264,7 +1269,8 @@ def visible_ips(user):
           LEFT JOIN user_ip_access uia ON uia.ip_id=ips.id AND uia.user_id=?
           WHERE (uga.user_id IS NOT NULL OR uia.can_view=1)
             AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
-          ORDER BY ips.ip_address LIMIT 1000
+          ORDER BY COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE,
+                   ips.ip_address COLLATE NOCASE LIMIT 1000
         """, (user["id"], user["id"], user["id"])).fetchall()
         return rows
 
@@ -1856,7 +1862,11 @@ def user_edit(user_id):
     with connect_db() as db:
         user = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,can_view_passwords FROM users WHERE id=?", (user_id,)).fetchone()
         groups = db.execute("SELECT * FROM groups ORDER BY name").fetchall()
-        ips = db.execute("SELECT id,ip_address,name,group_id FROM ips ORDER BY ip_address").fetchall()
+        ips = db.execute(
+            "SELECT id,ip_address,name,group_id FROM ips "
+            "ORDER BY COALESCE(NULLIF(TRIM(name), ''), ip_address) COLLATE NOCASE, "
+            "ip_address COLLATE NOCASE"
+        ).fetchall()
         allowed_groups = {r[0] for r in db.execute("SELECT group_id FROM user_group_access WHERE user_id=?", (user_id,))}
         ip_rules = {r[0]: r[1] for r in db.execute("SELECT ip_id,can_view FROM user_ip_access WHERE user_id=?", (user_id,))}
     if not user:
