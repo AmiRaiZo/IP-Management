@@ -1,3 +1,8 @@
+## Version 2.9.6 release notes
+
+- Fixed updater self-bootstrap to use a dedicated command-line marker instead of an environment variable that could accidentally bypass repair.
+- Added a Bash syntax preflight immediately after bootstrap and before any application files or dependencies are changed, preventing partial deployments from malformed updater scripts.
+
 ## Version 2.9.5 release notes
 
 - Fixed interactive Telegram commands not responding when the webhook was missing or stale: Save and Save & send test now re-register the webhook using the already-saved encrypted credentials, even when credential fields are left blank.
