@@ -1,3 +1,12 @@
+## Version 3.0.12 release notes
+
+- Add a superadmin-only Markdown import page for existing NAME/IP/USER/PASS inventory tables.
+- Provide a preview that never displays usernames or passwords, encrypt the staged source file, and expire the preview after 15 minutes.
+- Parse host:port values, encrypt imported connection passwords, put new records in the Default group, and skip IP/port duplicates.
+- Hold ambiguous rows (multiple IPs, usernames, or password lines) for manual review instead of guessing, and audit only aggregate counts.
+- Add regression tests for successful import, password encryption and preview privacy, duplicate handling, ambiguous rows, invalid files, and role restrictions.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.12.
+
 ## Version 3.0.11 release notes
 
 - Remove the password-security helper sentence and the "Copy current password" button from the IP edit form while retaining normal password editing and the show/hide toggle.
