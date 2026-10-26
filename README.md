@@ -1,3 +1,10 @@
+## Version 2.9.7 release notes
+
+- Automatically delete bot replies, menu/browse screens, search results, security alerts, and other temporary bot messages after two minutes; editing a screen resets its expiry timer so the active screen gets a full timeout.
+- Delete incoming menu commands and sensitive search/add-flow inputs where Telegram permissions allow, reducing chat clutter.
+- Display IP addresses, ports, usernames, and passwords as inline code in detail views, search results, and save confirmations so the value itself can be tapped to copy; no copy buttons are added.
+- Added regression coverage for automatic cleanup, timer resets, and tap-to-copy message formatting.
+
 ## Version 2.9.6 release notes
 
 - Fixed updater self-bootstrap to use a dedicated command-line marker instead of an environment variable that could accidentally bypass repair.
