@@ -584,6 +584,50 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("setup-2fa", response.location)
 
+    def test_ip_edit_and_delete_preserve_filtered_return_url(self):
+        _, secret = self.create_user("return-filter-admin")
+        self.assertEqual(self.login("return-filter-admin", secret).status_code, 302)
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            ip_id = db.execute(
+                "INSERT INTO ips(name,ip_address,port,username,password_enc,group_id,created_by,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                ("Filter Target Router", "192.0.2.170", 22, "operator", "", group_id,
+                 "return-filter-admin", archive.now(), archive.now()),
+            ).lastrowid
+
+        return_to = f"/?q=Filter%20Target&group={group_id}"
+        encoded_return_to = "%2F%3Fq%3DFilter%2520Target%26group%3D" + str(group_id)
+        edit_page = self.client.get(f"/ips/{ip_id}/edit?return_to={encoded_return_to}")
+        self.assertEqual(edit_page.status_code, 200)
+        edit_html = edit_page.get_data(as_text=True)
+        self.assertIn(f'name="return_to" value="/?q=Filter%20Target&amp;group={group_id}"', edit_html)
+        self.assertIn(f'href="/?q=Filter%20Target&amp;group={group_id}"', edit_html)
+
+        response = self.client.post(f"/ips/{ip_id}/edit", data={
+            "csrf_token": self.csrf(), "return_to": return_to,
+            "name": "Filter Target Router Updated", "ip_address": "192.0.2.170",
+            "port": "22", "username": "operator", "password": "",
+            "notes": "", "group_id": str(group_id),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, return_to)
+
+        response = self.client.post(f"/ips/{ip_id}/delete", data={
+            "csrf_token": self.csrf(), "return_to": return_to,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, return_to)
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM ips WHERE id=?", (ip_id,)).fetchone())
+
+        # Return URLs must not become an open redirect to an external website.
+        response = self.client.post(f"/ips/{ip_id}/delete", data={
+            "csrf_token": self.csrf(), "return_to": "https://attacker.example/",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/")
+
     def test_ip_records_are_sorted_by_name_a_to_z(self):
         superadmin_id, superadmin_secret = self.create_user("sort-records-root")
         self.assertEqual(self.login("sort-records-root", superadmin_secret).status_code, 302)
