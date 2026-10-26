@@ -321,6 +321,7 @@
   const search = document.querySelector('[data-live-search]');
   const group = document.querySelector('[data-group-filter]');
   const rows = [...document.querySelectorAll('[data-search-row]')];
+  const mobileRows = [...document.querySelectorAll('[data-mobile-search-row]')];
   function filterRows() {
     const query = (search?.value || '').trim().toLowerCase();
     const groupName = group?.value || '';
@@ -329,6 +330,10 @@
       const visible = (!query || (row.dataset.search || '').toLowerCase().includes(query)) && (!groupName || row.dataset.group === groupName);
       row.hidden = !visible;
       if (visible) count++;
+    });
+    mobileRows.forEach(row => {
+      const visible = (!query || (row.dataset.search || '').toLowerCase().includes(query)) && (!groupName || row.dataset.group === groupName);
+      row.hidden = !visible;
     });
     const counter = document.querySelector('[data-visible-count]');
     if (counter) counter.textContent = String(count);
@@ -351,21 +356,81 @@
       return copied;
     }
   }
-  document.querySelectorAll('[data-copy-value]').forEach(button => button.addEventListener('click', async () => {
+  // Delegate copy handling so dynamically populated mobile modal fields also work.
+  document.addEventListener('click', async event => {
+    const button = event.target instanceof Element ? event.target.closest('[data-copy-value]') : null;
+    if (!button) return;
     const value = button.dataset.copyValue || '';
     if (!value) return;
-    const originalTitle = button.dataset.originalTitle || button.title;
+    const originalTitle = button.dataset.originalTitle || button.title || 'Click to copy value';
     button.dataset.originalTitle = originalTitle;
     if (await copyText(value)) {
       button.classList.add('is-copied');
       button.title = 'Copied!';
       button.setAttribute('aria-label', 'Copied');
       window.setTimeout(() => {
-        button.classList.remove('is-copied'); button.title = originalTitle;
+        button.classList.remove('is-copied');
+        button.title = originalTitle;
         button.setAttribute('aria-label', originalTitle.replace(/^Click to copy /, 'Copy '));
       }, 1200);
     }
-  }));  document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
+  });
+
+  const mobileIpDetailsModal = document.getElementById('mobile-ip-details-modal');
+  const mobileIpDetailsTitle = document.getElementById('mobile-ip-details-title');
+  const mobileIpDetailsList = document.getElementById('mobile-ip-details-list');
+
+  function addMobileIpDetail(label, value, copyable = false) {
+    if (!mobileIpDetailsList) return;
+    const row = document.createElement('div');
+    row.className = 'mobile-ip-detail-row';
+    const labelElement = document.createElement('span');
+    labelElement.className = 'mobile-ip-detail-label';
+    labelElement.textContent = label;
+    row.appendChild(labelElement);
+
+    const normalized = String(value || '');
+    if (copyable && normalized) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'copy-value mobile-ip-copy';
+      button.dataset.copyValue = normalized;
+      button.title = 'Click to copy ' + label;
+      button.setAttribute('aria-label', 'Copy ' + label);
+      const code = document.createElement('code');
+      code.textContent = normalized;
+      button.appendChild(code);
+      row.appendChild(button);
+    } else {
+      const valueElement = document.createElement('span');
+      valueElement.className = 'mobile-ip-detail-value';
+      valueElement.textContent = normalized || '—';
+      row.appendChild(valueElement);
+    }
+    mobileIpDetailsList.appendChild(row);
+  }
+
+  document.querySelectorAll('[data-mobile-ip-card]').forEach(card => {
+    card.addEventListener('click', () => {
+      if (!mobileIpDetailsModal || !mobileIpDetailsList) return;
+      const data = card.dataset;
+      mobileIpDetailsTitle.textContent = data.ipName || data.ipAddress || 'IP details';
+      mobileIpDetailsList.replaceChildren();
+      addMobileIpDetail('IP address', data.ipAddress, true);
+      addMobileIpDetail('Group', data.ipGroup, false);
+      addMobileIpDetail('Port', data.ipPort, true);
+      addMobileIpDetail('Username', data.ipUsername, true);
+      if (card.hasAttribute('data-ip-password')) addMobileIpDetail('Password', data.ipPassword, true);
+      if (data.ipNotes) addMobileIpDetail('Notes', data.ipNotes, false);
+      if (!mobileIpDetailsModal.open) mobileIpDetailsModal.showModal();
+    });
+  });
+  document.getElementById('close-mobile-ip-details')?.addEventListener('click', () => mobileIpDetailsModal?.close());
+  mobileIpDetailsModal?.addEventListener('click', event => {
+    if (event.target === mobileIpDetailsModal) mobileIpDetailsModal.close();
+  });
+
+  document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copyTarget);
     if (!target) return;
     try { await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; }
