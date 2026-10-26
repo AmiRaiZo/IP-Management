@@ -1,3 +1,11 @@
+## Version 3.0.16 release notes
+
+- Sort the main IP directory by group name A–Z, case-insensitively, on desktop and mobile.
+- Keep IP records sorted by their own names A–Z within each group, using the IP address as the fallback for blank names.
+- Apply the group-first directory order for both superadmins and restricted users, without changing the IP-name ordering in user permissions settings.
+- Add regression coverage for mixed group names and per-group record order in desktop/mobile directories and restricted-user views.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.16.
+
 ## Version 3.0.15 release notes
 
 - Keep the current IP directory search and group filter when opening an IP record for editing and after saving or deleting it.
