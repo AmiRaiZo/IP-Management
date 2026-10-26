@@ -1,3 +1,12 @@
+## Version 3.0.17 release notes
+
+- Fix shared two-factor login so all accounts use the existing site-wide Authenticator code after password verification; newly created users no longer have to enroll a separate authenticator.
+- Restrict the personal Authenticator setup route to the per-user policy, while keeping individual enrollment available when that policy is selected.
+- Update the users list and profile to show the active global shared policy instead of a misleading per-user setup status.
+- Clarify security settings so the shared Authenticator behavior is explicit.
+- Add regression coverage for creating a new account under shared mode, logging in with the shared code, blocking per-account setup in shared mode, and keeping per-user enrollment intact.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.17.
+
 ## Version 3.0.16 release notes
 
 - Sort the main IP directory by group name A–Z, case-insensitively, on desktop and mobile.
