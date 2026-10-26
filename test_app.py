@@ -206,6 +206,54 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(markup["inline_keyboard"][1][0]["text"], "📂 Display all groups")
         self.assertEqual(markup["inline_keyboard"][1][0]["callback_data"], "ip_groups")
 
+    def test_telegram_menu_commands_accept_plain_and_bot_qualified_commands(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        commands = ("ربات", "/start", "/menu", "/start@IPManagementBot", "/menu@IPManagementBot")
+        with patch.object(archive, "telegram_menu") as menu:
+            for command in commands:
+                archive.handle_telegram_update({"message": {
+                    "chat": {"id": 12345, "type": "private"}, "text": command
+                }})
+        self.assertEqual(menu.call_count, len(commands))
+
+    def test_telegram_settings_re_registers_webhook_using_saved_credentials(self):
+        _, secret = self.create_user("telegram-webhook-repair-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-webhook-repair-admin", secret).status_code, 302)
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
+        webhook_url = "https://archive.example.com/telegram/webhook"
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \\
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"url": webhook_url}}) as api, \\
+             patch.object(archive, "send_telegram_security_alert", return_value=True):
+            response = self.client.post("/settings/telegram", data={
+                "csrf_token": self.csrf(), "action": "test",
+            })
+        self.assertEqual(response.status_code, 302)
+        api.assert_any_call("setWebhook", {
+            "url": webhook_url,
+            "secret_token": "saved-webhook-secret",
+            "allowed_updates": ["message", "callback_query"],
+        })
+        api.assert_any_call("getWebhookInfo", {})
+
+    def test_telegram_settings_surfaces_webhook_registration_failure(self):
+        _, secret = self.create_user("telegram-webhook-failure-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-webhook-failure-admin", secret).status_code, 302)
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \\
+             patch.object(archive, "telegram_api", return_value={}), \\
+             patch.object(archive, "send_telegram_security_alert", return_value=True):
+            response = self.client.post("/settings/telegram", data={
+                "csrf_token": self.csrf(), "action": "test",
+            })
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            messages = [message for _, message in sess.get("_flashes", [])]
+        self.assertTrue(any("Interactive Telegram commands are not active" in message for message in messages))
+
     def test_telegram_group_browser_replaces_screens_and_shows_ip_details_only_on_selection(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         encrypted = archive.vault.encrypt(b"Router-Secret-9").decode()
