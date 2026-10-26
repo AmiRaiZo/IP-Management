@@ -1070,7 +1070,7 @@ def login():
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
-    if (request.method == "GET" and two_factor_mode() in ("per_user", "shared")
+    if (request.method == "GET" and two_factor_mode() == "per_user"
             and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
         return redirect(url_for("setup_2fa"))
     if request.method == "POST":
@@ -1080,8 +1080,6 @@ def login():
             with connect_db() as db:
                 user = db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone()
             mode = two_factor_mode()
-            if user and mode == "shared" and not user["two_factor_enrolled"]:
-                return redirect(url_for("setup_2fa"))
             secret = shared_two_factor_secret() if mode == "shared" else (decrypt_authenticator_secret(user["totp_secret"]) if user else "")
             totp_ok = bool(user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1))
             recovery_ok = bool(user and user_requires_two_factor(user) and not totp_ok and consume_recovery_code(user["id"], code))
@@ -1129,13 +1127,6 @@ def login():
                 return redirect(safe_login_target())
             if user_requires_two_factor(user):
                 mode = two_factor_mode()
-                if mode == "shared" and not user["two_factor_enrolled"]:
-                    security_event("login", username, "password_ok_2fa_pending", "Password accepted; authenticator enrollment is required")
-                    session.clear()
-                    session["pending_2fa_user_id"] = user["id"]
-                    session["pending_2fa_secret"] = shared_two_factor_secret()
-                    session["csrf_token"] = secrets.token_urlsafe(32)
-                    return redirect(url_for("setup_2fa"))
                 if mode == "per_user" and not decrypt_authenticator_secret(user["totp_secret"]):
                     security_event("login", username, "password_ok_2fa_pending", "Password accepted; authenticator enrollment is required")
                     session.clear()
@@ -1197,14 +1188,14 @@ def setup_2fa():
     user_id = session.get("pending_2fa_user_id")
     secret = session.get("pending_2fa_secret")
     mode = two_factor_mode()
-    if mode not in ("per_user", "shared") or not user_id or not secret:
+    if mode != "per_user" or not user_id or not secret:
         if session.get("user_id"):
             abort(403)
+        session.pop("pending_2fa_secret", None)
         return redirect(url_for("login"))
     with connect_db() as db:
         user = db.execute("SELECT id,username,role,profile_image,two_factor_enabled,two_factor_enrolled FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
-    if (not user or (mode == "per_user" and not user["two_factor_enabled"])
-            or (mode == "shared" and (secret != shared_two_factor_secret() or user["two_factor_enrolled"]))):
+    if not user or not user["two_factor_enabled"]:
         session.clear()
         return redirect(url_for("login"))
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
@@ -1215,10 +1206,7 @@ def setup_2fa():
         code = re.sub(r"\s", "", request.form.get("code", ""))
         if pyotp.TOTP(secret).verify(code, valid_window=1):
             with connect_db() as db:
-                if mode == "shared":
-                    db.execute("UPDATE users SET two_factor_enrolled=1 WHERE id=?", (user_id,))
-                else:
-                    db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (encrypt_authenticator_secret(secret), user_id))
+                db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (encrypt_authenticator_secret(secret), user_id))
             session.clear()
             # Authentication must remain a browser-session cookie. Only the
             # separate signed 2FA-remember cookie is persistent (24 hours).
