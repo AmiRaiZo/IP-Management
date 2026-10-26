@@ -628,56 +628,102 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.location, "/")
 
-    def test_ip_records_are_sorted_by_name_a_to_z(self):
+    def test_ip_directory_is_sorted_by_group_name_then_ip_name_a_to_z(self):
         superadmin_id, superadmin_secret = self.create_user("sort-records-root")
         self.assertEqual(self.login("sort-records-root", superadmin_secret).status_code, 302)
         with archive.connect_db() as db:
-            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
-            for name, address in (
-                ("zulu router", "192.0.2.10"),
-                ("Bravo switch 2", "192.0.2.40"),
-                ("Alpha router", "192.0.2.20"),
-                ("bravo switch", "192.0.2.30"),
-            ):
+            default_group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            alpha_group_id = db.execute(
+                "INSERT INTO groups(name,description,created_at,sort_order) VALUES(?,?,?,0)",
+                ("Alpha group", "Alphabetical sort test", archive.now()),
+            ).lastrowid
+            zulu_group_id = db.execute(
+                "INSERT INTO groups(name,description,created_at,sort_order) VALUES(?,?,?,0)",
+                ("Zulu group", "Alphabetical sort test", archive.now()),
+            ).lastrowid
+            entries = [
+                ("zulu router", "192.0.2.10", default_group_id),
+                ("Bravo switch 2", "192.0.2.40", default_group_id),
+                ("Alpha router", "192.0.2.20", default_group_id),
+                ("bravo switch", "192.0.2.30", default_group_id),
+                ("Omega node", "192.0.2.50", alpha_group_id),
+                ("alpha node", "192.0.2.60", alpha_group_id),
+                ("charlie node", "192.0.2.70", zulu_group_id),
+                ("bravo node", "192.0.2.80", zulu_group_id),
+            ]
+            for name, address, group_id in entries:
                 db.execute(
                     "INSERT INTO ips(name,ip_address,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                     (name, address, group_id, "sort-test", archive.now(), archive.now()),
                 )
 
-        def assert_directory_order(page):
+        expected_records = [
+            ("alpha node", "Alpha group"),
+            ("Omega node", "Alpha group"),
+            ("Alpha router", "Default"),
+            ("bravo switch", "Default"),
+            ("Bravo switch 2", "Default"),
+            ("zulu router", "Default"),
+            ("bravo node", "Zulu group"),
+            ("charlie node", "Zulu group"),
+        ]
+
+        def assert_directory_order(page, expected):
             start = page.index('data-mobile-ip-list')
             end = page.index('</div>', start)
             mobile_list = page[start:end]
-            expected = ["Alpha router", "bravo switch", "Bravo switch 2", "zulu router"]
-            positions = [mobile_list.index(f'data-ip-name="{name}"') for name in expected]
-            self.assertEqual(positions, sorted(positions), "Mobile IP records must be sorted by name A–Z")
+            mobile_records = re.findall(
+                r'data-ip-name="([^"]+)"[^>]*data-ip-group="([^"]+)"', mobile_list
+            )
+            self.assertEqual(
+                mobile_records, expected,
+                "Mobile IP directory must sort group names A-Z, then IP names A-Z within each group",
+            )
+
             table = page[page.index('<tbody>'):]
-            table_positions = [table.index(f'<strong>{name}</strong>') for name in expected]
-            self.assertEqual(table_positions, sorted(table_positions), "Desktop IP rows must be sorted by name A–Z")
+            desktop_rows = re.findall(r'<tr data-search-row.*?</tr>', table, re.S)
+            desktop_records = []
+            for row in desktop_rows:
+                name_match = re.search(r'<strong>(.*?)</strong>', row, re.S)
+                group_match = re.search(r'<span class="group-tag">(.*?)</span>', row, re.S)
+                if name_match and group_match:
+                    desktop_records.append((name_match.group(1), group_match.group(1)))
+            self.assertEqual(
+                desktop_records, expected,
+                "Desktop IP directory must sort group names A-Z, then IP names A-Z within each group",
+            )
 
         directory = self.client.get("/")
         self.assertEqual(directory.status_code, 200)
-        assert_directory_order(directory.get_data(as_text=True))
+        assert_directory_order(directory.get_data(as_text=True), expected_records)
 
+        # The permissions editor keeps its own alphabetical IP-name ordering.
         user_settings = self.client.get(f"/users/{superadmin_id}")
         self.assertEqual(user_settings.status_code, 200)
         settings_page = user_settings.get_data(as_text=True)
         settings_start = settings_page.index('class="ip-rule-list"')
         settings_list = settings_page[settings_start:]
-        settings_positions = [settings_list.index(f"<strong>{name}</strong>") for name in (
-            "Alpha router", "bravo switch", "Bravo switch 2", "zulu router",
-        )]
+        settings_sorted_names = sorted((name for name, _, _ in entries), key=str.casefold)
+        settings_positions = [settings_list.index(f"<strong>{name}</strong>") for name in settings_sorted_names]
         self.assertEqual(settings_positions, sorted(settings_positions),
-                         "IP visibility settings must also be sorted by name A–Z")
+                         "IP visibility settings must remain sorted by IP name A-Z")
 
         admin_id, admin_secret = self.create_user("sort-records-limited", role="admin")
         with archive.connect_db() as db:
-            db.execute("INSERT INTO user_group_access(user_id,group_id) VALUES(?,?)", (admin_id, group_id))
+            db.execute(
+                "INSERT INTO user_group_access(user_id,group_id) VALUES(?,?)",
+                (admin_id, default_group_id),
+            )
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.assertEqual(self.login("sort-records-limited", admin_secret).status_code, 302)
         limited_directory = self.client.get("/")
         self.assertEqual(limited_directory.status_code, 200)
-        assert_directory_order(limited_directory.get_data(as_text=True))
+        limited_expected = [
+            (name, "Default")
+            for name, _, group_id in sorted(entries, key=lambda row: row[0].casefold())
+            if group_id == default_group_id
+        ]
+        assert_directory_order(limited_directory.get_data(as_text=True), limited_expected)
 
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
