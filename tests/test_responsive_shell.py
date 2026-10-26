@@ -92,9 +92,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('name="return_to" value="{{ return_to|default(url_for(\'index\')) }}"', self.ip_form)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.15")
-        self.assertIn("style.css') }}?v=3.0.15", self.base)
-        self.assertIn("app.js') }}?v=3.0.15", self.base)
+        self.assertEqual(self.version, "3.0.16")
+        self.assertIn("style.css') }}?v=3.0.16", self.base)
+        self.assertIn("app.js') }}?v=3.0.16", self.base)
 
 
 if __name__ == "__main__":
