@@ -9,6 +9,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+        cls.index = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
         cls.js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         cls.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -44,10 +45,23 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".welcome-toast{top:58px;right:10px;left:auto;width:min(390px,calc(100%-20px))", "".join(self.css.split()))
 
 
+    def test_mobile_ip_directory_uses_name_only_cards_and_blurred_details_dialog(self):
+        self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", self.index)
+        self.assertIn('class="mobile-ip-list" data-mobile-ip-list', self.index)
+        self.assertIn('class="mobile-ip-card" data-mobile-ip-card', self.index)
+        self.assertIn('id="mobile-ip-details-modal"', self.index)
+        self.assertIn('id="mobile-ip-details-list"', self.index)
+        self.assertIn('data-copy-value', self.index)
+        self.assertIn(".mobile-ip-details-modal::backdrop{background:rgba(7,16,29,.52);backdrop-filter:blur(8px)", self.css)
+        self.assertIn(".inventory-panel .table-scroll{display:none!important}", self.css)
+        self.assertIn("event.target.closest('[data-copy-value]')", self.js)
+        self.assertIn("if (card.hasAttribute('data-ip-password'))", self.js)
+        self.assertIn("mobileRows.forEach(row =>", self.js)
+
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.5")
-        self.assertIn("style.css') }}?v=3.0.5", self.base)
-        self.assertIn("app.js') }}?v=3.0.5", self.base)
+        self.assertEqual(self.version, "3.0.6")
+        self.assertIn("style.css') }}?v=3.0.6", self.base)
+        self.assertIn("app.js') }}?v=3.0.6", self.base)
 
 
 if __name__ == "__main__":
