@@ -1260,7 +1260,8 @@ def visible_ips(user):
             return db.execute(
                 "SELECT ips.*, groups.name AS group_name FROM ips "
                 "LEFT JOIN groups ON groups.id=ips.group_id "
-                "ORDER BY COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE, "
+                "ORDER BY COALESCE(NULLIF(TRIM(groups.name), ''), 'Default') COLLATE NOCASE, "
+                "COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE, "
                 "ips.ip_address COLLATE NOCASE LIMIT 1000"
             ).fetchall()
         rows = db.execute("""
@@ -1270,7 +1271,8 @@ def visible_ips(user):
           LEFT JOIN user_ip_access uia ON uia.ip_id=ips.id AND uia.user_id=?
           WHERE (uga.user_id IS NOT NULL OR uia.can_view=1)
             AND NOT EXISTS (SELECT 1 FROM user_ip_access deny WHERE deny.user_id=? AND deny.ip_id=ips.id AND deny.can_view=0)
-          ORDER BY COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE,
+          ORDER BY COALESCE(NULLIF(TRIM(groups.name), ''), 'Default') COLLATE NOCASE,
+                   COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE,
                    ips.ip_address COLLATE NOCASE LIMIT 1000
         """, (user["id"], user["id"], user["id"])).fetchall()
         return rows
