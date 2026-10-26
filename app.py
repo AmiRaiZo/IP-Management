@@ -1362,6 +1362,344 @@ def validate_ip(form):
             "notes": notes, "group_id": group_id}, None
 
 
+
+def _markdown_cell_values(value):
+    """Split Markdown <br> alternatives while keeping credential values otherwise intact."""
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"(?i)<br\s*/?>", "\n", value)
+    value = re.sub(r"(?i)</?(?:p|div|span)>", "", value)
+    return [part.strip() for part in value.splitlines() if part.strip()]
+
+
+def _is_import_placeholder(value):
+    return str(value or "").strip().casefold() in {"", "-", "—", "–", "n/a", "na", "none", "null"}
+
+
+def _markdown_header_key(value):
+    value = html.unescape(str(value or "")).strip().strip(chr(96) + "*_~").casefold()
+    value = re.sub(r"\s+", " ", value)
+    aliases = {
+        "name": {"name", "record name", "device", "device name", "نام", "نام دستگاه"},
+        "ip": {"ip", "ip address", "address", "host", "ip/host", "آدرس", "آی پی", "آی‌پی"},
+        "username": {"user", "username", "user name", "login", "نام کاربری", "کاربر"},
+        "password": {"pass", "password", "passwd", "رمز", "رمز عبور"},
+    }
+    for key, values in aliases.items():
+        if value in values:
+            return key
+    return ""
+
+
+def _parse_markdown_import_address(value):
+    """Return (host, port, error), without accepting extra labels in the host field."""
+    address = str(value or "").strip().strip(chr(96))
+    port = None
+    ipv6_port = re.fullmatch(r"\[([^\]]+)\]:(\d{1,5})", address)
+    host_port = re.fullmatch(r"([^:\s]+):(\d{1,5})", address)
+    if ipv6_port:
+        address, raw_port = ipv6_port.groups()
+        try:
+            ip_address(address)
+        except ValueError:
+            return "", None, "The address format needs review."
+        port = int(raw_port)
+    elif host_port:
+        address, raw_port = host_port.groups()
+        port = int(raw_port)
+    if port is not None and not 1 <= port <= 65535:
+        return "", None, "Port must be between 1 and 65535."
+    if not address or any(character.isspace() for character in address):
+        return "", None, "The IP field contains extra text or multiple values."
+    try:
+        ip_address(address)
+    except ValueError:
+        if not re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", address):
+            return "", None, "The IP/host format needs review."
+    return address, port, None
+
+
+def parse_markdown_ip_inventory(content):
+    """Parse NAME/IP/USER/PASS Markdown tables, marking ambiguous rows instead of guessing."""
+    lines = str(content or "").splitlines()
+    header_line = None
+    column_map = {}
+    expected_columns = 0
+    for index, line in enumerate(lines):
+        if not line.strip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        mapped = {}
+        for column, cell in enumerate(cells):
+            key = _markdown_header_key(cell)
+            if key and key not in mapped:
+                mapped[key] = column
+        if {"name", "ip", "username", "password"}.issubset(mapped):
+            header_line = index
+            column_map = mapped
+            expected_columns = len(cells)
+            break
+    if header_line is None:
+        return [], "Could not find a Markdown table with NAME, IP, USER, and PASS columns."
+
+    entries = []
+    for index in range(header_line + 1, len(lines)):
+        line = lines[index].strip()
+        if not line:
+            continue
+        if not line.startswith("|"):
+            if entries:
+                break
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells):
+            continue
+        if not any(cells):
+            continue
+
+        entry = {
+            "line": index + 1, "name": "", "ip": "", "port": None,
+            "username": "", "password": "", "status": "review", "reason": "",
+        }
+        if len(cells) != expected_columns:
+            entry["reason"] = "The row has a different number of columns than the header."
+            entries.append(entry)
+            continue
+
+        def cell_at(key):
+            column = column_map[key]
+            return cells[column] if column < len(cells) else ""
+
+        name_values = [part for part in _markdown_cell_values(cell_at("name"))
+                       if not _is_import_placeholder(part)]
+        ip_values = [part for part in _markdown_cell_values(cell_at("ip"))
+                     if part.strip().casefold() not in {"--ip--", "-ip-", "ip"}
+                     and not _is_import_placeholder(part)]
+        user_values = [part for part in _markdown_cell_values(cell_at("username"))
+                       if not _is_import_placeholder(part)]
+        password_values = [part for part in _markdown_cell_values(cell_at("password"))
+                           if not _is_import_placeholder(part)]
+
+        if len(name_values) > 1:
+            entry["reason"] = "The row has multiple names; review it manually."
+        elif len(ip_values) != 1:
+            entry["reason"] = ("The row has multiple IP/host values; review it manually."
+                               if len(ip_values) > 1 else "The row has no IP/host value.")
+        elif len(user_values) > 1:
+            entry["ip"] = ip_values[0]
+            entry["reason"] = "The row has multiple usernames; review it manually."
+        elif len(password_values) > 1:
+            entry["ip"] = ip_values[0]
+            entry["reason"] = "The row has multiple password lines or notes; review it manually."
+        else:
+            address, port, address_error = _parse_markdown_import_address(ip_values[0])
+            entry["ip"] = address or ip_values[0]
+            entry["port"] = port
+            if address_error:
+                entry["reason"] = address_error
+            else:
+                entry["name"] = name_values[0].strip(chr(96)) if name_values else address
+                entry["username"] = user_values[0] if user_values else ""
+                entry["password"] = password_values[0] if password_values else ""
+                if len(entry["name"]) > 120 or len(entry["username"]) > 120 or len(entry["password"]) > 500:
+                    entry["reason"] = "A field exceeds the site's length limit."
+                else:
+                    entry["status"] = "ready"
+        if entry["status"] != "ready" and not entry["reason"]:
+            entry["reason"] = "This row needs manual review."
+        entries.append(entry)
+        if len(entries) >= 1000:
+            entries.append({
+                "line": index + 1, "name": "", "ip": "", "port": None,
+                "username": "", "password": "", "status": "review",
+                "reason": "Import stopped at the 1,000-row safety limit.",
+            })
+            break
+    if not entries:
+        return [], "No data rows were found in the Markdown table."
+    return entries, None
+
+
+MARKDOWN_IMPORT_DIR = DATA_DIR / "import-staging"
+MARKDOWN_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    os.chmod(MARKDOWN_IMPORT_DIR, 0o700)
+except OSError:
+    pass
+
+
+def _markdown_import_stage_path(token):
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,100}", token):
+        return None
+    digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+    return MARKDOWN_IMPORT_DIR / (digest + ".enc")
+
+
+def _cleanup_markdown_import_staging():
+    cutoff = time.time() - 900
+    try:
+        for path in MARKDOWN_IMPORT_DIR.iterdir():
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
+def _classify_markdown_import_duplicates(entries):
+    """Mark existing or repeated host/port pairs; never write credential-bearing rows to logs."""
+    with connect_db() as db:
+        existing_rows = db.execute("SELECT ip_address, port FROM ips").fetchall()
+    existing = {
+        ((row["ip_address"] or "").strip().casefold(), row["port"])
+        for row in existing_rows
+    }
+    seen = set()
+    for entry in entries:
+        if entry["status"] != "ready":
+            continue
+        key = ((entry["ip"] or "").strip().casefold(), entry["port"])
+        if key in existing:
+            entry["status"] = "duplicate"
+            entry["reason"] = "This IP/port pair already exists in the directory."
+        elif key in seen:
+            entry["status"] = "duplicate"
+            entry["reason"] = "This IP/port pair appears more than once in the file."
+        else:
+            seen.add(key)
+    return entries
+
+
+def _markdown_import_preview(entries):
+    safe_rows = []
+    for entry in entries:
+        safe_rows.append({
+            "line": entry["line"], "name": entry["name"], "ip": entry["ip"],
+            "port": entry["port"], "status": entry["status"], "reason": entry["reason"],
+        })
+    return {
+        "rows": safe_rows,
+        "ready_count": sum(entry["status"] == "ready" for entry in entries),
+        "duplicate_count": sum(entry["status"] == "duplicate" for entry in entries),
+        "review_count": sum(entry["status"] == "review" for entry in entries),
+    }
+
+
+@app.route("/ips/import", methods=["GET", "POST"])
+@superadmin_required
+def ip_import():
+    if request.method == "GET":
+        return render_template("import_markdown.html", preview=None, import_token=None)
+
+    action = request.form.get("action", "")
+    if action == "preview":
+        upload = request.files.get("file")
+        if not upload or not upload.filename:
+            flash("Choose the Markdown file first.", "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+        if Path(upload.filename).suffix.casefold() not in {".md", ".markdown", ".txt"}:
+            flash("Upload a .md, .markdown, or .txt file.", "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+        raw_bytes = upload.read(1_000_001)
+        if not raw_bytes:
+            flash("The selected file is empty.", "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+        if len(raw_bytes) > 1_000_000:
+            flash("The Markdown file must be 1 MB or smaller.", "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+        try:
+            content = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            flash("The file must use UTF-8 text encoding.", "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+
+        entries, parse_error = parse_markdown_ip_inventory(content)
+        if parse_error:
+            flash(parse_error, "error")
+            return render_template("import_markdown.html", preview=None, import_token=None), 400
+
+        _cleanup_markdown_import_staging()
+        old_token = session.get("markdown_import_token")
+        old_path = _markdown_import_stage_path(old_token)
+        if old_path:
+            try:
+                old_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        entries = _classify_markdown_import_duplicates(entries)
+        import_token = None
+        if any(entry["status"] == "ready" for entry in entries):
+            import_token = secrets.token_urlsafe(32)
+            stage_path = _markdown_import_stage_path(import_token)
+            stage_path.write_bytes(vault.encrypt(content.encode("utf-8")))
+            try:
+                os.chmod(stage_path, 0o600)
+            except OSError:
+                pass
+            session["markdown_import_token"] = import_token
+        else:
+            session.pop("markdown_import_token", None)
+        return render_template("import_markdown.html",
+                               preview=_markdown_import_preview(entries),
+                               import_token=import_token)
+
+    if action == "import":
+        import_token = request.form.get("import_token", "")
+        stored_token = session.get("markdown_import_token", "")
+        if not stored_token or not import_token or not secrets.compare_digest(import_token, stored_token):
+            abort(400, description="The import preview expired. Upload the file again.")
+        stage_path = _markdown_import_stage_path(stored_token)
+        if not stage_path or not stage_path.is_file() or time.time() - stage_path.stat().st_mtime > 900:
+            session.pop("markdown_import_token", None)
+            abort(400, description="The import preview expired. Upload the file again.")
+        try:
+            content = vault.decrypt(stage_path.read_bytes()).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError, OSError):
+            session.pop("markdown_import_token", None)
+            abort(400, description="The staged import could not be read. Upload the file again.")
+        finally:
+            try:
+                stage_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        session.pop("markdown_import_token", None)
+
+        entries, parse_error = parse_markdown_ip_inventory(content)
+        if parse_error:
+            flash(parse_error, "error")
+            return redirect(url_for("ip_import"))
+        entries = _classify_markdown_import_duplicates(entries)
+        ready = [entry for entry in entries if entry["status"] == "ready"]
+        created = 0
+        with connect_db() as db:
+            default_group = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()
+            group_id = default_group["id"] if default_group else None
+            existing = {
+                ((row["ip_address"] or "").strip().casefold(), row["port"])
+                for row in db.execute("SELECT ip_address, port FROM ips").fetchall()
+            }
+            for entry in ready:
+                key = ((entry["ip"] or "").strip().casefold(), entry["port"])
+                if key in existing:
+                    continue
+                password_enc = vault.encrypt(entry["password"].encode("utf-8")).decode("ascii") if entry["password"] else ""
+                db.execute(
+                    "INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (entry["name"], entry["ip"], entry["port"], entry["username"],
+                     password_enc, "", group_id, request.user["username"], now(), now()),
+                )
+                existing.add(key)
+                created += 1
+        duplicates = sum(entry["status"] == "duplicate" for entry in entries) + (len(ready) - created)
+        review_count = sum(entry["status"] == "review" for entry in entries)
+        audit("ips_imported", f"created={created}; duplicates_skipped={duplicates}; rows_needing_review={review_count}; source=markdown")
+        flash(f"Import complete: {created} records added, {duplicates} duplicates skipped, {review_count} rows need manual review.", "success")
+        return redirect(url_for("index"))
+
+    abort(400, description="Unknown import action.")
+
+
 @app.route("/ips/new", methods=["GET", "POST"])
 @superadmin_required
 def ip_new():
