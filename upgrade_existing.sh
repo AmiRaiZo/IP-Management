@@ -123,7 +123,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access; do
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
@@ -261,7 +261,7 @@ git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
 git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup" "$TMP/venv-backup"
 # Preserve exact dependencies so rollback never relies on PyPI or network access.
@@ -274,6 +274,15 @@ DEPLOYED=1
 	install -o root -g root -m 0750 "$TMP/source/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
 	echo "PROGRESS:50:Installing privileged helper and server service configuration"
 install -o root -g root -m 0750 "$TMP/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
+install -o root -g root -m 0750 "$TMP/source/station_archive_refresh_ip.py" /usr/local/sbin/station-archive-refresh-ip
+install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh.service" /etc/systemd/system/station-archive-ip-refresh.service
+install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh.timer" /etc/systemd/system/station-archive-ip-refresh.timer
+install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh-boot.service" /etc/systemd/system/station-archive-ip-refresh-boot.service
+install -d -o root -g root -m 0755 /etc/systemd/system/nginx.service.d
+install -o root -g root -m 0644 "$TMP/source/nginx-station-archive-ip-refresh.conf" /etc/systemd/system/nginx.service.d/10-station-archive-ip-refresh.conf
+systemctl daemon-reload
+/usr/local/sbin/station-archive-refresh-ip
+systemctl enable --now station-archive-ip-refresh.timer
 cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'
 www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service, /usr/bin/systemctl --no-block start station-archive-reconfigure.service
 SUDOERS
@@ -370,6 +379,12 @@ UPDATER
 chown root:root /usr/local/sbin/station-archive-update
 chmod 0750 /usr/local/sbin/station-archive-update
 install -o root -g root -m 0750 "$WORK_DIR/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
+install -o root -g root -m 0750 "$WORK_DIR/source/station_archive_refresh_ip.py" /usr/local/sbin/station-archive-refresh-ip
+install -o root -g root -m 0644 "$WORK_DIR/source/station-archive-ip-refresh.service" /etc/systemd/system/station-archive-ip-refresh.service
+install -o root -g root -m 0644 "$WORK_DIR/source/station-archive-ip-refresh.timer" /etc/systemd/system/station-archive-ip-refresh.timer
+install -o root -g root -m 0644 "$WORK_DIR/source/station-archive-ip-refresh-boot.service" /etc/systemd/system/station-archive-ip-refresh-boot.service
+install -d -o root -g root -m 0755 /etc/systemd/system/nginx.service.d
+install -o root -g root -m 0644 "$WORK_DIR/source/nginx-station-archive-ip-refresh.conf" /etc/systemd/system/nginx.service.d/10-station-archive-ip-refresh.conf
 # Permit only the fixed systemd start action from the web process. The actual
 # updater runs as a separate root-owned systemd unit outside the web sandbox.
 install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
@@ -396,7 +411,7 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 NoNewPrivileges=false
-ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system
+ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system /etc/nginx /var/backups
 UMask=0077
 UPDATEUNIT
 cat > /etc/systemd/system/station-archive-reconfigure.service <<'RECONFIGUNIT'
@@ -426,6 +441,10 @@ www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.se
 SUDOERS
 chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update
+
+systemctl daemon-reload
+/usr/local/sbin/station-archive-refresh-ip
+systemctl enable --now station-archive-ip-refresh.timer
 
 nginx -t
 systemctl daemon-reload

@@ -1,0 +1,18 @@
+[Unit]
+Description=Refresh the IP Management Nginx public IPv4 listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-refresh-ip
+StandardOutput=journal
+StandardError=journal
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/etc/nginx /var/backups
+PrivateTmp=true
+TimeoutStartSec=30
+UMask=0077

@@ -1,0 +1,19 @@
+[Unit]
+Description=Validate the IP Management Nginx listener before Nginx starts
+Wants=network-online.target
+After=network-online.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-refresh-ip --preflight
+StandardOutput=journal
+StandardError=journal
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/etc/nginx /var/backups
+PrivateTmp=true
+TimeoutStartSec=30
+UMask=0077

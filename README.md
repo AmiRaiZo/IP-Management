@@ -1,3 +1,10 @@
+## Automatic public IPv4 listener recovery
+
+- The installer, in-place upgrader, and in-app updater now install a root-owned IP refresh helper.
+- Before Nginx starts, a systemd preflight updates the IP-specific HTTPS listener to the IPv4 address currently assigned to the VPS and validates the Nginx configuration.
+- A systemd timer rechecks every 30 seconds, fixes the listener after an address change, validates with `nginx -t`, then reloads or starts Nginx. The app remains on its existing loopback port; VPN listeners are not edited.
+- This repairs the server-side Nginx bind when a local interface IP changes. The domain's DNS A/AAAA record must still be updated by the DNS provider or a separate dynamic-DNS integration if the public IP changes.
+
 ## Version 2.9.1 release notes
 
 - Fixed the sidebar toggle button to stay at a consistent top-left position when the sidebar is expanded or collapsed, on desktop and mobile.

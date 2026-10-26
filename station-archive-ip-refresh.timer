@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically detect public IPv4 changes for the IP Management site
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=station-archive-ip-refresh.service
+
+[Install]
+WantedBy=timers.target

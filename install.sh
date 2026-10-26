@@ -64,7 +64,7 @@ cleanup() { rm -rf -- "$WORK_DIR"; [[ -z "${ADMIN_CREDENTIALS:-}" ]] || rm -f --
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
 SOURCE_DIR="$WORK_DIR/source"
-for required in app.py setup_admin.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station-archive-update; do
+for required in app.py setup_admin.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station-archive-update station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
   [[ -e "$SOURCE_DIR/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
@@ -182,7 +182,6 @@ server {
 }
 EOF
 ln -sfn "$NGINX_FILE" "/etc/nginx/sites-enabled/station-archive-$DOMAIN"
-(more lines follow — continue from line 161)
 nginx -t
 systemctl enable --now nginx
 if ! certbot certonly --webroot -w "$WEBROOT" --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN"; then
@@ -229,7 +228,7 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 NoNewPrivileges=false
-ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system
+ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system /etc/nginx /var/backups
 UMask=0077
 UPDATEUNIT
 cat > /etc/systemd/system/station-archive-reconfigure.service <<'RECONFIGUNIT'
@@ -267,6 +266,16 @@ if ! systemctl is-active --quiet station-archive; then
   journalctl -u station-archive -n 60 --no-pager >&2 || true
   exit 1
 fi
+install -o root -g root -m 0750 "$SOURCE_DIR/station_archive_refresh_ip.py" /usr/local/sbin/station-archive-refresh-ip
+install -o root -g root -m 0644 "$SOURCE_DIR/station-archive-ip-refresh.service" /etc/systemd/system/station-archive-ip-refresh.service
+install -o root -g root -m 0644 "$SOURCE_DIR/station-archive-ip-refresh.timer" /etc/systemd/system/station-archive-ip-refresh.timer
+install -o root -g root -m 0644 "$SOURCE_DIR/station-archive-ip-refresh-boot.service" /etc/systemd/system/station-archive-ip-refresh-boot.service
+install -d -o root -g root -m 0755 /etc/systemd/system/nginx.service.d
+install -o root -g root -m 0644 "$SOURCE_DIR/nginx-station-archive-ip-refresh.conf" /etc/systemd/system/nginx.service.d/10-station-archive-ip-refresh.conf
+systemctl daemon-reload
+/usr/local/sbin/station-archive-refresh-ip
+systemctl enable --now station-archive-ip-refresh.timer
+
 nginx -t
 systemctl reload nginx
 
