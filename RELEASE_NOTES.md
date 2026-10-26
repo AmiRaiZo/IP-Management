@@ -1,3 +1,12 @@
+## Version 3.0.15 release notes
+
+- Keep the current IP directory search and group filter when opening an IP record for editing and after saving or deleting it.
+- Carry the filtered return URL through the edit form and delete request; restore the same scroll position after returning.
+- Preserve the search/filter fields whether they were submitted via the filter form or changed with live client-side filtering.
+- Restrict return redirects to the local IP directory to prevent open redirects.
+- Add regression tests for the edit form, update/delete return destinations, malicious external return URLs, and front-end filter transfer.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.15.
+
 ## Version 3.0.14 release notes
 
 - Preserve list scroll position when editing or deleting IP records, groups, and users and then returning to the list.
