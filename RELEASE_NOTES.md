@@ -1,3 +1,11 @@
+## Version 3.0.13 release notes
+
+- Sort IP records alphabetically by record name (A–Z, case-insensitive) in the main directory on desktop and mobile.
+- Apply the same name-based ordering to the IP visibility list in user permission settings.
+- Use the IP address as a stable fallback for records whose names are blank and keep tie ordering deterministic.
+- Add regression coverage for alphabetical ordering in the superadmin directory, restricted-user directory, and access settings.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.13.
+
 ## Version 3.0.12 release notes
 
 - Add a superadmin-only Markdown import page for existing NAME/IP/USER/PASS inventory tables.
