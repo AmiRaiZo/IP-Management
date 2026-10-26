@@ -369,6 +369,9 @@ def send_telegram_security_alert(message):
                       headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=5) as response:
             result = json.loads(response.read(65536).decode("utf-8"))
+        message_id = (result.get("result") or {}).get("message_id") if isinstance(result, dict) else None
+        if result.get("ok") and message_id:
+            telegram_schedule_delete(chat_id, message_id, 120)
         return bool(result.get("ok"))
     except (URLError, HTTPError, TimeoutError, ValueError, OSError):
         app.logger.warning("Telegram security notification failed")
@@ -406,16 +409,63 @@ def telegram_api(method, payload):
         return {}
 
 
+TELEGRAM_MESSAGE_TTL_SECONDS = 120
+_TELEGRAM_DELETE_TIMERS = {}
+_TELEGRAM_DELETE_TIMERS_LOCK = threading.Lock()
+
+
+def telegram_cancel_scheduled_delete(chat_id, message_id):
+    try:
+        key = (str(chat_id), int(message_id))
+    except (TypeError, ValueError):
+        return
+    with _TELEGRAM_DELETE_TIMERS_LOCK:
+        pending = _TELEGRAM_DELETE_TIMERS.pop(key, None)
+    if pending and pending is not threading.current_thread():
+        pending.cancel()
+
+
+def telegram_schedule_delete(chat_id, message_id, delete_after=TELEGRAM_MESSAGE_TTL_SECONDS):
+    """Schedule deletion; edits to the same message reset its expiry timer."""
+    try:
+        normalized_chat_id = str(chat_id)
+        normalized_message_id = int(message_id)
+        delay = float(delete_after)
+    except (TypeError, ValueError):
+        return None
+    if delay <= 0:
+        return None
+    key = (normalized_chat_id, normalized_message_id)
+
+    def expire():
+        with _TELEGRAM_DELETE_TIMERS_LOCK:
+            if _TELEGRAM_DELETE_TIMERS.get(key) is not timer:
+                return
+            _TELEGRAM_DELETE_TIMERS.pop(key, None)
+        telegram_delete_message(normalized_chat_id, normalized_message_id)
+
+    with _TELEGRAM_DELETE_TIMERS_LOCK:
+        previous = _TELEGRAM_DELETE_TIMERS.pop(key, None)
+        if previous:
+            previous.cancel()
+        timer = threading.Timer(delay, expire)
+        timer.daemon = True
+        _TELEGRAM_DELETE_TIMERS[key] = timer
+        timer.start()
+    return timer
+
+
 def telegram_delete_message(chat_id, message_id):
-    """Best-effort cleanup for a bot message; Telegram may reject expired or unavailable messages."""
+    """Best-effort cleanup for a bot or user message; Telegram permissions still apply in groups."""
+    telegram_cancel_scheduled_delete(chat_id, message_id)
     try:
         telegram_api("deleteMessage", {"chat_id": str(chat_id), "message_id": int(message_id)})
     except (TypeError, ValueError):
         return
 
 
-def telegram_send(chat_id, text, reply_markup=None, parse_mode=None, delete_after=120):
-    """Send a bot message and schedule it for cleanup after two minutes by default."""
+def telegram_send(chat_id, text, reply_markup=None, parse_mode=None, delete_after=TELEGRAM_MESSAGE_TTL_SECONDS):
+    """Send a temporary bot message and schedule its automatic cleanup."""
     payload = {"chat_id": str(chat_id), "text": str(text)[:3900], "disable_web_page_preview": True}
     if reply_markup:
         payload["reply_markup"] = reply_markup
@@ -424,9 +474,7 @@ def telegram_send(chat_id, text, reply_markup=None, parse_mode=None, delete_afte
     result = telegram_api("sendMessage", payload)
     message_id = (result.get("result") or {}).get("message_id") if isinstance(result, dict) else None
     if delete_after and message_id:
-        cleanup = threading.Timer(float(delete_after), telegram_delete_message, args=(str(chat_id), message_id))
-        cleanup.daemon = True
-        cleanup.start()
+        telegram_schedule_delete(str(chat_id), message_id, delete_after)
     return result
 
 
@@ -441,9 +489,10 @@ def telegram_replace_message(chat_id, message_id, text, reply_markup=None, parse
     if message_id:
         result = telegram_api("editMessageText", payload)
         if result:
+            telegram_schedule_delete(str(chat_id), message_id, TELEGRAM_MESSAGE_TTL_SECONDS)
             return result
         telegram_delete_message(chat_id, message_id)
-    return telegram_send(chat_id, text, reply_markup, parse_mode, delete_after=0)
+    return telegram_send(chat_id, text, reply_markup, parse_mode)
 
 
 def telegram_browse_groups(chat_id, message_id):
@@ -473,6 +522,12 @@ def telegram_browse_group(chat_id, message_id, group_id):
     telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
 
 
+def telegram_code(value):
+    """Render a value as Telegram inline code; clients can tap the value itself to copy it."""
+    text = str(value if value not in (None, "") else "-")
+    return f"<code>{html.escape(text)}</code>"
+
+
 def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
     state = telegram_get_state()
     if state.get("mode") != "browse_ips" or str(state.get("group_id")) != str(group_id):
@@ -492,13 +547,13 @@ def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
     except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
         password = "-"
     detail = (
-        f"📌 Name: {row['name']}\n"
-        f"🌐 IP: {row['ip_address']}\n"
-        f"🔌 Port: {row['port'] or '-'}\n"
-        f"👤 Username: {row['username'] or '-'}\n"
-        f"🔑 Password: {password}\n"
-        f"📁 Group: {row['group_name']}\n"
-        f"📝 Notes: {(row['notes'] or '-')[:1000]}"
+        f"📌 Name: {telegram_code(row['name'])}\n"
+        f"🌐 IP: {telegram_code(row['ip_address'])}\n"
+        f"🔌 Port: {telegram_code(row['port'])}\n"
+        f"👤 Username: {telegram_code(row['username'])}\n"
+        f"🔑 Password: {telegram_code(password)}\n"
+        f"📁 Group: {html.escape(str(row['group_name'] or '-'))}\n"
+        f"📝 Notes: {html.escape(str((row['notes'] or '-')[:1000]))}"
     )
     keyboard = [
         [{"text": "⬅️ IP names", "callback_data": f"ip_browse_group:{group_id}"}],
@@ -506,7 +561,7 @@ def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
          {"text": "⌂ Menu", "callback_data": "menu"}],
     ]
     telegram_set_state({"mode": "browse_detail", "group_id": int(group_id), "group_name": row["group_name"]})
-    telegram_replace_message(chat_id, message_id, detail, {"inline_keyboard": keyboard})
+    telegram_replace_message(chat_id, message_id, detail, {"inline_keyboard": keyboard}, parse_mode="HTML")
 
 
 def telegram_set_state(state):
@@ -532,10 +587,9 @@ def telegram_menu(chat_id, message_id=None):
         [{"text": "🔐 2FA code", "callback_data": "telegram_2fa_code"}],
     ]}
     if message_id:
-        telegram_api("editMessageText", {"chat_id": str(chat_id), "message_id": message_id,
-                         "text": "IP Management — choose an option:", "reply_markup": markup})
+        telegram_replace_message(chat_id, message_id, "IP Management — choose an option:", markup)
     else:
-        telegram_send(chat_id, "IP Management — choose an option:", markup, delete_after=0)
+        telegram_send(chat_id, "IP Management — choose an option:", markup)
 
 
 def handle_telegram_update(update):
@@ -612,6 +666,8 @@ def handle_telegram_update(update):
     if command.startswith("/"):
         command = command.split("@", 1)[0]
     if command in ("/login_code", "/login-code", "/کدورود", "کد ورود", "کدورود"):
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
         telegram_set_state({})
         code = issue_telegram_login_code()
         if not code:
@@ -620,6 +676,8 @@ def handle_telegram_update(update):
         telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
         return
     if command in ("ربات", "/start", "/menu"):
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
         telegram_set_state({})
         telegram_menu(chat_id)
         return
@@ -649,8 +707,21 @@ def handle_telegram_update(update):
                 password = vault.decrypt((row["password_enc"] or "").encode()).decode() if row["password_enc"] else "-"
             except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
                 password = "-"
-            lines.append(f"\n📌 {row['name']}\n🌐 IP: {row['ip_address']}\n🔌 Port: {row['port'] or '-'}\n👤 Username: {row['username'] or '-'}\n🔑 Password: {password}\n📝 Notes: {(row['notes'] or '-')[:300]}")
-        telegram_send(chat_id, "\n".join(lines), {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
+            block = (
+                f"\n📌 Name: {telegram_code(row['name'])}"
+                f"\n🌐 IP: {telegram_code(row['ip_address'])}"
+                f"\n🔌 Port: {telegram_code(row['port'])}"
+                f"\n👤 Username: {telegram_code(row['username'])}"
+                f"\n🔑 Password: {telegram_code(password)}"
+                f"\n📝 Notes: {html.escape(str((row['notes'] or '-')[:180]))}"
+            )
+            if len("\n".join(lines + [block])) > 3500:
+                lines.append("\nMore results omitted to keep the message within Telegram's size limit.")
+                break
+            lines.append(block)
+        telegram_send(chat_id, "\n".join(lines),
+                      {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]},
+                      parse_mode="HTML")
         return
     if state.get("mode") == "add":
         # Best-effort deletion also removes submitted passwords from the private bot chat.
@@ -712,8 +783,17 @@ def handle_telegram_update(update):
                 cur = db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                                  (clean["name"], clean["ip"], clean["port"], clean["username"], clean["password"] or "", clean["notes"], clean["group_id"], "telegram-bot", now(), now()))
             telegram_set_state({})
-            telegram_send(chat_id, f"IP record saved in IP Management.\n📌 {clean['name']}\n🌐 {clean['ip']}\n🔌 {clean['port'] or '-'}\n📁 Group: {data.get('group_name', 'Default')}\nRecord ID: {cur.lastrowid}",
-                          {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]})
+            saved_message = (
+                f"IP record saved in IP Management.\n"
+                f"📌 {html.escape(str(clean['name']))}\n"
+                f"🌐 IP: {telegram_code(clean['ip'])}\n"
+                f"🔌 Port: {telegram_code(clean['port'])}\n"
+                f"📁 Group: {html.escape(str(data.get('group_name', 'Default')))}\n"
+                f"Record ID: {cur.lastrowid}"
+            )
+            telegram_send(chat_id, saved_message,
+                          {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]},
+                          parse_mode="HTML")
 def telegram_hostname():
     """Return a short configured host label without exposing local machine details."""
     return (os.environ.get("APP_HOSTNAME", "").strip() or socket.gethostname() or "IP Management")[:80]
