@@ -1560,6 +1560,39 @@ def user_edit(user_id):
     return render_template("user_edit.html", user=user, groups=groups, ips=ips, allowed_groups=allowed_groups, ip_rules=ip_rules, two_factor_mode=two_factor_mode())
 
 
+@app.post("/users/<int:user_id>/delete")
+@superadmin_required
+def user_delete(user_id):
+    if user_id == request.user["id"]:
+        flash("You cannot delete your own account.", "error")
+        return redirect(url_for("users"))
+
+    with connect_db() as db:
+        user = db.execute(
+            "SELECT id,username,role,enabled FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            flash("User not found.", "error")
+            return redirect(url_for("users"))
+
+        if user["role"] == "superadmin" and user["enabled"]:
+            remaining_superadmins = db.execute(
+                "SELECT COUNT(*) FROM users WHERE role='superadmin' AND enabled=1 AND id<>?",
+                (user_id,),
+            ).fetchone()[0]
+            if remaining_superadmins < 1:
+                flash("You cannot delete the last enabled super administrator.", "error")
+                return redirect(url_for("users"))
+
+        # Related access rules, recovery codes and Telegram login codes cascade on user deletion.
+        db.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    audit("user_deleted", f"id={user_id}; username={user['username']}; role={user['role']}")
+    flash(f"User {user['username']} deleted.", "success")
+    return redirect(url_for("users"))
+
+
 @app.post("/settings/security")
 @superadmin_required
 def update_security_settings():
