@@ -1,9 +1,18 @@
+## Version 3.0.6 release notes
+
+- Removed the extra explanatory sentence under the IP addresses heading.
+- Replaced the cramped mobile table with a clean list of IP names; opening a name shows the complete record in a centered dialog with a blurred backdrop.
+- Made IP address, port, username and (only when permitted) password values tap-to-copy inside the dialog. Group and notes are displayed as readable details.
+- Kept the desktop table and existing password visibility permissions unchanged.
+- Added regression tests for the mobile dialog, copy actions, subtitle removal, blur effect, and permission-gated password data.
+- Bumped CSS/JavaScript cache keys to v3.0.6.
+
 ## Version 3.0.5 release notes
 
 - Fixed the mobile half-width page: the tablet rule for `body.has-sidebar:not(.sidebar-collapsed) .main-column` had higher CSS specificity than the earlier mobile override, leaving a 215px sidebar gutter on phones.
 - Added a later mobile override with matching specificity so the main column always occupies the full viewport width and the content container uses its parent width rather than forcing `100vw`.
 - Kept the theme toggle and welcome toast constrained within the mobile page width.
-- Bumped CSS/JavaScript cache keys to v3.0.3 and added regression coverage for the exact specificity conflict.
+- Bumped CSS/JavaScript cache keys to v3.0.5 and added regression coverage for the exact specificity conflict.
 
 ## Version 3.0.2 release notes
 
