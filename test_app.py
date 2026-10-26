@@ -316,11 +316,13 @@ class ArchiveTests(unittest.TestCase):
             detail_calls = [call.args[1] for call in api.call_args_list if call.args[0] == "editMessageText"]
             detail = detail_calls[-1]
             self.assertIn("Branch Router", detail["text"])
-            self.assertIn("192.0.2.77", detail["text"])
-            self.assertIn("8291", detail["text"])
-            self.assertIn("netadmin", detail["text"])
-            self.assertIn("Router-Secret-9", detail["text"])
+            self.assertIn("<code>192.0.2.77</code>", detail["text"])
+            self.assertIn("<code>8291</code>", detail["text"])
+            self.assertIn("<code>netadmin</code>", detail["text"])
+            self.assertIn("<code>Router-Secret-9</code>", detail["text"])
             self.assertIn("Branch office", detail["text"])
+            self.assertEqual(detail["parse_mode"], "HTML")
+            self.assertNotIn("copy_text", str(detail.get("reply_markup", {})))
             self.assertEqual(detail["message_id"], 101)
             self.assertEqual(archive.telegram_get_state()["mode"], "browse_detail")
 
@@ -358,8 +360,11 @@ class ArchiveTests(unittest.TestCase):
                 "message_id": 77, "chat": {"id": 12345, "type": "private"}, "text": "Office Router"
             }})
         result_text = send.call_args.args[1]
-        self.assertIn("Password: Saved-Pass-42", result_text)
-        self.assertIn("Username: admin", result_text)
+        self.assertIn("Password: <code>Saved-Pass-42</code>", result_text)
+        self.assertIn("Username: <code>admin</code>", result_text)
+        self.assertIn("IP: <code>192.0.2.10</code>", result_text)
+        self.assertEqual(send.call_args.kwargs.get("parse_mode"), "HTML")
+        self.assertNotIn("copy_text", str(send.call_args.args[2]))
         self.assertEqual(archive.telegram_get_state(), {})
 
     def test_telegram_add_flow_deletes_user_input_messages(self):
@@ -386,13 +391,42 @@ class ArchiveTests(unittest.TestCase):
 
     def test_telegram_sent_messages_are_scheduled_for_deletion_after_two_minutes(self):
         with patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 909}}), \
-             patch.object(archive.threading, "Timer") as timer:
+             patch.object(archive, "telegram_schedule_delete") as schedule:
             archive.telegram_send("12345", "Temporary 2FA code")
-        timer.assert_called_once()
-        self.assertEqual(timer.call_args.args[0], 120)
-        self.assertEqual(timer.call_args.args[1], archive.telegram_delete_message)
-        self.assertEqual(timer.call_args.kwargs["args"], ("12345", 909))
-        timer.return_value.start.assert_called_once()
+        schedule.assert_called_once_with("12345", 909, archive.TELEGRAM_MESSAGE_TTL_SECONDS)
+
+    def test_edited_telegram_screens_reset_the_auto_delete_timer(self):
+        with patch.object(archive, "telegram_api", return_value={"ok": True, "result": True}), \
+             patch.object(archive, "telegram_schedule_delete") as schedule:
+            archive.telegram_replace_message("12345", 321, "Updated screen",
+                                             {"inline_keyboard": [[{"text": "Menu", "callback_data": "menu"}]]})
+        schedule.assert_called_once_with("12345", 321, archive.TELEGRAM_MESSAGE_TTL_SECONDS)
+
+    def test_auto_delete_scheduler_replaces_an_existing_timer_for_the_same_message(self):
+        key = ("12345", 909)
+        with patch.object(archive.threading, "Timer") as timer:
+            archive.telegram_schedule_delete("12345", 909, 120)
+            first_timer = archive._TELEGRAM_DELETE_TIMERS[key]
+            archive.telegram_schedule_delete("12345", 909, 120)
+            second_timer = archive._TELEGRAM_DELETE_TIMERS[key]
+            self.assertIsNot(first_timer, second_timer)
+            first_timer.cancel.assert_called_once()
+            self.assertEqual(timer.call_count, 2)
+            self.assertTrue(second_timer.daemon)
+            second_timer.start.assert_called_once()
+            archive.telegram_cancel_scheduled_delete("12345", 909)
+
+    def test_menu_command_input_is_deleted_and_menu_is_temporary(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "telegram_api", return_value={}) as api, \
+             patch.object(archive, "telegram_send") as send:
+            archive.handle_telegram_update({"message": {
+                "message_id": 88, "chat": {"id": 12345, "type": "private"}, "text": "/start",
+            }})
+        self.assertTrue(any(call.args[0] == "deleteMessage" and call.args[1].get("message_id") == 88
+                            for call in api.call_args_list))
+        self.assertTrue(send.called)
+        self.assertGreater(send.call_args.kwargs.get("delete_after", archive.TELEGRAM_MESSAGE_TTL_SECONDS), 0)
 
     def test_telegram_login_code_expired_code_is_rejected(self):
         user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
