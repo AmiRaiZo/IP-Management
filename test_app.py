@@ -646,7 +646,9 @@ class ArchiveTests(unittest.TestCase):
         edit_page = self.client.get("/ips/1/edit").get_data(as_text=True)
         self.assertIn('id="password" name="password" type="password"', edit_page)
         self.assertIn('value="super-secret"', edit_page)
-        self.assertIn('data-copy-value="super-secret"', edit_page)
+        self.assertNotIn('data-copy-value="super-secret"', edit_page)
+        self.assertNotIn("Copy current password", edit_page)
+        self.assertNotIn("Connection passwords are stored securely. Click the copy button to copy the current password.", edit_page)
         response = self.client.post("/settings/directory", data={
             "csrf_token": self.csrf(), "show_ip_passwords": "1",
         })
