@@ -11,6 +11,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
         cls.index = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
         cls.ip_form = (ROOT / "templates" / "ip_form.html").read_text(encoding="utf-8")
+        cls.profile = (ROOT / "templates" / "profile.html").read_text(encoding="utf-8")
+        cls.settings = (ROOT / "templates" / "settings.html").read_text(encoding="utf-8")
         cls.groups = (ROOT / "templates" / "groups.html").read_text(encoding="utf-8")
         cls.users = (ROOT / "templates" / "users.html").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
@@ -90,6 +92,14 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("destination.searchParams.set('return_to', currentDirectoryReturnUrl())", self.js)
         self.assertIn("returnInput.value = currentDirectoryReturnUrl()", self.js)
         self.assertIn('name="return_to" value="{{ return_to|default(url_for(\'index\')) }}"', self.ip_form)
+
+    def test_shared_authenticator_ui_does_not_advertise_per_user_enrollment(self):
+        self.assertIn("All accounts use the same site Authenticator code.", self.users)
+        self.assertIn("Shared Authenticator", self.users)
+        self.assertIn("regular users do not set up a separate authenticator.", self.users)
+        self.assertIn("users do not register a separate authenticator.", self.settings)
+        self.assertIn("Shared Authenticator required", self.profile)
+        self.assertIn("two_factor_mode == 'per_user' and user.totp_secret", self.profile)
 
     def test_assets_are_cache_busted_for_this_release(self):
         self.assertEqual(self.version, "3.0.16")
