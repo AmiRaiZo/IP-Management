@@ -61,7 +61,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_mobile_ip_cards_are_centered_spaced_and_group_precedes_ip(self):
         self.assertIn('v3.0.7: center and polish mobile IP cards', self.css)
         css = "".join(self.css.split())
-        self.assertIn('.mobile-ip-list{display:grid;gap:10px;padding:14px 12px 16px}', css)
+        self.assertIn('.mobile-ip-list{display:grid;gap:10px;padding:14px12px16px}', css)
         self.assertIn('justify-content:center', css[css.index('v3.0.7: center and polish mobile IP cards'):])
         self.assertIn('text-align:center', css[css.index('v3.0.7: center and polish mobile IP cards'):])
         self.assertLess(self.index.index('>Group</th>'), self.index.index('>IP address / host</th>'))
@@ -69,9 +69,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
                         self.js.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.7")
-        self.assertIn("style.css') }}?v=3.0.7", self.base)
-        self.assertIn("app.js') }}?v=3.0.7", self.base)
+        self.assertEqual(self.version, "3.0.8")
+        self.assertIn("style.css') }}?v=3.0.8", self.base)
+        self.assertIn("app.js') }}?v=3.0.8", self.base)
 
 
 if __name__ == "__main__":
