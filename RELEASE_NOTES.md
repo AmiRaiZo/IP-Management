@@ -1,3 +1,9 @@
+## Version 3.0.8 release notes
+
+- Finalize the mobile directory polish: Group appears before IP address in desktop and mobile details; the mobile IP-name cards and detail values are centered with consistent button boxes.
+- Add breathing room above the first mobile card so it no longer touches the divider, and refine card hover/tap feedback.
+- Refresh CSS/JavaScript cache keys and keep regression coverage for ordering, text alignment, and top spacing.
+
 ## Version 3.0.7 release notes
 
 - Move the Group column before IP address in the desktop directory and show Group first in the mobile detail dialog.
