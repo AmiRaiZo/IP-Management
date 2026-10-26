@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 import unittest
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
@@ -405,11 +405,12 @@ class ArchiveTests(unittest.TestCase):
     def test_auto_delete_scheduler_replaces_an_existing_timer_for_the_same_message(self):
         key = ("12345", 909)
         with patch.object(archive.threading, "Timer") as timer:
+            first_timer, second_timer = MagicMock(), MagicMock()
+            timer.side_effect = [first_timer, second_timer]
             archive.telegram_schedule_delete("12345", 909, 120)
-            first_timer = archive._TELEGRAM_DELETE_TIMERS[key]
+            self.assertIs(archive._TELEGRAM_DELETE_TIMERS[key], first_timer)
             archive.telegram_schedule_delete("12345", 909, 120)
-            second_timer = archive._TELEGRAM_DELETE_TIMERS[key]
-            self.assertIsNot(first_timer, second_timer)
+            self.assertIs(archive._TELEGRAM_DELETE_TIMERS[key], second_timer)
             first_timer.cancel.assert_called_once()
             self.assertEqual(timer.call_count, 2)
             self.assertTrue(second_timer.daemon)
@@ -1233,7 +1234,7 @@ class ArchiveTests(unittest.TestCase):
             archive.handle_telegram_update({"message": {"chat": {"id": 12345, "type": "private"}, "text": "Search Router"}})
         output = "\n".join(str(call.args[1]) for call in send.call_args_list)
         self.assertIn("192.0.2.77", output)
-        self.assertIn("Password: do-not-send-device-secret", output)
+        self.assertIn("Password: <code>do-not-send-device-secret</code>", output)
 
     def test_application_ip_block_does_not_require_os_firewall(self):
         _, secret = self.create_user("ip-rules-admin")
