@@ -62,16 +62,17 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('v3.0.7: center and polish mobile IP cards', self.css)
         css = "".join(self.css.split())
         self.assertIn('.mobile-ip-list{display:grid;gap:10px;padding:14px12px16px}', css)
-        self.assertIn('justify-content:center', css[css.index('v3.0.7: center and polish mobile IP cards'):])
-        self.assertIn('text-align:center', css[css.index('v3.0.7: center and polish mobile IP cards'):])
+        mobile_css = "".join(self.css[self.css.index('v3.0.7: center and polish mobile IP cards'):].split())
+        self.assertIn('justify-content:center', mobile_css)
+        self.assertIn('text-align:center', mobile_css)
         self.assertLess(self.index.index('>Group</th>'), self.index.index('>IP address / host</th>'))
         self.assertLess(self.js.index("addMobileIpDetail('Group', data.ipGroup, false)"),
                         self.js.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.8")
-        self.assertIn("style.css') }}?v=3.0.8", self.base)
-        self.assertIn("app.js') }}?v=3.0.8", self.base)
+        self.assertEqual(self.version, "3.0.9")
+        self.assertIn("style.css') }}?v=3.0.9", self.base)
+        self.assertIn("app.js') }}?v=3.0.9", self.base)
 
 
 if __name__ == "__main__":
