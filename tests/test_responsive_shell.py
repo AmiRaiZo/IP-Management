@@ -30,10 +30,18 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("document.body.classList.remove('sidebar-collapsed')", self.js)
         self.assertIn("document.body.classList.toggle('mobile-sidebar-open')", self.js)
 
+    def test_narrow_viewport_canvas_cannot_shrink_to_half_width(self):
+        self.assertIn("/* v3.0.0: anchor narrow layouts to the visual viewport", self.css)
+        self.assertIn("html,body{width:100vw!important;min-width:100vw!important;max-width:100vw!important", self.css)
+        self.assertIn(".app-shell{width:100vw!important;min-width:100vw!important;max-width:100vw!important}", self.css)
+        self.assertIn("body.sidebar-collapsed .main-column{width:100vw!important", self.css)
+        self.assertIn("body.has-sidebar .main-column{width:100vw!important", self.css)
+        self.assertIn(".container{width:calc(100vw - 20px)!important", self.css)
+
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "2.9.7")
-        self.assertIn("style.css') }}?v=2.9.7", self.base)
-        self.assertIn("app.js') }}?v=2.9.7", self.base)
+        self.assertEqual(self.version, "3.0.0")
+        self.assertIn("style.css') }}?v=3.0.0", self.base)
+        self.assertIn("app.js') }}?v=3.0.0", self.base)
 
 
 if __name__ == "__main__":
