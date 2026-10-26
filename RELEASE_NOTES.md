@@ -1,3 +1,12 @@
+## Version 3.0.18 release notes
+
+- Add a Log out action to the required first-login Authenticator setup page so users can safely leave instead of enrolling immediately.
+- The logout action clears the pending 2FA enrollment session and returns to sign-in; it does not disable or bypass the required per-user 2FA policy.
+- Keep the action protected by the application's CSRF guard and clear any remembered 2FA cookie.
+- Add API regression coverage proving that logout exits the pending session, protected pages remain inaccessible, and the next sign-in requires setup again.
+- Add a template regression test for the logout form, CSRF token, and explicit reminder that 2FA remains required.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.18.
+
 ## Version 3.0.17 release notes
 
 - Fix shared two-factor login so all accounts use the existing site-wide Authenticator code after password verification; newly created users no longer have to enroll a separate authenticator.
