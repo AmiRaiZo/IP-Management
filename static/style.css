@@ -312,7 +312,7 @@ body.sidebar-collapsed .main-column{margin-left:0!important}
 @media(prefers-reduced-motion:reduce){
   .sidebar,.sidebar>*:not(#sidebar-toggle),.sidebar-toggle,.sidebar-toggle-icon::before,.main-column{transition:none!important}
 }
-/* v2.9.2: viewport-locked layout and a stable, overlay-only sidebar toggle. */
+/* v2.9.4: viewport-locked layout and a stable, overlay-only sidebar toggle. */
 html,body{width:100%;max-width:100%;overflow-x:clip}
 .app-shell{width:100%;min-width:0}
 .main-column{min-width:0}

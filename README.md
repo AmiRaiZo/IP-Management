@@ -1,4 +1,4 @@
-## Version 2.9.2 release notes
+## Version 2.9.4 release notes
 
 - Fixed mobile horizontal overflow and the blank side area by locking the app shell and main content to the viewport width.
 - Made the navigation drawer responsive: it is hidden by default on phones, fits within the screen, and overlays the page instead of pushing or shrinking content.

@@ -20,6 +20,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Run responsive shell regression tests
+        run: python -m unittest tests.test_responsive_shell -v
+
       - name: Validate version and prepare release notes
         id: release-meta
         shell: bash
