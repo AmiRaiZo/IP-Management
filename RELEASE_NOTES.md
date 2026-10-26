@@ -1,3 +1,10 @@
+## Version 3.0.9 release notes
+
+- Put Group before IP address in the desktop table and mobile details panel.
+- Center the phone-sized IP name cards and detail values, standardize the card/button boxes, and add top spacing so the first card no longer touches the divider.
+- Retain hover/tap feedback and blur-backed details; refresh asset cache keys so phones load the final styles/scripts.
+- Harden the mobile layout regression test to validate the normalized CSS without relying on whitespace inside the version marker.
+
 ## Version 3.0.8 release notes
 
 - Finalize the mobile directory polish: Group appears before IP address in desktop and mobile details; the mobile IP-name cards and detail values are centered with consistent button boxes.
