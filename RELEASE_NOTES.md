@@ -1,3 +1,9 @@
+## Version 3.0.2 release notes
+
+- Stop formatting saved IP record names as Telegram inline-code values. Names stay ordinary readable text and are not presented as tap-to-copy fields.
+- Keep IP address, port, username, and password inline-code formatted for one-tap copy in the bot's detail view and search results.
+- Add regression assertions for both detail view and search results.
+
 ## Version 3.0.1 release notes
 
 - Fixed the in-place upgrade script's embedded updater: a missing newline after the Gunicorn recovery branch caused Bash to fail at `echo "PROGRESS:84..."` before Nginx validation.
