@@ -713,6 +713,37 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('width:calc(100% - 132px);margin-left:132px', stylesheet)
         self.assertIn('.inventory-panel .table-scroll .record-avatar{position:absolute;left:0;top:50%;transform:translateY(-50%);border-radius:50%}', stylesheet)
         self.assertIn('.profile-info{display:grid;gap:3px;min-width:0;flex:1}', stylesheet)
+    def test_mobile_ip_directory_uses_name_cards_and_permission_gated_copy_details(self):
+        _, secret = self.create_user("mobile-ip-directory")
+        self.assertEqual(self.login("mobile-ip-directory", secret).status_code, 302)
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            db.execute(
+                "INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                ("Mobile router", "192.0.2.99", 8728, "mobile-user", archive.vault.encrypt(b"mobile-secret").decode(), "Uplink device", group_id, "root", archive.now(), archive.now()),
+            )
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", page)
+        self.assertIn('class="mobile-ip-list" data-mobile-ip-list', page)
+        self.assertIn('data-mobile-ip-card', page)
+        self.assertIn('data-ip-name="Mobile router"', page)
+        self.assertIn('data-ip-address="192.0.2.99"', page)
+        self.assertIn('data-ip-port="8728"', page)
+        self.assertIn('data-ip-username="mobile-user"', page)
+        self.assertIn('data-ip-password="mobile-secret"', page)
+        self.assertIn('id="mobile-ip-details-modal"', page)
+        self.assertIn('id="mobile-ip-details-list"', page)
+        script = (archive.BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("document.querySelectorAll('[data-mobile-ip-card]')", script)
+        self.assertIn("event.target.closest('[data-copy-value]')", script)
+        self.assertIn("mobileRows.forEach(row =>", script)
+        stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".inventory-panel .table-scroll{display:none!important}", stylesheet)
+        self.assertIn(".mobile-ip-list{display:grid;gap:8px", stylesheet)
+        self.assertIn("backdrop-filter:blur(8px)", stylesheet)
+
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
         self.assertEqual(self.login("update-success-user", secret).status_code, 302)
