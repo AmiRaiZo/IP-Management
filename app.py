@@ -13,6 +13,7 @@ import subprocess
 import time
 import threading
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 from urllib.error import URLError, HTTPError
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -1706,9 +1707,26 @@ def ip_import():
     abort(400, description="Unknown import action.")
 
 
+def safe_ip_return_url(value):
+    """Accept only a local return URL to the IP directory, never an external redirect."""
+    default = url_for("index")
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 2048 or "\\" in candidate:
+        return default
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return default
+    if parsed.scheme or parsed.netloc or parsed.path != "/" or candidate.startswith("//"):
+        return default
+    # Only keep the directory filters; a fragment is unnecessary for the return target.
+    return "/" + ("?" + parsed.query if parsed.query else "")
+
+
 @app.route("/ips/new", methods=["GET", "POST"])
 @superadmin_required
 def ip_new():
+    return_to = safe_ip_return_url(request.form.get("return_to") or request.args.get("return_to"))
     with connect_db() as db:
         groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
         default_group = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()
@@ -1727,13 +1745,16 @@ def ip_new():
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
                 return {"ok": True, "message": "IP record created."}
             flash("IP record created.", "success")
-            return redirect(url_for("index"))
-    return render_template("ip_form.html", ip=None, groups=groups, default_group_id=default_group["id"] if default_group else None)
+            return redirect(return_to)
+    return render_template("ip_form.html", ip=None, groups=groups,
+                           default_group_id=default_group["id"] if default_group else None,
+                           return_to=return_to)
 
 
 @app.route("/ips/<int:ip_id>/edit", methods=["GET", "POST"])
 @superadmin_required
 def ip_edit(ip_id):
+    return_to = safe_ip_return_url(request.form.get("return_to") or request.args.get("return_to"))
     with connect_db() as db:
         ip = db.execute("SELECT * FROM ips WHERE id=?", (ip_id,)).fetchone()
         groups = db.execute("SELECT * FROM groups ORDER BY sort_order, id").fetchall()
@@ -1750,18 +1771,20 @@ def ip_edit(ip_id):
                            (data["name"], data["ip"], data["port"], data["username"], enc, data["notes"], data["group_id"], now(), ip_id))
             audit("ip_updated", f"id={ip_id}; ip={data['ip']}")
             flash("IP record updated.", "success")
-            return redirect(url_for("index"))
+            return redirect(return_to)
     ip_data = dict(ip)
     try:
         ip_data["password_plain"] = vault.decrypt((ip["password_enc"] or "").encode()).decode() if ip["password_enc"] else ""
     except (InvalidToken, ValueError, TypeError):
         ip_data["password_plain"] = ""
-    return render_template("ip_form.html", ip=ip_data, groups=groups, default_group_id=None)
+    return render_template("ip_form.html", ip=ip_data, groups=groups,
+                           default_group_id=None, return_to=return_to)
 
 
 @app.post("/ips/<int:ip_id>/delete")
 @superadmin_required
 def ip_delete(ip_id):
+    return_to = safe_ip_return_url(request.form.get("return_to"))
     with connect_db() as db:
         row = db.execute("SELECT ip_address FROM ips WHERE id=?", (ip_id,)).fetchone()
         if row:
@@ -1769,7 +1792,7 @@ def ip_delete(ip_id):
     if row:
         audit("ip_deleted", f"id={ip_id}; ip={row['ip_address']}")
         flash("IP record deleted.", "success")
-    return redirect(url_for("index"))
+    return redirect(return_to)
 
 
 @app.route("/groups", methods=["GET", "POST"])
