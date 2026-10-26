@@ -44,7 +44,7 @@ jobs:
             capture && /^## / { exit }
             capture { print }
           ' RELEASE_NOTES.md > release-notes.md
-          test -s release-notes.md || { echo "README.md has no release notes for $VERSION." >&2; exit 1; }
+          test -s release-notes.md || { echo "RELEASE_NOTES.md has no release notes for $VERSION." >&2; exit 1; }
 
       - name: Publish release for the exact commit
         env:
