@@ -385,9 +385,24 @@ def telegram_api(method, payload):
                       headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=5) as response:
             result = json.loads(response.read(65536).decode("utf-8"))
-        return result if result.get("ok") else {}
-    except (URLError, HTTPError, TimeoutError, ValueError, OSError):
-        app.logger.warning("Telegram bot API request failed")
+        if not result.get("ok"):
+            description = str(result.get("description") or "unspecified Telegram API error")[:240]
+            app.logger.warning("Telegram Bot API method %s failed: %s", method, description)
+            return {}
+        return result
+    except HTTPError as exc:
+        description = ""
+        try:
+            error_data = json.loads(exc.read(65536).decode("utf-8"))
+            description = str(error_data.get("description") or "")
+        except (ValueError, OSError, UnicodeDecodeError):
+            pass
+        app.logger.warning("Telegram Bot API method %s failed (HTTP %s): %s",
+                           method, exc.code, description[:240] or "request rejected")
+        return {}
+    except (URLError, TimeoutError, ValueError, OSError) as exc:
+        app.logger.warning("Telegram Bot API method %s request failed (%s)",
+                           method, type(exc).__name__)
         return {}
 
 
@@ -593,7 +608,10 @@ def handle_telegram_update(update):
             telegram_send(chat_id, "Send the saved name or IP address to search:")
         return
     text = str(message.get("text", "")).strip()
-    if text.lower() in ("/login_code", "/login-code", "/کدورود", "کد ورود", "کدورود"):
+    command = text.lower()
+    if command.startswith("/"):
+        command = command.split("@", 1)[0]
+    if command in ("/login_code", "/login-code", "/کدورود", "کد ورود", "کدورود"):
         telegram_set_state({})
         code = issue_telegram_login_code()
         if not code:
@@ -601,7 +619,7 @@ def handle_telegram_update(update):
             return
         telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
         return
-    if text.lower() in ("ربات", "/start", "/menu"):
+    if command in ("ربات", "/start", "/menu"):
         telegram_set_state({})
         telegram_menu(chat_id)
         return
@@ -1640,6 +1658,37 @@ def settings():
                            public_port=deployment["public_port"])
 
 
+def configure_telegram_webhook(public_base=None):
+    """Register the interactive bot webhook using the saved encrypted credentials."""
+    if not secure_setting("telegram_bot_token_enc") or not secure_setting("telegram_chat_id_enc"):
+        return False, "Enter and save both the bot token and numeric chat ID first."
+    if public_base is None:
+        public_base = (os.environ.get("APP_PUBLIC_URL", "").strip()
+                       or request.url_root)
+    public_base = str(public_base or "").strip().rstrip("/")
+    if not public_base.lower().startswith("https://") or len(public_base) <= len("https://"):
+        return False, "The public URL must be externally reachable over HTTPS. Check APP_PUBLIC_URL and the reverse-proxy HTTPS headers."
+    webhook_secret = secure_setting("telegram_webhook_secret_enc") or secrets.token_urlsafe(32)
+    save_secure_setting("telegram_webhook_secret_enc", webhook_secret)
+    expected_url = public_base + url_for("telegram_webhook")
+    result = telegram_api("setWebhook", {
+        "url": expected_url,
+        "secret_token": webhook_secret,
+        "allowed_updates": ["message", "callback_query"],
+    })
+    if not result.get("ok"):
+        return False, "Telegram rejected webhook registration. Check the application service log for the Telegram API error."
+    info = telegram_api("getWebhookInfo", {})
+    if info.get("ok"):
+        actual_url = str((info.get("result") or {}).get("url") or "")
+        if actual_url and actual_url != expected_url:
+            return False, "Telegram reports a different webhook URL. Check APP_PUBLIC_URL."
+        last_error = str((info.get("result") or {}).get("last_error_message") or "").strip()
+        if last_error:
+            app.logger.warning("Telegram reports a recent webhook delivery error: %s", last_error[:240])
+    return True, ""
+
+
 @app.post("/settings/telegram")
 @superadmin_required
 def update_telegram_settings():
@@ -1647,27 +1696,31 @@ def update_telegram_settings():
     token = request.form.get("telegram_bot_token", "").strip()
     chat_id = request.form.get("telegram_chat_id", "").strip()
     if token or chat_id:
-        if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{20,100}", token) or not re.fullmatch(r"-?\d{1,20}", chat_id):
-            flash("Enter a valid Telegram bot token and numeric chat ID. Leave both blank to keep the saved values.", "error")
+        if (not token or not chat_id
+                or not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{20,100}", token)
+                or not re.fullmatch(r"-?\d{1,20}", chat_id)):
+            flash("Enter both a valid Telegram bot token and numeric chat ID. Leave both blank to keep the saved values.", "error")
             return redirect(url_for("settings") + "#notifications")
         save_secure_setting("telegram_bot_token_enc", token)
         save_secure_setting("telegram_chat_id_enc", chat_id)
-        webhook_secret = secure_setting("telegram_webhook_secret_enc") or secrets.token_urlsafe(32)
-        save_secure_setting("telegram_webhook_secret_enc", webhook_secret)
         audit("telegram_security_alerts_configured")
-        public_base = (os.environ.get("APP_PUBLIC_URL", "").strip().rstrip("/")
-                       or request.url_root.rstrip("/"))
-        if public_base.startswith("https://"):
-            telegram_api("setWebhook", {"url": public_base + url_for("telegram_webhook"),
-                                         "secret_token": webhook_secret,
-                                         "allowed_updates": ["message", "callback_query"]})
+
+    # Always re-register from stored credentials, even when the password fields are blank.
+    # This makes the existing settings form a repair path for a missing or stale webhook.
+    webhook_ok, webhook_error = configure_telegram_webhook()
+    if not webhook_ok:
+        app.logger.warning("Telegram interactive bot webhook setup failed: %s", webhook_error)
+        flash("Interactive Telegram commands are not active: " + webhook_error, "error")
+    elif action == "test":
+        flash("Interactive Telegram bot webhook registered and verified.", "success")
+
     if action == "test":
         if send_telegram_security_alert("IP Management security notification test.\nThis confirms Telegram delivery; no passwords or authenticator codes are included."):
             flash("Telegram test notification sent.", "success")
         else:
             flash("Telegram test failed. Check the bot token, chat ID, bot access to the chat, and server internet access.", "error")
-    else:
-        flash("Telegram security notification settings saved. Raw attempted passwords are never sent.", "success")
+    elif webhook_ok:
+        flash("Telegram settings saved and the interactive bot webhook registered.", "success")
     return redirect(url_for("settings") + "#notifications")
 
 
