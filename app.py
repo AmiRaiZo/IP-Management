@@ -1234,6 +1234,30 @@ def setup_2fa():
     return render_template("setup_2fa.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri, user=dict(user))
 
 
+@app.post("/cancel-2fa-setup")
+def cancel_2fa_setup():
+    """Log out of the pending mandatory enrollment flow without disabling 2FA."""
+    pending_user_id = session.get("pending_2fa_user_id")
+    if not pending_user_id:
+        if session.get("user_id"):
+            abort(403)
+        session.clear()
+        return redirect(url_for("login"))
+
+    with connect_db() as db:
+        user = db.execute("SELECT username FROM users WHERE id=?", (pending_user_id,)).fetchone()
+    security_event(
+        "two_factor_enrollment",
+        user["username"] if user else "",
+        "info",
+        "User logged out from the pending authenticator setup page",
+    )
+    session.clear()
+    response = redirect(url_for("login"))
+    response.delete_cookie(REMEMBER_2FA_COOKIE)
+    return response
+
+
 @app.post("/logout")
 @login_required
 def logout():
