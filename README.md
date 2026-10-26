@@ -1,3 +1,9 @@
+## Version 2.9.5 release notes
+
+- Fixed interactive Telegram commands not responding when the webhook was missing or stale: Save and Save & send test now re-register the webhook using the already-saved encrypted credentials, even when credential fields are left blank.
+- The settings page now reports webhook registration failures rather than silently claiming that the settings were saved; Telegram Bot API failure descriptions are logged without exposing the bot token.
+- Added support for slash commands addressed to a bot username, such as `/start@BotName` and `/menu@BotName`.
+
 ## Version 2.9.4 release notes
 
 - Fixed mobile horizontal overflow and the blank side area by locking the app shell and main content to the viewport width.
