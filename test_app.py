@@ -606,6 +606,23 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"192.0.2.10", response.data)
         self.assertIn(b"device-secret", response.data)
 
+    def test_ip_edit_form_omits_password_copy_controls(self):
+        _, secret = self.create_user("edit-form-no-copy")
+        self.assertEqual(self.login("edit-form-no-copy", secret).status_code, 302)
+        with archive.connect_db() as db:
+            ip_id = db.execute(
+                "INSERT INTO ips(name,ip_address,password_enc,created_at,updated_at) VALUES(?,?,?,?,?)",
+                ("Edit password router", "192.0.2.202", archive.vault.encrypt(b"edit-form-secret").decode(), archive.now(), archive.now()),
+            ).lastrowid
+        response = self.client.get(f"/ips/{ip_id}/edit")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertNotIn("Connection passwords are stored securely. Click the copy button to copy the current password.", page)
+        self.assertNotIn("Copy current password", page)
+        self.assertNotIn('data-copy-value="edit-form-secret"', page)
+        self.assertIn('id="password" name="password" type="password"', page)
+        self.assertIn("Leave blank to keep current password", page)
+
     def test_default_group_and_password_visibility_and_copy_are_available(self):
         _, secret = self.create_user("passwordarchive")
         self.assertEqual(self.login("passwordarchive", secret).status_code, 302)
@@ -790,6 +807,54 @@ class ArchiveTests(unittest.TestCase):
             db.execute("INSERT INTO user_ip_access(user_id,ip_id,can_view) VALUES(?,?,0)", (user_id, ip_id))
         response = self.client.get("/")
         self.assertNotIn(b"198.51.100.5", response.data)
+
+    def test_superadmin_can_delete_user_and_preserves_self_account(self):
+        root_id, root_secret = self.create_user("delete-root")
+        self.assertEqual(self.login("delete-root", root_secret).status_code, 302)
+        target_id, _ = self.create_user("delete-target", role="admin")
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            ip_id = db.execute(
+                "INSERT INTO ips(name,ip_address,created_at,updated_at) VALUES(?,?,?,?)",
+                ("Delete test IP", "192.0.2.201", archive.now(), archive.now()),
+            ).lastrowid
+            db.execute("INSERT INTO user_group_access(user_id,group_id) VALUES(?,?)", (target_id, group_id))
+            db.execute("INSERT INTO user_ip_access(user_id,ip_id,can_view) VALUES(?,?,1)", (target_id, ip_id))
+            db.execute("INSERT INTO user_recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)",
+                       (target_id, "delete-test-recovery-hash", archive.now()))
+            db.execute("INSERT INTO telegram_login_codes(user_id,code_hash,expires_at,created_at) VALUES(?,?,?,?)",
+                       (target_id, "delete-test-telegram-hash", archive.now(), archive.now()))
+
+        listing = self.client.get("/users")
+        self.assertEqual(listing.status_code, 200)
+        page = listing.get_data(as_text=True)
+        self.assertIn(f'action="/users/{target_id}/delete"', page)
+        self.assertIn('data-confirm="Delete this user account? This cannot be undone."', page)
+
+        response = self.client.post(f"/users/{target_id}/delete", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/users")
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM user_group_access WHERE user_id=?", (target_id,)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM user_ip_access WHERE user_id=?", (target_id,)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?", (target_id,)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (target_id,)).fetchone()[0], 0)
+            self.assertIsNotNone(db.execute("SELECT id FROM users WHERE id=?", (root_id,)).fetchone())
+        self.assertIn(b"User delete-target deleted.", self.client.get("/users").data)
+
+        self_id = root_id
+        response = self.client.post(f"/users/{self_id}/delete", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            self.assertIsNotNone(db.execute("SELECT id FROM users WHERE id=?", (self_id,)).fetchone())
+        self.assertIn(b"You cannot delete your own account.", self.client.get("/users").data)
+
+    def test_regular_admin_cannot_delete_a_user(self):
+        _, secret = self.create_user("delete-not-allowed", role="admin")
+        self.assertEqual(self.login("delete-not-allowed", secret).status_code, 302)
+        response = self.client.post("/users/999/delete", data={"csrf_token": self.csrf()})
+        self.assertIn(response.status_code, (302, 403))
 
     def test_superadmin_pages_render(self):
         _, secret = self.create_user("adminpages")
