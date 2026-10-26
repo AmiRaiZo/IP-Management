@@ -76,6 +76,46 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"400", response.data)
         self.assertNotIn(b"Internal Server Error", response.data)
 
+    def test_user_can_log_out_from_mandatory_2fa_setup_and_must_enroll_again(self):
+        with archive.connect_db() as db:
+            db.execute(
+                "INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) "
+                "VALUES(?,?,?,?,?,1,1)",
+                ("pending-logout-user", archive.password_hash("test-pass"), archive.now(), "admin", ""),
+            )
+
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "pending-logout-user", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/setup-2fa", response.location)
+
+        setup_page = self.client.get("/setup-2fa")
+        self.assertEqual(setup_page.status_code, 200)
+        self.assertIn(b"Log out", setup_page.data)
+        self.assertIn(b"name=" + b'"csrf_token"', setup_page.data)
+
+        response = self.client.post("/cancel-2fa-setup", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("pending_2fa_user_id", sess)
+            self.assertNotIn("pending_2fa_secret", sess)
+            self.assertNotIn("user_id", sess)
+
+        # Logging out is not a way around the required authenticator: next sign-in starts setup again.
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "pending-logout-user", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/setup-2fa", response.location)
+
+        # The POST action is protected by the global CSRF check.
+        response = self.client.post("/cancel-2fa-setup", data={"csrf_token": "invalid"})
+        self.assertEqual(response.status_code, 400)
+
     def test_first_login_requires_enrollment_and_enables_totp(self):
         with archive.connect_db() as db:
             db.execute("INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,enabled) VALUES(?,?,?,?,?,1,1)",
