@@ -223,8 +223,8 @@ class ArchiveTests(unittest.TestCase):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
         webhook_url = "https://archive.example.com/telegram/webhook"
-        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \\
-             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"url": webhook_url}}) as api, \\
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"url": webhook_url}}) as api, \
              patch.object(archive, "send_telegram_security_alert", return_value=True):
             response = self.client.post("/settings/telegram", data={
                 "csrf_token": self.csrf(), "action": "test",
@@ -243,8 +243,8 @@ class ArchiveTests(unittest.TestCase):
         archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
-        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \\
-             patch.object(archive, "telegram_api", return_value={}), \\
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \
+             patch.object(archive, "telegram_api", return_value={}), \
              patch.object(archive, "send_telegram_security_alert", return_value=True):
             response = self.client.post("/settings/telegram", data={
                 "csrf_token": self.csrf(), "action": "test",
