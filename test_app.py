@@ -606,6 +606,76 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"192.0.2.10", response.data)
         self.assertIn(b"device-secret", response.data)
 
+    def test_superadmin_can_preview_and_import_markdown_ip_inventory(self):
+        _, secret = self.create_user("markdown-import-admin")
+        self.assertEqual(self.login("markdown-import-admin", secret).status_code, 302)
+        markdown = (
+            "| NAME | IP | USER | PASS |\n"
+            "|---|---|---|---|\n"
+            "| Core Router | 192.0.2.10:35300 | operator | import-secret-one |\n"
+            "| Switch | 192.0.2.20 | admin | import-secret-two |\n"
+            "| Multi IP | 192.0.2.30<br />192.0.2.31 | admin | import-secret-three |\n"
+            "| Ambiguous | 192.0.2.40 | user-a<br />user-b | pass-a<br />pass-b |\n"
+            "| Router alias | 192.0.2.10:35300 | another-user | duplicate-secret |\n"
+        )
+        response = self.client.post("/ips/import", data={
+            "csrf_token": self.csrf(), "action": "preview",
+            "file": (BytesIO(markdown.encode("utf-8")), "PASWORD.md"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Import preview", page)
+        self.assertIn("2</strong> ready to import", page)
+        self.assertIn("1</strong> duplicates skipped", page)
+        self.assertIn("2</strong> need manual review", page)
+        self.assertIn("multiple IP/host values", page)
+        for credential in ("import-secret-one", "import-secret-two", "import-secret-three", "pass-a", "pass-b", "duplicate-secret"):
+            self.assertNotIn(credential, page)
+        match = re.search(r'name="import_token" value="([A-Za-z0-9_-]+)"', page)
+        self.assertIsNotNone(match)
+
+        response = self.client.post("/ips/import", data={
+            "csrf_token": self.csrf(), "action": "import", "import_token": match.group(1),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/")
+        with archive.connect_db() as db:
+            rows = db.execute("SELECT ip_address,port,username,password_enc FROM ips ORDER BY ip_address").fetchall()
+            self.assertEqual(len(rows), 2)
+            router = db.execute("SELECT * FROM ips WHERE ip_address='192.0.2.10'").fetchone()
+            switch = db.execute("SELECT * FROM ips WHERE ip_address='192.0.2.20'").fetchone()
+            audit_row = db.execute("SELECT detail FROM audit_log WHERE action='ips_imported' ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(router["port"], 35300)
+        self.assertEqual(router["username"], "operator")
+        self.assertNotEqual(router["password_enc"], "import-secret-one")
+        self.assertEqual(archive.vault.decrypt(router["password_enc"].encode()).decode(), "import-secret-one")
+        self.assertEqual(archive.vault.decrypt(switch["password_enc"].encode()).decode(), "import-secret-two")
+        self.assertNotIn("import-secret", audit_row["detail"])
+        self.assertNotIn("duplicate-secret", audit_row["detail"])
+        page = self.client.get(response.location).get_data(as_text=True)
+        self.assertIn("2 records added", page)
+        self.assertIn("2 rows need manual review", page)
+
+    def test_markdown_import_is_superadmin_only(self):
+        _, secret = self.create_user("markdown-import-limited", role="admin")
+        self.assertEqual(self.login("markdown-import-limited", secret).status_code, 302)
+        response = self.client.get("/ips/import")
+        self.assertEqual(response.status_code, 403)
+        response = self.client.post("/ips/import", data={"csrf_token": self.csrf(), "action": "preview"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_markdown_import_rejects_unrecognized_table(self):
+        _, secret = self.create_user("markdown-import-invalid")
+        self.assertEqual(self.login("markdown-import-invalid", secret).status_code, 302)
+        response = self.client.post("/ips/import", data={
+            "csrf_token": self.csrf(), "action": "preview",
+            "file": (BytesIO(b"| Host | Login |\n|---|---|\n| 192.0.2.55 | admin |"), "bad.md"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"Could not find a Markdown table", response.data)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM ips").fetchone()[0], 0)
+
     def test_ip_edit_form_omits_password_copy_controls(self):
         _, secret = self.create_user("edit-form-no-copy")
         self.assertEqual(self.login("edit-form-no-copy", secret).status_code, 302)
