@@ -416,8 +416,8 @@
       const data = card.dataset;
       mobileIpDetailsTitle.textContent = data.ipName || data.ipAddress || 'IP details';
       mobileIpDetailsList.replaceChildren();
-      addMobileIpDetail('IP address', data.ipAddress, true);
       addMobileIpDetail('Group', data.ipGroup, false);
+      addMobileIpDetail('IP address', data.ipAddress, true);
       addMobileIpDetail('Port', data.ipPort, true);
       addMobileIpDetail('Username', data.ipUsername, true);
       if (card.hasAttribute('data-ip-password')) addMobileIpDetail('Password', data.ipPassword, true);
