@@ -1,3 +1,11 @@
+## Version 3.0.14 release notes
+
+- Preserve list scroll position when editing or deleting IP records, groups, and users and then returning to the list.
+- Restore the same record's viewport position when it still exists; after deletion, keep the nearest row in view.
+- Preserve in-progress IP search text and selected group filter across edits/deletes, including the mobile IP list.
+- Add stable row markers and regression checks for scroll, filter, and return-position restoration.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.14.
+
 ## Version 3.0.13 release notes
 
 - Sort IP records alphabetically by record name (A–Z, case-insensitive) in the main directory on desktop and mobile.
