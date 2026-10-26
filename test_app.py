@@ -527,19 +527,24 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(archive.two_factor_mode(), "shared")
 
-        with archive.connect_db() as db:
-            db.execute(
-                "INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,two_factor_enrolled,enabled) "
-                "VALUES(?,?,?,?,?,?,?,1)",
-                ("shared-new-user", archive.password_hash("new-user-pass"), archive.now(), "admin", "", 0, 0),
-            )
+        # Create a real account through the admin UI while global shared mode is active.
+        response = self.client.post("/users", data={
+            "csrf_token": self.csrf(), "username": "shared-new-user",
+            "password": "new-user-pass-123", "role": "admin",
+        })
+        self.assertEqual(response.status_code, 302)
+        users_page = self.client.get("/users")
+        self.assertEqual(users_page.status_code, 200)
+        users_html = users_page.get_data(as_text=True)
+        self.assertIn("Shared Authenticator", users_html)
+        self.assertNotIn("Pending setup", users_html)
 
         # Existing and newly created accounts use the same shared code; neither enrolls a private secret.
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.delete_cookie("ip_management_2fa")
         for index, (username, password) in enumerate((
             ("shared-admin", "test-pass"),
-            ("shared-new-user", "new-user-pass"),
+            ("shared-new-user", "new-user-pass-123"),
         )):
             if index:
                 self.client.post("/logout", data={"csrf_token": self.csrf()})
@@ -571,6 +576,10 @@ class ArchiveTests(unittest.TestCase):
                 ).fetchone()
             self.assertNotEqual(user["totp_secret"], shared)
             self.assertEqual(user["two_factor_enrolled"], 0)
+            profile_response = self.client.get("/profile")
+            self.assertEqual(profile_response.status_code, 200)
+            self.assertIn(b"Shared Authenticator required", profile_response.data)
+            self.assertNotIn(b"Reconfigure two-factor authentication", profile_response.data)
 
     def test_superadmin_controls_per_user_two_factor_setting(self):
         admin_id, admin_secret = self.create_user("peruser-admin", role="superadmin")
