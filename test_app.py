@@ -735,13 +735,18 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('data-ip-password="mobile-secret"', page)
         self.assertIn('id="mobile-ip-details-modal"', page)
         self.assertIn('id="mobile-ip-details-list"', page)
+        self.assertLess(page.index(">Group</th>"), page.index(">IP address / host</th>"))
         script = (archive.BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
         self.assertIn("document.querySelectorAll('[data-mobile-ip-card]')", script)
+        self.assertLess(script.index("addMobileIpDetail('Group', data.ipGroup, false)"),
+                        script.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
         self.assertIn("event.target.closest('[data-copy-value]')", script)
         self.assertIn("mobileRows.forEach(row =>", script)
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".inventory-panel .table-scroll{display:none!important}", stylesheet)
         self.assertIn(".mobile-ip-list{display:grid;gap:8px", stylesheet)
+        self.assertIn(".mobile-ip-list{display:grid;gap:10px;padding:14px 12px 16px}", stylesheet)
+        self.assertIn("text-align:center", stylesheet[stylesheet.index("v3.0.7: center and polish mobile IP cards"):])
         self.assertIn("backdrop-filter:blur(8px)", stylesheet)
 
     def test_update_success_button_says_ok(self):
