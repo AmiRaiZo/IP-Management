@@ -1,3 +1,11 @@
+## Version 2.9.2 release notes
+
+- Fixed mobile horizontal overflow and the blank side area by locking the app shell and main content to the viewport width.
+- Made the navigation drawer responsive: it is hidden by default on phones, fits within the screen, and overlays the page instead of pushing or shrinking content.
+- Moved the hamburger control outside the drawer so it stays fixed in one position while the navigation opens and closes.
+- Preserved desktop sidebar collapse preferences; mobile navigation starts closed and can be toggled with the fixed button, with Escape and outside-tap dismissal.
+- Updated static asset cache versions so the responsive fix loads after deployment.
+
 ## Automatic public IPv4 listener recovery
 
 - The installer, in-place upgrader, and in-app updater now install a root-owned IP refresh helper.

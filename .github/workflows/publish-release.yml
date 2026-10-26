@@ -1,0 +1,52 @@
+name: Publish versioned GitHub release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    if: startsWith(github.event.head_commit.message, 'Release IP Management v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate version and prepare release notes
+        id: release-meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION is not semantic X.Y.Z." >&2; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          awk -v version="$VERSION" '
+            $0 == "## Version " version " release notes" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' README.md > release-notes.md
+          test -s release-notes.md || { echo "README.md has no release notes for $VERSION." >&2; exit 1; }
+
+      - name: Publish release for the exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release-meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "IP Management v$VERSION" \
+            --notes-file release-notes.md

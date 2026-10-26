@@ -2,21 +2,64 @@
   const sidebar = document.querySelector('.sidebar');
   const sidebarToggle = document.getElementById('sidebar-toggle');
   const sidebarPreferenceKey = 'ip-management-sidebar-collapsed';
+  const mobileSidebarQuery = window.matchMedia('(max-width: 720px)');
+  function setSidebarToggleState(expanded) {
+    if (!sidebarToggle) return;
+    sidebarToggle.setAttribute('aria-expanded', String(expanded));
+    sidebarToggle.setAttribute('title', expanded ? 'Hide sidebar' : 'Show sidebar');
+    sidebarToggle.setAttribute('aria-label', expanded ? 'Hide sidebar' : 'Show sidebar');
+    const label = sidebarToggle.querySelector('.sidebar-toggle-label');
+    if (label) label.textContent = expanded ? 'Hide sidebar' : 'Show sidebar';
+  }
   function setSidebarCollapsed(collapsed, persist = true) {
     if (!sidebar || !sidebarToggle) return;
     document.body.classList.toggle('sidebar-collapsed', collapsed);
-    sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
-    sidebarToggle.setAttribute('title', collapsed ? 'Show sidebar' : 'Hide sidebar');
-    sidebarToggle.setAttribute('aria-label', collapsed ? 'Show sidebar' : 'Hide sidebar');
-    const label = sidebarToggle.querySelector('.sidebar-toggle-label');
-    if (label) label.textContent = collapsed ? 'Show sidebar' : 'Hide sidebar';
-    if (persist) { try { localStorage.setItem(sidebarPreferenceKey, collapsed ? '1' : '0'); } catch (_) {} }
+    setSidebarToggleState(!collapsed);
+    if (persist) {
+      try { localStorage.setItem(sidebarPreferenceKey, collapsed ? '1' : '0'); } catch (_) {}
+    }
   }
-  if (sidebar && sidebarToggle) {
+  function applySidebarMode() {
+    if (!sidebar || !sidebarToggle) return;
+    document.body.classList.remove('mobile-sidebar-open');
+    if (mobileSidebarQuery.matches) {
+      // Phones always start with the drawer closed, independent of desktop preference.
+      document.body.classList.remove('sidebar-collapsed');
+      setSidebarToggleState(false);
+      return;
+    }
     let collapsed = false;
     try { collapsed = localStorage.getItem(sidebarPreferenceKey) === '1'; } catch (_) {}
     setSidebarCollapsed(collapsed, false);
-    sidebarToggle.addEventListener('click', () => setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')));
+  }
+  if (sidebar && sidebarToggle) {
+    applySidebarMode();
+    if (typeof mobileSidebarQuery.addEventListener === 'function') {
+      mobileSidebarQuery.addEventListener('change', applySidebarMode);
+    } else {
+      mobileSidebarQuery.addListener(applySidebarMode);
+    }
+    sidebarToggle.addEventListener('click', () => {
+      if (mobileSidebarQuery.matches) {
+        const expanded = document.body.classList.toggle('mobile-sidebar-open');
+        setSidebarToggleState(expanded);
+      } else {
+        setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+      }
+    });
+    function closeMobileSidebar() {
+      if (!mobileSidebarQuery.matches || !document.body.classList.contains('mobile-sidebar-open')) return;
+      document.body.classList.remove('mobile-sidebar-open');
+      setSidebarToggleState(false);
+    }
+    document.addEventListener('click', event => {
+      if (!document.body.classList.contains('mobile-sidebar-open')) return;
+      if (sidebar.contains(event.target) || sidebarToggle.contains(event.target)) return;
+      closeMobileSidebar();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closeMobileSidebar();
+    });
   }
   document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
     let dismissed = false;
