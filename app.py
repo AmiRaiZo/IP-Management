@@ -1686,6 +1686,7 @@ def configure_telegram_webhook(public_base=None):
         last_error = str((info.get("result") or {}).get("last_error_message") or "").strip()
         if last_error:
             app.logger.warning("Telegram reports a recent webhook delivery error: %s", last_error[:240])
+            return False, "Telegram reports a webhook delivery error: " + last_error[:180] + ". Check the public HTTPS endpoint and webhook secret-token handling."
     return True, ""
 
 
