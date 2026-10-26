@@ -31,9 +31,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("document.body.classList.toggle('mobile-sidebar-open')", self.js)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "2.9.5")
-        self.assertIn("style.css') }}?v=2.9.5", self.base)
-        self.assertIn("app.js') }}?v=2.9.5", self.base)
+        self.assertEqual(self.version, "2.9.6")
+        self.assertIn("style.css') }}?v=2.9.6", self.base)
+        self.assertIn("app.js') }}?v=2.9.6", self.base)
 
 
 if __name__ == "__main__":
