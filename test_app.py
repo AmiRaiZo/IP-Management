@@ -254,6 +254,31 @@ class ArchiveTests(unittest.TestCase):
             messages = [message for _, message in sess.get("_flashes", [])]
         self.assertTrue(any("Interactive Telegram commands are not active" in message for message in messages))
 
+    def test_telegram_settings_surfaces_webhook_delivery_errors(self):
+        _, secret = self.create_user("telegram-webhook-delivery-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-webhook-delivery-admin", secret).status_code, 302)
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
+        webhook_url = "https://archive.example.com/telegram/webhook"
+        responses = [
+            {"ok": True, "result": True},
+            {"ok": True, "result": {
+                "url": webhook_url,
+                "last_error_message": "Wrong response from the webhook: 403 Forbidden",
+            }},
+        ]
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \
+             patch.object(archive, "telegram_api", side_effect=responses), \
+             patch.object(archive, "send_telegram_security_alert", return_value=True):
+            response = self.client.post("/settings/telegram", data={
+                "csrf_token": self.csrf(), "action": "test",
+            })
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            messages = [message for _, message in sess.get("_flashes", [])]
+        self.assertTrue(any("403 Forbidden" in message for message in messages))
+
     def test_telegram_group_browser_replaces_screens_and_shows_ip_details_only_on_selection(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         encrypted = archive.vault.encrypt(b"Router-Secret-9").decode()
