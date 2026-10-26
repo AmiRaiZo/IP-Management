@@ -429,6 +429,25 @@ class ArchiveTests(unittest.TestCase):
         self.assertTrue(send.called)
         self.assertGreater(send.call_args.kwargs.get("delete_after", archive.TELEGRAM_MESSAGE_TTL_SECONDS), 0)
 
+    def test_telegram_security_alerts_are_scheduled_for_auto_deletion(self):
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, limit):
+                return b'{"ok":true,"result":{"message_id":901}}'
+
+        with patch.object(archive, "urlopen", return_value=FakeResponse()), \
+             patch.object(archive, "telegram_schedule_delete") as schedule:
+            self.assertTrue(archive.send_telegram_security_alert("Temporary security alert"))
+        schedule.assert_called_once_with("12345", 901, 120)
+
     def test_telegram_login_code_expired_code_is_rejected(self):
         user_id, _ = self.create_user("expired-telegram-code", role="superadmin")
         code = "123456"
