@@ -343,3 +343,15 @@ html,body{width:100%;max-width:100%;overflow-x:clip}
 @media(prefers-reduced-motion:reduce){
   .sidebar{transition:none!important}
 }
+
+/* v3.0.0: anchor narrow layouts to the visual viewport so the page cannot render in a half-width column. */
+@media(max-width:1050px){
+html,body{width:100vw!important;min-width:100vw!important;max-width:100vw!important;margin:0!important;overflow-x:hidden!important}
+.app-shell{width:100vw!important;min-width:100vw!important;max-width:100vw!important}
+body.sidebar-collapsed .main-column{width:100vw!important;min-width:0!important;max-width:100vw!important;margin:0!important}
+body.has-sidebar:not(.sidebar-collapsed) .main-column{width:calc(100vw - 215px)!important;min-width:0!important;max-width:calc(100vw - 215px)!important;margin-left:215px!important}
+}
+@media(max-width:720px){
+body.has-sidebar .main-column{width:100vw!important;min-width:0!important;max-width:100vw!important;margin:0!important}
+.container{width:calc(100vw - 20px)!important;max-width:calc(100vw - 20px)!important}
+}
