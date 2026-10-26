@@ -1222,7 +1222,7 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         updater = Path(__file__).with_name("station-archive-update").read_text(encoding="utf-8")
         self.assertIn('bash -n "$BOOTSTRAP_TMP/updater.new"', updater)
         self.assertIn('install -o root -g root -m 0750 "$BOOTSTRAP_TMP/updater.new" /usr/local/sbin/station-archive-update', updater)
-        self.assertIn("station-archive-update; do", updater)
+        self.assertIn("for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station-archive-update station_archive_refresh_ip.py", updater)
         bootstrap = updater.index('Refreshing the privileged updater from the verified release')
         deploy = updater.index("rsync -a --delete --exclude='.git/'")
         self.assertLess(bootstrap, deploy, "updater bootstrap must precede deployment")
