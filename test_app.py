@@ -526,40 +526,51 @@ class ArchiveTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(archive.two_factor_mode(), "shared")
-        self.client.post("/logout", data={"csrf_token": self.csrf()})
-        # This assertion verifies mandatory enrollment, not trusted-device behavior.
-        self.client.delete_cookie("ip_management_2fa")
-        self.client.get("/login")
-        response = self.client.post("/login", data={
-            "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("setup-2fa", response.location)
-        response = self.client.get("/setup-2fa")
-        self.assertEqual(response.status_code, 200)
-        response = self.client.post("/setup-2fa", data={
-            "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
-        })
-        self.assertEqual(response.status_code, 302)
+
         with archive.connect_db() as db:
-            enrolled = db.execute("SELECT two_factor_enrolled FROM users WHERE username='shared-admin'").fetchone()
-        self.assertEqual(enrolled["two_factor_enrolled"], 1)
+            db.execute(
+                "INSERT INTO users(username,password_hash,created_at,role,totp_secret,two_factor_enabled,two_factor_enrolled,enabled) "
+                "VALUES(?,?,?,?,?,?,?,1)",
+                ("shared-new-user", archive.password_hash("new-user-pass"), archive.now(), "admin", "", 0, 0),
+            )
+
+        # Existing and newly created accounts use the same shared code; neither enrolls a private secret.
         self.client.post("/logout", data={"csrf_token": self.csrf()})
-        # Remove the trusted-device cookie to verify the normal second-factor prompt.
         self.client.delete_cookie("ip_management_2fa")
-        self.client.get("/login")
-        response = self.client.post("/login", data={
-            "csrf_token": self.csrf(), "username": "shared-admin", "password": "test-pass",
-        })
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Authenticator code", response.data)
-        self.assertNotIn(b"or recovery code", response.data)
-        response = self.client.post("/login", data={
-            "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
-        })
-        self.assertEqual(response.status_code, 302)
-        with self.client.session_transaction() as sess:
-            self.assertTrue(sess.get("two_factor_verified"))
+        for index, (username, password) in enumerate((
+            ("shared-admin", "test-pass"),
+            ("shared-new-user", "new-user-pass"),
+        )):
+            if index:
+                self.client.post("/logout", data={"csrf_token": self.csrf()})
+                self.client.delete_cookie("ip_management_2fa")
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": username, "password": password,
+            })
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Authenticator code", response.data)
+            self.assertNotIn(b"Verify and enable 2FA", response.data)
+            self.assertNotIn(b"Scan the QR code", response.data)
+
+            # Account-level enrollment is unavailable when the global shared policy is active.
+            setup_response = self.client.get("/setup-2fa")
+            self.assertEqual(setup_response.status_code, 302)
+            self.assertIn("/login", setup_response.location)
+
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "code": pyotp.TOTP(shared).now(),
+            })
+            self.assertEqual(response.status_code, 302)
+            with self.client.session_transaction() as sess:
+                self.assertTrue(sess.get("two_factor_verified"))
+                self.assertEqual(sess.get("username"), username)
+            with archive.connect_db() as db:
+                user = db.execute(
+                    "SELECT totp_secret,two_factor_enrolled FROM users WHERE username=?", (username,)
+                ).fetchone()
+            self.assertNotEqual(user["totp_secret"], shared)
+            self.assertEqual(user["two_factor_enrolled"], 0)
 
     def test_superadmin_controls_per_user_two_factor_setting(self):
         admin_id, admin_secret = self.create_user("peruser-admin", role="superadmin")
