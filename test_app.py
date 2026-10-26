@@ -1290,12 +1290,32 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         if not bash:
             self.skipTest("bash is not installed on this platform")
         root = Path(__file__).resolve().parent
-        for name in ("install.sh", "station-archive-update"):
+        for name in ("install.sh", "station-archive-update", "upgrade_existing.sh"):
             with self.subTest(script=name):
                 script = root / name
                 self.assertTrue(script.is_file(), f"missing deployment script: {name}")
                 result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+
+    def test_in_place_upgrade_embedded_updater_has_valid_bash_syntax(self):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash is not installed on this platform")
+        root = Path(__file__).resolve().parent
+        upgrade_script = (root / "upgrade_existing.sh").read_text(encoding="utf-8")
+        start_marker = "cat > /usr/local/sbin/station-archive-update <<'UPDATER'\\n"
+        end_marker = "\\nUPDATER\\n"
+        self.assertEqual(upgrade_script.count(start_marker), 1, "expected one embedded updater heredoc")
+        start = upgrade_script.index(start_marker) + len(start_marker)
+        end = upgrade_script.index(end_marker, start)
+        generated_updater = upgrade_script[start:end] + "\\n"
+        self.assertIn('echo "PROGRESS:84:Validating Nginx configuration"', generated_updater)
+        self.assertIn('\\n\\techo "PROGRESS:84:Validating Nginx configuration"', generated_updater)
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "station-archive-update.generated"
+            script.write_text(generated_updater, encoding="utf-8")
+            result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, f"generated updater: {result.stderr}")
 
     def test_updater_bootstraps_before_deploy_and_never_overwrites_its_running_file(self):
         updater = Path(__file__).with_name("station-archive-update").read_text(encoding="utf-8")
