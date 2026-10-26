@@ -13,6 +13,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.ip_form = (ROOT / "templates" / "ip_form.html").read_text(encoding="utf-8")
         cls.profile = (ROOT / "templates" / "profile.html").read_text(encoding="utf-8")
         cls.settings = (ROOT / "templates" / "settings.html").read_text(encoding="utf-8")
+        cls.setup_2fa = (ROOT / "templates" / "setup_2fa.html").read_text(encoding="utf-8")
         cls.groups = (ROOT / "templates" / "groups.html").read_text(encoding="utf-8")
         cls.users = (ROOT / "templates" / "users.html").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
@@ -101,10 +102,17 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("Shared Authenticator required", self.profile)
         self.assertIn("two_factor_mode == 'per_user' and user.totp_secret", self.profile)
 
+    def test_mandatory_authenticator_setup_has_csrf_protected_logout(self):
+        self.assertIn("url_for('cancel_2fa_setup')", self.setup_2fa)
+        self.assertIn('name="csrf_token"', self.setup_2fa)
+        self.assertIn(">Log out</button>", self.setup_2fa)
+        self.assertIn("Two-factor authentication remains required.", self.setup_2fa)
+        self.assertNotIn("url_for('settings')", self.setup_2fa)
+
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.17")
-        self.assertIn("style.css') }}?v=3.0.17", self.base)
-        self.assertIn("app.js') }}?v=3.0.17", self.base)
+        self.assertEqual(self.version, "3.0.18")
+        self.assertIn("style.css') }}?v=3.0.18", self.base)
+        self.assertIn("app.js') }}?v=3.0.18", self.base)
 
 
 if __name__ == "__main__":
