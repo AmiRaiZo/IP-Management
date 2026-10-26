@@ -70,9 +70,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
                         self.js.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.10")
-        self.assertIn("style.css') }}?v=3.0.10", self.base)
-        self.assertIn("app.js') }}?v=3.0.10", self.base)
+        self.assertEqual(self.version, "3.0.11")
+        self.assertIn("style.css') }}?v=3.0.11", self.base)
+        self.assertIn("app.js') }}?v=3.0.11", self.base)
 
 
 if __name__ == "__main__":
