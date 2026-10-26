@@ -43,7 +43,7 @@ jobs:
             $0 == "## Version " version " release notes" { capture=1; next }
             capture && /^## / { exit }
             capture { print }
-          ' README.md > release-notes.md
+          ' RELEASE_NOTES.md > release-notes.md
           test -s release-notes.md || { echo "README.md has no release notes for $VERSION." >&2; exit 1; }
 
       - name: Publish release for the exact commit
@@ -61,3 +61,16 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "IP Management v$VERSION" \
             --notes-file release-notes.md
+
+      - name: Keep only the two newest published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t OLD_TAGS < <(gh release list --limit 100 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | reverse | .[2:] | .[].tagName')
+          for TAG in "${OLD_TAGS[@]}"; do
+            [[ -n "$TAG" ]] || continue
+            echo "Deleting old release and tag: $TAG"
+            gh release delete "$TAG" --yes --cleanup-tag
+          done
