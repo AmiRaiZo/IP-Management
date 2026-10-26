@@ -10,7 +10,7 @@
     <span class="role-tag">{{ user.role|replace('superadmin','Super administrator')|title }}</span>
     <div class="profile-detail"><span>Username</span><strong>{{ user.username }}</strong></div>
     <div class="profile-detail"><span>Account created</span><strong>{{ user.created_at[:10] if user.created_at else '—' }}</strong></div>
-    <div class="profile-detail"><span>Two-factor authentication</span><strong class="profile-security {{ 'security-enabled' if user.totp_secret else '' }}">{{ 'Enabled' if user.totp_secret else 'Not configured' }}</strong></div>
+    <div class="profile-detail"><span>Two-factor authentication</span><strong class="profile-security {{ 'security-enabled' if two_factor_mode == 'shared' or (two_factor_mode == 'per_user' and user.totp_secret) else '' }}">{{ 'Shared Authenticator required' if two_factor_mode == 'shared' else ('Disabled by policy' if two_factor_mode == 'off' else ('Enabled' if user.totp_secret else ('Required — setup pending' if user.two_factor_enabled else 'Not required'))) }}</strong></div>
     <form class="stack-form profile-avatar-form" method="post" action="{{ url_for('profile') }}" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label for="avatar">Profile picture</label>
@@ -18,7 +18,7 @@
       <p class="helper-note">Choose a PNG, JPG, or WEBP image. It will appear in the sidebar.</p>
       <button class="btn btn-secondary" type="submit">Save profile picture</button>
     </form>
-    {% if user.totp_secret %}<a class="btn btn-secondary profile-2fa" href="{{ url_for('setup_2fa') }}">Reconfigure two-factor authentication</a>{% endif %}
+    {% if two_factor_mode == 'per_user' and user.totp_secret %}<a class="btn btn-secondary profile-2fa" href="{{ url_for('setup_2fa') }}">Reconfigure two-factor authentication</a>{% endif %}
   </section>
   <section class="panel profile-password">
     <div class="panel-heading"><div><h2>Change password</h2><p>Use your current password to set a new one.</p></div></div>
