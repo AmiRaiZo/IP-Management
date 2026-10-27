@@ -867,7 +867,7 @@ class ArchiveTests(unittest.TestCase):
             mobile_records = []
             for card in mobile_cards:
                 name_match = re.search(r'class="mobile-ip-title"><strong>(.*?)</strong>', card, re.S)
-                group_match = re.search(r'<span class="[^"]*\\bgroup-tag\\b[^"]*">([^<]+)</span>', card)
+                group_match = re.search(r'<span class="[^"]*\bgroup-tag\b[^"]*">([^<]+)</span>', card)
                 if name_match and group_match:
                     mobile_records.append((name_match.group(1), group_match.group(1)))
             self.assertEqual(
@@ -880,7 +880,7 @@ class ArchiveTests(unittest.TestCase):
             desktop_records = []
             for row in desktop_rows:
                 name_match = re.search(r'<strong>(.*?)</strong>', row, re.S)
-                group_match = re.search(r'<span class="[^"]*\\bgroup-tag\\b[^"]*">(.*?)</span>', row, re.S)
+                group_match = re.search(r'<span class="[^"]*\bgroup-tag\b[^"]*">(.*?)</span>', row, re.S)
                 if name_match and group_match:
                     desktop_records.append((name_match.group(1), group_match.group(1)))
             self.assertEqual(
