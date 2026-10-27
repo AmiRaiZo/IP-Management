@@ -200,9 +200,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.0.28")
-        self.assertIn("style.css') }}?v=3.0.28", self.base)
-        self.assertIn("app.js') }}?v=3.0.28", self.base)
+        self.assertEqual(self.version, "3.0.29")
+        self.assertIn("style.css') }}?v=3.0.29", self.base)
+        self.assertIn("app.js') }}?v=3.0.29", self.base)
 
 
 if __name__ == "__main__":
