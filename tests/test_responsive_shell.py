@@ -59,7 +59,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
         self.assertNotIn("IP record #{{ ip.id }}", self.index)
-        self.assertIn('class="mobile-account-fields"', self.accounts)
+        self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
         self.assertIn("mobile-ip-edit", self.index)
         self.assertIn("url_for('ip_edit', ip_id=ip.id)", self.index)
         self.assertIn("url_for('ip_delete', ip_id=ip.id)", self.index)
