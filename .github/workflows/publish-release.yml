@@ -59,11 +59,18 @@ jobs:
           version, output = sys.argv[1:]
           root = pathlib.Path(".")
           package = pathlib.Path(output)
-          # Include runtime files and deployment helpers, but not tests, workflows or local state.
+          # Collect root files before opening the output archive; otherwise the archive could include itself.
           excluded = {"test_app.py", ".gitignore"}
+          root_files = [
+              path for path in root.iterdir()
+              if path.is_file() and path.resolve() != package.resolve()
+              and path.name not in excluded and not path.name.startswith(".")
+          ]
           with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
-              for path in sorted(root.iterdir()):
-                  if path.is_file() and path.name not in excluded and not path.name.startswith("."):
+              for path in sorted(root_files):
+                  if path.name == "VERSION":
+                      archive.writestr("VERSION", version + "\n")
+                  else:
                       archive.write(path, path.name)
               for folder in ("templates", "static"):
                   directory = root / folder
