@@ -373,7 +373,7 @@ def save_secure_setting(key, value):
         db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, encrypted))
 
 
-def send_telegram_security_alert(message):
+def send_telegram_security_alert(message, reply_markup=None):
     """Best-effort Telegram alert. Never include submitted passwords or TOTP codes."""
     token = secure_setting("telegram_bot_token_enc")
     chat_id = secure_setting("telegram_chat_id_enc")
@@ -381,6 +381,8 @@ def send_telegram_security_alert(message):
         return False
     try:
         payload = {"chat_id": chat_id, "text": str(message)[:3900], "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         req = Request(f"https://api.telegram.org/bot{token}/sendMessage", data=json.dumps(payload).encode(),
                       headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=5) as response:
@@ -819,14 +821,22 @@ def safe_telegram_username(value):
     return re.sub(r"[^A-Za-z0-9_.@-]", "?", str(value or "unknown"))[:80] or "(empty)"
 
 
-def send_login_success_alert(username, remote_ip):
-    return send_telegram_security_alert(
+def send_login_success_alert(username, remote_ip, telegram_code_used=False):
+    message = (
         "Successful sign-in to IP Management.\n"
         f"💻 Host: {telegram_hostname()}\n"
         f"👤 Username: {safe_telegram_username(username)}\n"
         f"🌐 IP address: {remote_ip}\n"
         f"⏰ Time (Iran): {jalali_datetime(now())}"
     )
+    reply_markup = None
+    if telegram_code_used:
+        message += "\n🔐 Method: Telegram one-time login code."
+        message += "\n✅ The code was consumed on successful login and cannot be reused."
+        reply_markup = {"inline_keyboard": [[
+            {"text": "✅ Confirm login", "callback_data": "ack_telegram_login"}
+        ]]}
+    return send_telegram_security_alert(message, reply_markup=reply_markup)
 
 
 def send_login_failure_alert(username, remote_ip, reason, password=""):
@@ -1109,7 +1119,10 @@ def login():
                 if telegram_code_ok:
                     security_event("two_factor_recovery", user["username"], "success", "Two-minute Telegram fallback code consumed")
                     audit("telegram_login_recovery_code_used")
-                send_login_success_alert(user["username"], client_ip())
+                if telegram_code_ok:
+                    send_login_success_alert(user["username"], client_ip(), telegram_code_used=True)
+                else:
+                    send_login_success_alert(user["username"], client_ip())
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 response = redirect(safe_login_target())
                 if totp_ok:
