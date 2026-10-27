@@ -1353,6 +1353,61 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b'id="close-update-success">OK</button>', response.data)
         self.assertNotIn(b"Back to IP addresses", response.data)
 
+    def test_group_colors_are_saved_and_rendered_as_explicit_inline_styles(self):
+        _, secret = self.create_user("group-colors")
+        self.assertEqual(self.login("group-colors", secret).status_code, 302)
+
+        response = self.client.post("/groups", data={
+            "csrf_token": self.csrf(), "name": "Colorized IPs", "color": "#e11d48",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            ip_group_id = db.execute("SELECT id FROM groups WHERE name='Colorized IPs'").fetchone()["id"]
+        response = self.client.post(f"/groups/{ip_group_id}/color", data={
+            "csrf_token": self.csrf(), "color": "#db2777",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            saved_ip_color = db.execute("SELECT color FROM groups WHERE id=?", (ip_group_id,)).fetchone()["color"]
+            db.execute(
+                "INSERT INTO ips(name,ip_address,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                ("Colored router", "192.0.2.211", ip_group_id, "group-colors", archive.now(), archive.now()),
+            )
+        self.assertEqual(saved_ip_color, "#db2777")
+
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertIn("color: #db2777 !important", page)
+        self.assertIn("background-color: #db277722 !important", page)
+        groups_page = self.client.get("/groups").get_data(as_text=True)
+        self.assertIn('style="--group-color: #db2777; color: #db2777 !important"', groups_page)
+
+        response = self.client.post("/account-groups", data={
+            "csrf_token": self.csrf(), "name": "Colorized Accounts", "color": "#16a34a",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            account_group_id = db.execute("SELECT id FROM account_groups WHERE name='Colorized Accounts'").fetchone()["id"]
+        response = self.client.post(f"/account-groups/{account_group_id}/color", data={
+            "csrf_token": self.csrf(), "color": "#0f766e",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            saved_account_color = db.execute(
+                "SELECT color FROM account_groups WHERE id=?", (account_group_id,)
+            ).fetchone()["color"]
+            db.execute(
+                "INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                ("Colored mailbox", "color-user", "color@example.test", "", account_group_id,
+                 "group-colors", archive.now(), archive.now()),
+            )
+        self.assertEqual(saved_account_color, "#0f766e")
+        account_page = self.client.get("/accounts").get_data(as_text=True)
+        self.assertIn("color: #0f766e !important", account_page)
+        self.assertIn("background-color: #0f766e22 !important", account_page)
+        self.assertIn('class="mobile-ip-card mobile-account-card"', account_page)
+        self.assertIn('class="mobile-data-row mobile-account-group-row"', account_page)
+
     def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
         _, secret = self.create_user("grouporder")
         self.assertEqual(self.login("grouporder", secret).status_code, 302)
