@@ -106,7 +106,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         compact_css = "".join(self.css.split())
         self.assertIn(".mobile-ip-list{display:grid!important;gap:11px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-ip-fields{display:grid;padding:3px14px6px}", compact_css)
-        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
+        self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
 
 
     def test_mobile_ip_and_account_fields_use_clean_icons_and_simple_table_headers(self):
@@ -114,7 +114,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         compact_css = "".join(self.css.split())
         self.assertIn(".mobile-ip-list{display:grid!important;gap:11px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-account-list{display:none}", compact_css)
-        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
+        self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-data-row{display:grid;grid-template-columns:27px92pxminmax(0,1fr)", compact_css)
         self.assertIn(".mobile-account-field{grid-template-columns:27px65pxminmax(0,1fr)}", compact_css)
         self.assertLess(self.index.index('class="mobile-data-label">Group</span>'),
@@ -179,14 +179,14 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("independent from IP groups", self.account_groups)
         self.assertIn("currentDirectoryReturnUrl()", self.js)
         self.assertIn("destination.pathname === '/accounts/new'", self.js)
-        self.assertIn("account_edit", self.js)
-        self.assertIn("account_delete", self.js)
+        self.assertIn("account_edit", self.app_source)
+        self.assertIn("account_delete", self.app_source)
         self.assertIn('class="mobile-account-list"', self.accounts)
         self.assertIn("mobile-account-edit", self.accounts)
         self.assertIn(">Edit account</a>", self.accounts)
         self.assertIn('class="mobile-account-actions"', self.accounts)
-        self.assertIn(".account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
-        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
+        self.assertIn(".account-inventory-panel.mobile-account-actions{display:flex!important", self.css)
+        self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
 
 
     def test_account_form_only_requires_name_and_mobile_cards_show_edit(self):
