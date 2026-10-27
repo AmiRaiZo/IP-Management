@@ -776,15 +776,20 @@ def telegram_menu(chat_id, message_id=None):
     markup = {"inline_keyboard": [
         [
             {"text": "➕ Add IP", "callback_data": "ip_add"},
-            {"text": "🔎 Search", "callback_data": "ip_search"},
+            {"text": "🔎 Search IPs", "callback_data": "ip_search"},
         ],
-        [{"text": "📂 Display all groups", "callback_data": "ip_groups"}],
+        [{"text": "📂 IP groups", "callback_data": "ip_groups"}],
+        [
+            {"text": "➕ Add account", "callback_data": "account_add"},
+            {"text": "🔎 Search accounts", "callback_data": "account_search"},
+        ],
+        [{"text": "🗂 Account groups", "callback_data": "account_groups"}],
         [{"text": "🔐 2FA code", "callback_data": "telegram_2fa_code"}],
     ]}
     if message_id:
-        telegram_replace_message(chat_id, message_id, "IP Management — choose an option:", markup)
+        telegram_replace_message(chat_id, message_id, "IP Management — choose a section:", markup)
     else:
-        telegram_send(chat_id, "IP Management — choose an option:", markup)
+        telegram_send(chat_id, "IP Management — choose a section:", markup)
 
 
 def handle_telegram_update(update):
@@ -800,7 +805,16 @@ def handle_telegram_update(update):
     if callback:
         telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
         action = callback.get("data", "")
-        if action == "menu":
+        if action == "ack_telegram_login":
+            alert_text = str(message.get("text", ""))
+            if "Telegram one-time login code" not in alert_text:
+                return
+            acknowledged = alert_text + "\\n\\n✅ Login acknowledged. The one-time code has already been consumed."
+            telegram_replace_message(
+                chat_id, message.get("message_id"), acknowledged,
+                {"inline_keyboard": [[{"text": "⌂ Menu", "callback_data": "menu"}]]},
+            )
+        elif action == "menu":
             telegram_set_state({})
             telegram_menu(chat_id, message.get("message_id"))
         elif action == "ip_groups":
