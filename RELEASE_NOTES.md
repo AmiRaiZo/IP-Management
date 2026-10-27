@@ -1,3 +1,13 @@
+## Version 3.0.19 release notes
+
+- Add a separate **Accounts** area for saving an account name, username, email, and password.
+- Add a dedicated account-group directory and account-only group assignments; IP records and IP groups remain in their existing tables and are not mixed with account records.
+- Add account creation, editing, deletion, search, group filtering, sorting by group/name, and scroll/filter preservation after edits or deletion.
+- Encrypt account passwords at rest with the application's Fernet key; leave an existing password unchanged when the edit form's password field is blank. Passwords are masked in the directory and can be copied by authorized account-vault users.
+- Restrict account records and account groups to super administrators independently from the IP record visibility and saved-IP-password permissions.
+- Add regression tests for account CRUD, password encryption, invalid email rejection, isolated groups, preserving existing passwords, safe return URLs, and access control.
+- Add separate responsive account directory and group pages, separate navigation, and cache-busted assets; publish v3.0.19.
+
 ## Version 3.0.18 release notes
 
 - Add a Log out action to the required first-login Authenticator setup page so users can safely leave instead of enrolling immediately.
