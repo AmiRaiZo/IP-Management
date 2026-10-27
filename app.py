@@ -1897,7 +1897,7 @@ def safe_accounts_return_url(value):
     return "/accounts" + ("?" + parsed.query if parsed.query else "")
 
 
-def validate_account(form, require_password=False):
+def validate_account(form):
     name = str(form.get("name", "")).strip()[:120]
     username = str(form.get("username", "")).strip()[:120]
     email = str(form.get("email", "")).strip()[:254]
