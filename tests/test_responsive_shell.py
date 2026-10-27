@@ -126,7 +126,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("name=\"username\"", self.account_form)
         self.assertIn("name=\"email\"", self.account_form)
         self.assertIn("name=\"password\"", self.account_form)
-        self.assertIn("account_groups", self.account_form)
+        self.assertIn("Only account groups appear here", self.account_form)
         self.assertIn("data-live-search", self.accounts)
         self.assertIn("data-group-filter", self.accounts)
         self.assertIn("data-scroll-record=\"account-{{ account.id }}\"", self.accounts)
