@@ -1804,14 +1804,14 @@ def visible_ips(user):
     with connect_db() as db:
         if user["role"] == "superadmin":
             return db.execute(
-                "SELECT ips.*, groups.name AS group_name FROM ips "
+                "SELECT ips.*, groups.name AS group_name, groups.color AS group_color FROM ips "
                 "LEFT JOIN groups ON groups.id=ips.group_id "
                 "ORDER BY COALESCE(NULLIF(TRIM(groups.name), ''), 'Default') COLLATE NOCASE, "
                 "COALESCE(NULLIF(TRIM(ips.name), ''), ips.ip_address) COLLATE NOCASE, "
                 "ips.ip_address COLLATE NOCASE LIMIT 1000"
             ).fetchall()
         rows = db.execute("""
-          SELECT DISTINCT ips.*, groups.name AS group_name FROM ips
+          SELECT DISTINCT ips.*, groups.name AS group_name, groups.color AS group_color FROM ips
           LEFT JOIN groups ON groups.id=ips.group_id
           LEFT JOIN user_group_access uga ON uga.group_id=ips.group_id AND uga.user_id=?
           LEFT JOIN user_ip_access uia ON uia.ip_id=ips.id AND uia.user_id=?
@@ -2368,6 +2368,23 @@ def groups():
     return render_template("groups.html", groups=rows)
 
 
+
+
+@app.post("/groups/<int:group_id>/color")
+@superadmin_required
+def group_color_update(group_id):
+    color = request.form.get("color", "").strip()[:7]
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+        flash("Choose a valid group color.", "error")
+    else:
+        with connect_db() as db:
+            cur = db.execute("UPDATE groups SET color=? WHERE id=?", (color, group_id))
+            if not cur.rowcount:
+                abort(404)
+        audit("group_color_updated", f"{group_id}:{color}")
+        flash("Group color updated.", "success")
+    return redirect(url_for("groups"))
+
 @app.post("/groups/<int:group_id>/move")
 @superadmin_required
 def group_move(group_id):
@@ -2460,7 +2477,7 @@ def accounts():
     with connect_db() as db:
         groups = db.execute("SELECT * FROM account_groups ORDER BY sort_order, id").fetchall()
         rows = db.execute("""
-            SELECT accounts.*, account_groups.name AS group_name
+            SELECT accounts.*, account_groups.name AS group_name, account_groups.color AS group_color
             FROM accounts LEFT JOIN account_groups ON account_groups.id=accounts.group_id
             ORDER BY COALESCE(NULLIF(TRIM(account_groups.name), ''), 'Default') COLLATE NOCASE,
                      accounts.name COLLATE NOCASE, accounts.id
@@ -2587,6 +2604,23 @@ def account_groups():
         ).fetchall()
     return render_template("account_groups.html", groups=rows)
 
+
+
+
+@app.post("/account-groups/<int:group_id>/color")
+@superadmin_required
+def account_group_color_update(group_id):
+    color = request.form.get("color", "").strip()[:7]
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+        flash("Choose a valid account group color.", "error")
+    else:
+        with connect_db() as db:
+            cur = db.execute("UPDATE account_groups SET color=? WHERE id=?", (color, group_id))
+            if not cur.rowcount:
+                abort(404)
+        audit("account_group_color_updated", f"{group_id}:{color}")
+        flash("Account group color updated.", "success")
+    return redirect(url_for("account_groups"))
 
 @app.post("/account-groups/<int:group_id>/move")
 @superadmin_required
