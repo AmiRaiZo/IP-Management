@@ -506,7 +506,7 @@ class ArchiveTests(unittest.TestCase):
         messages = [str(call.args[1]) for call in send.call_args_list]
         code_messages = [message for message in messages if "Login code for IP Management" in message]
         self.assertEqual(len(code_messages), 1)
-        self.assertRegex(code_messages[0], r"\\b\\d{6}\\b")
+        self.assertRegex(code_messages[0], r"\b\d{6}\b")
         self.assertIn("<code>", code_messages[0])
         self.assertNotIn("2 minutes", code_messages[0])
         with archive.connect_db() as db:
