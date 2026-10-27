@@ -1,3 +1,13 @@
+## Version 3.0.20 release notes
+
+- Add a standalone **Accounts** section to save a display name, username, email address, and password for websites or services.
+- Add separate **Account groups** with their own records, creation/reordering/deletion, and a dedicated Default group; IP groups and IP records stay unchanged and are never reused by this module.
+- Add account creation, editing, deletion, case-insensitive search, group filtering, responsive cards, and preservation of the active filter/scroll position after edits or deletes.
+- Encrypt account passwords at rest using the app's Fernet key. When editing, a blank password field keeps the current password; the directory masks passwords and provides a copy action.
+- Limit the account vault and its groups to super administrators independently of IP visibility and saved-IP-password permissions.
+- Add regression tests for account CRUD, at-rest encryption, email validation, access control, retention of existing passwords, safe return URLs, and separation from IP data and groups.
+- Refresh CSS/JS cache keys and publish v3.0.20.
+
 ## Version 3.0.19 release notes
 
 - Add a separate **Accounts** area for saving an account name, username, email, and password.
