@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - VERSION
+      - templates/base.html
   workflow_dispatch:
     inputs:
       version:
