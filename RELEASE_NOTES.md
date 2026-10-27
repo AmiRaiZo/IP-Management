@@ -1,3 +1,11 @@
+## Version 3.5.2 release notes
+
+- Render group text, borders, and tinted backgrounds with explicit color values directly in the HTML instead of relying solely on CSS variables or color-mix rendering.
+- Ensure all group-management views always provide a real fallback color; no empty group-color styles are emitted.
+- Rebuild account cards with the same header, avatar, field rows, group row, spacing, and action footer as IP cards.
+- Bump CSS and JavaScript cache keys to load the refreshed interface after installing the release.
+- Add a regression test for saving group colors and verifying those exact colors on group management, IP records, and account cards.
+
 ## Version 3.5.1 release notes
 
 - Removed the unnecessary internal “IP record #…” line from IP card headers.
