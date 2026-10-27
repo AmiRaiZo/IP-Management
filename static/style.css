@@ -664,3 +664,28 @@ html[data-theme="dark"] .mobile-account-actions{background:var(--surface-2)}
   .mobile-account-actions{padding:10px 12px 12px}
   .mobile-account-actions .btn{min-height:40px;padding:9px 12px}
 }
+
+
+/* v3.5.2: authoritative inline colors plus identical IP/account card layout. */
+.group-tag{color:var(--group-color,var(--group-palette-0));border-color:var(--group-color,var(--group-palette-0));background-color:var(--surface-2)}
+.group-name-text{color:var(--group-color,var(--group-palette-0))!important}
+.group-symbol{color:var(--group-color,var(--group-palette-0))!important;border-color:var(--group-color,var(--group-palette-0))}
+.account-inventory-panel .mobile-account-card.mobile-ip-card{display:block!important;min-width:0;padding:0!important;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--surface)}
+.mobile-account-heading.mobile-ip-record-heading{display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:8px;padding:13px 15px;background:linear-gradient(120deg,var(--surface-2),var(--surface));border-bottom:1px solid var(--border)}
+.mobile-account-heading .mobile-account-avatar{order:0;align-self:center}
+.mobile-account-title.mobile-ip-title{display:flex;align-items:center;flex:1;min-width:0;margin:0}
+.mobile-account-title strong{display:block;min-width:0;max-width:100%;overflow-wrap:anywhere;font-size:13px;line-height:1.45}
+.mobile-account-heading>.group-tag{flex:0 1 auto;max-width:42%;margin-left:auto;text-align:center}
+.mobile-account-fields.mobile-ip-fields{display:grid;min-width:0;padding:3px 14px 6px}
+.mobile-account-group-row .mobile-data-value .group-tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.account-inventory-panel .mobile-account-actions.mobile-ip-actions{display:flex!important;align-items:stretch;justify-content:flex-end;gap:8px;margin:0;padding:10px 12px 12px;border-top:1px solid var(--border);background:var(--surface-2);visibility:visible;opacity:1}
+.account-inventory-panel .mobile-account-actions.mobile-ip-actions .mobile-account-edit{display:inline-flex!important;flex:1 1 auto;min-width:0;min-height:40px;align-items:center;justify-content:center;white-space:normal}
+.account-inventory-panel .mobile-account-actions.mobile-ip-actions form{display:flex!important;flex:0 0 auto;margin:0}
+.account-inventory-panel .mobile-account-actions.mobile-ip-actions form button{min-height:40px}
+html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{background:linear-gradient(120deg,var(--surface-2),var(--surface))}
+@media(max-width:720px){
+ .mobile-account-heading.mobile-ip-record-heading{padding:12px 12px}
+ .mobile-account-fields.mobile-ip-fields{padding:2px 12px 4px}
+ .mobile-account-title strong{font-size:13px}
+ .account-inventory-panel .mobile-account-actions.mobile-ip-actions{padding:10px 12px 12px}
+}
