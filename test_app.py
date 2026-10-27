@@ -832,14 +832,15 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(row["group_id"], account_group["id"])
         self.assertNotEqual(row["password_enc"], "account-secret-value")
         self.assertEqual(archive.vault.decrypt(row["password_enc"].encode()).decode(), "account-secret-value")
-        self.assertEqual(db.execute("SELECT COUNT(*) FROM ips WHERE ip_address='amir@example.com'").fetchone()[0], 0)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM ips WHERE ip_address='amir@example.com'").fetchone()[0], 0)
 
         response = self.client.get("/accounts?q=amir")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Work Email", response.data)
         self.assertIn(b"amir@example.com", response.data)
         self.assertIn(b'data-copy-value="account-secret-value"', response.data)
-        self.assertIn(b"••••••••".decode("utf-8").encode("utf-8"), response.data)
+        self.assertIn("••••••••".encode("utf-8"), response.data)
 
         account_id = row["id"]
         original_password_enc = row["password_enc"]
