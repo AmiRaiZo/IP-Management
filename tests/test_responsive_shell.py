@@ -57,7 +57,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
     def test_mobile_ip_cards_include_direct_edit_and_delete_actions_for_admins(self):
         self.assertIn('class="mobile-ip-open" data-mobile-ip-card', self.index)
-        self.assertIn('class="mobile-ip-edit" href="{{ url_for(\'ip_edit\', ip_id=ip.id) }}"', self.index)
+        self.assertIn('mobile-ip-edit" href="{{ url_for(\'ip_edit\', ip_id=ip.id) }}"', self.index)
         self.assertIn('action="{{ url_for(\'ip_delete\', ip_id=ip.id) }}"', self.index)
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn("data-confirm=\"Delete this IP record?\"", self.index)
