@@ -186,7 +186,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(">Edit account</a>", self.accounts)
         self.assertIn("mobile-account-actions", self.accounts)
         self.assertIn(".account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
-        self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
+        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
 
 
     def test_account_form_only_requires_name_and_mobile_cards_show_edit(self):
