@@ -859,8 +859,8 @@ class ArchiveTests(unittest.TestCase):
             mobile_cards = re.findall(r'<article class="mobile-ip-card".*?</article>', page, re.S)
             mobile_records = []
             for card in mobile_cards:
-                name_match = re.search(r'data-ip-name="([^"]+)"', card)
-                group_match = re.search(r'data-ip-group="([^"]+)"', card)
+                name_match = re.search(r'class="mobile-ip-title"><strong>(.*?)</strong>', card, re.S)
+                group_match = re.search(r'<span class="group-tag">([^<]+)</span>', card)
                 if name_match and group_match:
                     mobile_records.append((name_match.group(1), group_match.group(1)))
             self.assertEqual(
