@@ -1881,6 +1881,236 @@ def group_delete(group_id):
     return redirect(url_for("groups"))
 
 
+
+def safe_accounts_return_url(value):
+    """Accept only a local URL for the separate Accounts directory."""
+    default = url_for("accounts")
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 2048 or "\\" in candidate:
+        return default
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return default
+    if parsed.scheme or parsed.netloc or parsed.path != "/accounts" or candidate.startswith("//"):
+        return default
+    return "/accounts" + ("?" + parsed.query if parsed.query else "")
+
+
+def validate_account(form, require_password=False):
+    name = str(form.get("name", "")).strip()[:120]
+    username = str(form.get("username", "")).strip()[:120]
+    email = str(form.get("email", "")).strip()[:254]
+    password = form.get("password", "")
+    group_raw = str(form.get("group_id", "")).strip()
+
+    if not name:
+        return None, "Account name is required."
+    if not username:
+        return None, "Username is required."
+    if not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+        return None, "Enter a valid email address."
+    if require_password and not password:
+        return None, "Password is required for a new account."
+    if len(password) > 2000:
+        return None, "Password is too long."
+
+    try:
+        group_id = int(group_raw) if group_raw else None
+    except ValueError:
+        return None, "Select a valid account group."
+    with connect_db() as db:
+        if group_id is None:
+            default_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()
+            group_id = default_group["id"] if default_group else None
+        if group_id and not db.execute("SELECT id FROM account_groups WHERE id=?", (group_id,)).fetchone():
+            return None, "Selected account group does not exist."
+
+    return {
+        "name": name,
+        "username": username,
+        "email": email,
+        "password_enc": vault.encrypt(password.encode("utf-8")).decode("ascii") if password else None,
+        "group_id": group_id,
+    }, None
+
+
+@app.get("/accounts")
+@superadmin_required
+def accounts():
+    term = request.args.get("q", "").strip()[:100]
+    group_filter = request.args.get("group", "").strip()
+    with connect_db() as db:
+        groups = db.execute("SELECT * FROM account_groups ORDER BY sort_order, id").fetchall()
+        rows = db.execute("""
+            SELECT accounts.*, account_groups.name AS group_name
+            FROM accounts LEFT JOIN account_groups ON account_groups.id=accounts.group_id
+            ORDER BY COALESCE(NULLIF(TRIM(account_groups.name), ''), 'Default') COLLATE NOCASE,
+                     accounts.name COLLATE NOCASE, accounts.id
+        """).fetchall()
+    rows = list(rows)
+    if group_filter == "ungrouped":
+        rows = [row for row in rows if row["group_id"] is None]
+    elif group_filter.isdigit():
+        rows = [row for row in rows if row["group_id"] == int(group_filter)]
+    if term:
+        needle = term.casefold()
+        rows = [row for row in rows if any(
+            needle in str(row[key] or "").casefold()
+            for key in ("name", "username", "email", "group_name")
+        )]
+    prepared = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["password_plain"] = vault.decrypt((row["password_enc"] or "").encode("ascii")).decode("utf-8") if row["password_enc"] else ""
+        except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+            item["password_plain"] = ""
+        prepared.append(item)
+    return render_template("accounts.html", accounts=prepared, groups=groups, q=term, group_filter=group_filter)
+
+
+@app.route("/accounts/new", methods=["GET", "POST"])
+@superadmin_required
+def account_new():
+    return_to = safe_accounts_return_url(request.form.get("return_to") or request.args.get("return_to"))
+    with connect_db() as db:
+        groups = db.execute("SELECT * FROM account_groups ORDER BY sort_order, id").fetchall()
+        default_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()
+    if request.method == "POST":
+        data, error = validate_account(request.form, require_password=True)
+        if error:
+            flash(error, "error")
+        else:
+            with connect_db() as db:
+                cursor = db.execute(
+                    "INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (data["name"], data["username"], data["email"], data["password_enc"], data["group_id"],
+                     request.user["username"], now(), now()),
+                )
+                account_id = cursor.lastrowid
+            audit("account_created", f"id={account_id}; name={data['name']}")
+            flash("Account saved.", "success")
+            return redirect(return_to)
+    return render_template("account_form.html", account=None, groups=groups,
+                           default_group_id=default_group["id"] if default_group else None,
+                           return_to=return_to)
+
+
+@app.route("/accounts/<int:account_id>/edit", methods=["GET", "POST"])
+@superadmin_required
+def account_edit(account_id):
+    return_to = safe_accounts_return_url(request.form.get("return_to") or request.args.get("return_to"))
+    with connect_db() as db:
+        account = db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+        groups = db.execute("SELECT * FROM account_groups ORDER BY sort_order, id").fetchall()
+    if not account:
+        abort(404)
+    if request.method == "POST":
+        data, error = validate_account(request.form, require_password=False)
+        if error:
+            flash(error, "error")
+        else:
+            encrypted_password = data["password_enc"] if data["password_enc"] is not None else account["password_enc"]
+            with connect_db() as db:
+                db.execute(
+                    "UPDATE accounts SET name=?,username=?,email=?,password_enc=?,group_id=?,updated_at=? WHERE id=?",
+                    (data["name"], data["username"], data["email"], encrypted_password,
+                     data["group_id"], now(), account_id),
+                )
+            audit("account_updated", f"id={account_id}; name={data['name']}")
+            flash("Account updated.", "success")
+            return redirect(return_to)
+    return render_template("account_form.html", account=account, groups=groups,
+                           default_group_id=None, return_to=return_to)
+
+
+@app.post("/accounts/<int:account_id>/delete")
+@superadmin_required
+def account_delete(account_id):
+    return_to = safe_accounts_return_url(request.form.get("return_to"))
+    with connect_db() as db:
+        row = db.execute("SELECT name FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if row:
+            db.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+    if row:
+        audit("account_deleted", f"id={account_id}; name={row['name']}")
+        flash("Account deleted.", "success")
+    return redirect(return_to)
+
+
+@app.route("/account-groups", methods=["GET", "POST"])
+@superadmin_required
+def account_groups():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()[:100]
+        description = request.form.get("description", "").strip()[:500]
+        if not name:
+            flash("Account group name is required.", "error")
+        else:
+            try:
+                with connect_db() as db:
+                    next_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM account_groups").fetchone()[0]
+                    db.execute(
+                        "INSERT INTO account_groups(name,description,created_at,sort_order) VALUES(?,?,?,?)",
+                        (name, description, now(), next_order),
+                    )
+                audit("account_group_created", name)
+                flash("Account group created.", "success")
+                return redirect(url_for("account_groups"))
+            except sqlite3.IntegrityError:
+                flash("An account group with that name already exists.", "error")
+    with connect_db() as db:
+        rows = db.execute(
+            "SELECT account_groups.*, COUNT(accounts.id) AS account_count "
+            "FROM account_groups LEFT JOIN accounts ON accounts.group_id=account_groups.id "
+            "GROUP BY account_groups.id ORDER BY account_groups.sort_order, account_groups.id"
+        ).fetchall()
+    return render_template("account_groups.html", groups=rows)
+
+
+@app.post("/account-groups/<int:group_id>/move")
+@superadmin_required
+def account_group_move(group_id):
+    direction = request.form.get("direction", "")
+    if direction not in ("up", "down"):
+        abort(400)
+    moved = False
+    with connect_db() as db:
+        ordered = db.execute("SELECT id,sort_order FROM account_groups ORDER BY sort_order,id").fetchall()
+        ids = [row["id"] for row in ordered]
+        if group_id not in ids:
+            abort(404)
+        current = ids.index(group_id)
+        target = current - 1 if direction == "up" else current + 1
+        if 0 <= target < len(ids):
+            first, second = ordered[current], ordered[target]
+            db.execute("UPDATE account_groups SET sort_order=? WHERE id=?", (second["sort_order"], first["id"]))
+            db.execute("UPDATE account_groups SET sort_order=? WHERE id=?", (first["sort_order"], second["id"]))
+            moved = True
+    if moved:
+        audit("account_group_reordered", f"id={group_id}; direction={direction}")
+    return redirect(url_for("account_groups"))
+
+
+@app.post("/account-groups/<int:group_id>/delete")
+@superadmin_required
+def account_group_delete(group_id):
+    with connect_db() as db:
+        group = db.execute("SELECT id,name FROM account_groups WHERE id=?", (group_id,)).fetchone()
+        if not group:
+            abort(404)
+        if group["name"] == "Default":
+            flash("The Default account group cannot be deleted.", "error")
+            return redirect(url_for("account_groups"))
+        default_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()
+        db.execute("UPDATE accounts SET group_id=? WHERE group_id=?", (default_group["id"], group_id))
+        db.execute("DELETE FROM account_groups WHERE id=?", (group_id,))
+    audit("account_group_deleted", f"id={group_id}; name={group['name']}")
+    flash("Account group deleted. Its accounts were moved to Default.", "success")
+    return redirect(url_for("account_groups"))
+
+
 @app.route("/users", methods=["GET", "POST"])
 @superadmin_required
 def users():
