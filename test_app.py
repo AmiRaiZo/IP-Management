@@ -251,7 +251,7 @@ class ArchiveTests(unittest.TestCase):
         with patch.object(archive, "telegram_send") as send:
             archive.telegram_menu("12345")
         markup = send.call_args.args[2]
-        self.assertEqual(markup["inline_keyboard"][1][0]["text"], "📂 Display all groups")
+        self.assertEqual(markup["inline_keyboard"][1][0]["text"], "📂 IP groups")
         self.assertEqual(markup["inline_keyboard"][1][0]["callback_data"], "ip_groups")
 
     def test_telegram_menu_commands_accept_plain_and_bot_qualified_commands(self):
