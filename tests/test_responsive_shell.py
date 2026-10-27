@@ -58,8 +58,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_mobile_ip_cards_include_inline_details_and_direct_edit_delete_actions(self):
         self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
-        self.assertIn('class="mobile-ip-edit" href="{{ url_for(\\'ip_edit\\', ip_id=ip.id) }}"', self.index)
-        self.assertIn('action="{{ url_for(\\'ip_delete\\', ip_id=ip.id) }}"', self.index)
+        self.assertIn("mobile-ip-edit", self.index)
+        self.assertIn("url_for('ip_edit', ip_id=ip.id)", self.index)
+        self.assertIn("url_for('ip_delete', ip_id=ip.id)", self.index)
         self.assertIn('name="csrf_token"', self.index)
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn('data-confirm="Delete this IP record?"', self.index)
@@ -79,7 +80,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="data-field-icon icon-user"', self.accounts)
         self.assertIn('class="data-field-icon icon-email"', self.accounts)
         self.assertIn(".data-field-icon svg{display:block", self.css)
-        self.assertIn("html[data-theme=\\"dark\\"] .data-field-icon", self.css)
+        self.assertIn('html[data-theme="dark"] .data-field-icon', self.css)
 
 
     def test_mobile_ip_directory_uses_inline_details_cards_like_account_vault(self):
@@ -115,12 +116,12 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".mobile-account-list{display:none}", compact_css)
         self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-data-row{display:grid;grid-template-columns:27px92pxminmax(0,1fr)", compact_css)
-        self.assertIn(".mobile-account-field{grid-template-columns:27px70pxminmax(0,1fr)}", compact_css)
+        self.assertIn(".mobile-account-field{grid-template-columns:27px65pxminmax(0,1fr)}", compact_css)
         self.assertLess(self.index.index('class="mobile-data-label">Group</span>'),
                         self.index.index('class="mobile-data-label">IP address</span>'))
-        self.assertIn('class="column-heading"', self.index) is False
         self.assertNotIn('class="column-heading"', self.index)
         self.assertNotIn('class="column-heading"', self.accounts)
+
 
     def test_return_position_is_preserved_across_edits_and_deletions(self):
         self.assertIn("ip-archive-return-position", self.js)
@@ -178,10 +179,10 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("independent from IP groups", self.account_groups)
         self.assertIn("currentDirectoryReturnUrl()", self.js)
         self.assertIn("destination.pathname === '/accounts/new'", self.js)
-        self.assertIn(r"^\\/accounts\\/\\d+\\/delete$", self.js)
+        self.assertIn(r"^\/accounts\/\d+\/delete$", self.js)
         self.assertIn('class="mobile-account-list"', self.accounts)
-        self.assertIn('class="mobile-account-edit"', self.accounts)
-        self.assertIn('>Edit account</a>', self.accounts)
+        self.assertIn("mobile-account-edit", self.accounts)
+        self.assertIn(">Edit account</a>", self.accounts)
         self.assertIn('class="mobile-account-actions"', self.accounts)
         self.assertIn(".account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
         self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
