@@ -1971,10 +1971,10 @@ class ArchiveTests(unittest.TestCase):
         response.__enter__.return_value = response
         response.geturl.return_value = "https://github.com/AmiRaiZo/IP-Management/releases/tag/v3.0.27"
         commit_sha = "a" * 40
-        refs = MagicMock(returncode=0, stdout=f"{commit_sha}\\trefs/tags/v3.0.27\\n", stderr="")
-        with patch.object(archive, "urlopen", side_effect=[HTTPError("https://api.github.com", 403, "rate limit exceeded", {}, None), response]), \\
-             patch.object(archive.subprocess, "run", return_value=refs) as git_run:
-            release = archive.latest_release()
+        refs = MagicMock(returncode=0, stdout=f"{commit_sha}\trefs/tags/v3.0.27\n", stderr="")
+        with patch.object(archive, "urlopen", side_effect=[HTTPError("https://api.github.com", 403, "rate limit exceeded", {}, None), response]) as mocked_urlopen:
+            with patch.object(archive.subprocess, "run", return_value=refs) as git_run:
+                release = archive.latest_release()
 
         self.assertEqual(release, {"version": "3.0.27", "sha": commit_sha, "tag": "v3.0.27"})
         self.assertEqual(git_run.call_args.args[0][1], "ls-remote")
