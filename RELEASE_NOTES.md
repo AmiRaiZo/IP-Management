@@ -1,3 +1,11 @@
+## Version 3.0.26 release notes
+
+- Complete the mobile IP directory with inline record details and visible edit/delete actions for authorized users, matching the Account Vault experience.
+- Add Telegram Account Vault controls for browsing accounts and creating account records with roles.
+- Consume Telegram one-time login codes immediately after successful use and notify the configured bot chat with the login identity and confirmation or suspicious-login actions.
+- Keep desktop table headings simple and refine mobile record-field icons and spacing.
+- Correct responsive regression checks to match the account card markup and actual mobile field grid sizing; refresh static asset cache keys.
+
 ## Version 3.0.25 release notes
 
 - Complete the Telegram Account Vault workflow: browse account groups, search accounts, inspect credentials, add accounts, edit records, and confirm deletions. Account passwords remain encrypted in the database and conversation state.
