@@ -5,7 +5,7 @@
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}IP Archive{% endblock %}</title>
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3.0.27">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3.0.28">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -15,19 +15,19 @@
   <aside class="sidebar">
     <a class="brand" href="{{ url_for('index') }}"><span class="brand-symbol">IP</span><span>IP Archive<small>NETWORK DIRECTORY</small></span></a>
     <nav class="nav-links" id="primary-navigation">
-      <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon">▦</span>IP addresses</a>
-      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon">▤</span>IP groups</a>{% endif %}
+      <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon nav-icon-ip" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>IP addresses</a>
+      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-groups" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M3.5 10h17"/></svg></span>IP groups</a>{% endif %}
     </nav>
     {% if current_role == 'superadmin' %}
     <p class="nav-label nav-label-spaced">ACCOUNT VAULT</p><nav class="nav-links">
-      <a href="{{ url_for('accounts') }}" class="{% if request.endpoint in ['accounts','account_new','account_edit','account_delete'] %}active{% endif %}"><span class="nav-icon">▣</span>Accounts</a>
-      <a href="{{ url_for('account_groups') }}" class="{% if request.endpoint in ['account_groups','account_group_move','account_group_delete'] %}active{% endif %}"><span class="nav-icon">▤</span>Account groups</a>
+      <a href="{{ url_for('accounts') }}" class="{% if request.endpoint in ['accounts','account_new','account_edit','account_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-accounts" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="9" r="2.3"/><path d="M7.8 16.5c.8-2 2.2-3 4.2-3s3.4 1 4.2 3"/></svg></span>Accounts</a>
+      <a href="{{ url_for('account_groups') }}" class="{% if request.endpoint in ['account_groups','account_group_move','account_group_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-account-groups" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="13" rx="2"/><path d="M8 8h4M8 11h4"/><path d="M8 19h11a2 2 0 0 0 2-2V8"/></svg></span>Account groups</a>
     </nav>
     <p class="nav-label nav-label-spaced">ADMINISTRATION</p><nav class="nav-links">
-      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit','user_delete'] %}active{% endif %}"><span class="nav-icon">♙</span>Users & permissions</a>
-      <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}"><span class="nav-icon">⚙</span>Settings</a>
-      <a href="{{ url_for('security_center') }}" class="{% if request.endpoint in ['security_center','add_ip_access_rule','delete_ip_access_rule'] %}active{% endif %}"><span class="nav-icon">⛨</span>Security & login logs</a>
-      <a href="{{ url_for('update_page') }}" class="{% if request.endpoint in ['update_page','update_app'] %}active{% endif %}"><span class="nav-icon">↻</span>Updates</a>
+      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit','user_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-users" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19v-1.2A4.8 4.8 0 0 1 8.3 13h1.4a4.8 4.8 0 0 1 4.8 4.8V19"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17 13.5a4.5 4.5 0 0 1 3.5 4.4V19"/></svg></span>Users & permissions</a>
+      <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}"><span class="nav-icon nav-icon-settings" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span>Settings</a>
+      <a href="{{ url_for('security_center') }}" class="{% if request.endpoint in ['security_center','add_ip_access_rule','delete_ip_access_rule'] %}active{% endif %}"><span class="nav-icon nav-icon-security" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6z"/><path d="m8.5 12 2.3 2.3 4.8-5"/></svg></span>Security & login logs</a>
+      <a href="{{ url_for('update_page') }}" class="{% if request.endpoint in ['update_page','update_app'] %}active{% endif %}"><span class="nav-icon nav-icon-updates" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M4.5 10a7.5 7.5 0 0 1 13-3L20 12M4 17v-5h5"/><path d="M19.5 14a7.5 7.5 0 0 1-13 3L4 12"/></svg></span>Updates</a>
     </nav>{% endif %}
     <div class="sidebar-bottom"><a class="profile-account" href="{{ url_for('profile') }}" aria-label="Open my profile"><span class="profile-dot">{% if current_avatar %}<img src="{{ url_for('media_file', filename=current_avatar) }}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span hidden>{{ (current_user|string)[:1]|upper }}</span>{% else %}{{ (current_user|string)[:1]|upper }}{% endif %}</span><span class="profile-info"><strong>{{ current_user }}</strong><span>{{ current_role|replace('superadmin','Superadmin')|title }}</span></span></a><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-button" type="submit" title="Sign out" aria-label="Sign out">↗</button></form></div>
   </aside>
@@ -39,5 +39,5 @@
     </main>
   </div>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=3.0.27" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=3.0.28" defer></script>
 </body></html>
