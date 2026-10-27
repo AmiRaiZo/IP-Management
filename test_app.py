@@ -840,6 +840,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"Work Email", response.data)
         self.assertIn(b"amir@example.com", response.data)
         self.assertIn(b'data-copy-value="account-secret-value"', response.data)
+        self.assertIn(b">Edit account</a>", response.data)
         self.assertIn("••••••••".encode("utf-8"), response.data)
 
         account_id = row["id"]
