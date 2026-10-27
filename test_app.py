@@ -1108,7 +1108,7 @@ class ArchiveTests(unittest.TestCase):
         directory = self.client.get("/")
         self.assertEqual(directory.status_code, 200)
         self.assertNotIn(b"hidden-device-secret", directory.data)
-        self.assertNotIn(b"<th>Password</th>", directory.data)
+        self.assertNotIn(b"<span>Password</span></span></th>", directory.data)
         edit = self.client.get(f"/ips/{ip_id}/edit")
         self.assertEqual(edit.status_code, 403)
         self.assertNotIn(b"hidden-device-secret", edit.data)
@@ -1139,7 +1139,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.login("password-reader", user_secret).status_code, 302)
         directory = self.client.get("/")
         self.assertEqual(directory.status_code, 200)
-        self.assertIn(b"<th>Password</th>", directory.data)
+        self.assertIn(b"<span>Password</span></span></th>", directory.data)
         self.assertIn(b"allowed-secret", directory.data)
         self.assertIn(b'data-copy-value="allowed-secret"', directory.data)
 
