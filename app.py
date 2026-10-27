@@ -1908,7 +1908,7 @@ def validate_account(form, require_password=False):
         return None, "Account name is required."
     if not username:
         return None, "Username is required."
-    if not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         return None, "Enter a valid email address."
     if require_password and not password:
         return None, "Password is required for a new account."
