@@ -1,3 +1,13 @@
+## Version 3.0.24 release notes
+
+- Finalize the independent Account Vault module with its own account records, groups, forms, and CRUD operations, isolated from the IP and IP-group tables.
+- Require only the account name; username, email, and password remain optional, while a supplied email is format-validated and blank passwords on edit preserve the existing encrypted password.
+- Remove the redundant account form explanation about IP groups.
+- Keep the account Edit and Delete actions clearly visible on mobile, and show IP Edit/Delete actions on mobile IP cards for super administrators.
+- Use consistent, crisp SVG column icons for IP and account tables with matching sizing, alignment, borders, and light/dark theme support.
+- Correct responsive regression assertions to match the actual mobile action markup and verify only the intended account field is required.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.24.
+
 ## Version 3.0.23 release notes
 
 - Keep the **Accounts** module independent from IP records and IP groups, with its own account table, groups, directory, and create/edit/delete flows.
