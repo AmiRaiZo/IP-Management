@@ -732,12 +732,16 @@ class ArchiveTests(unittest.TestCase):
         ]
 
         def assert_directory_order(page, expected):
-            start = page.index('data-mobile-ip-list')
-            end = page.index('<div class="table-scroll">', start)
-            mobile_list = page[start:end]
-            mobile_records = re.findall(
-                r'data-ip-name="([^"]+)"[^>]*data-ip-group="([^"]+)"', mobile_list
-            )
+            # Mobile cards retain name and group metadata on the outer card wrapper.
+            # Parse whole article blocks instead of relying on attribute order inside
+            # the nested detail button, which also carries modal-specific fields.
+            mobile_cards = re.findall(r'<article class="mobile-ip-card".*?</article>', page, re.S)
+            mobile_records = []
+            for card in mobile_cards:
+                name_match = re.search(r'data-ip-name="([^"]+)"', card)
+                group_match = re.search(r'data-ip-group="([^"]+)"', card)
+                if name_match and group_match:
+                    mobile_records.append((name_match.group(1), group_match.group(1)))
             self.assertEqual(
                 mobile_records, expected,
                 "Mobile IP directory must sort group names A-Z, then IP names A-Z within each group",
