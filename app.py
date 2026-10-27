@@ -3293,8 +3293,44 @@ def latest_release():
     base = f"https://api.github.com/repos/{match.group(1)}/{match.group(2)}"
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "IP-Archive-Updater"}
     req = Request(f"{base}/releases/latest", headers=headers)
-    with urlopen(req, timeout=8) as response:
-        payload = json.loads(response.read(256_000).decode("utf-8"))
+    try:
+        with urlopen(req, timeout=8) as response:
+            payload = json.loads(response.read(256_000).decode("utf-8"))
+    except HTTPError as exc:
+        # GitHub's unauthenticated REST API has a small shared-IP rate limit.
+        # If it is exhausted, use the public release page and git's public refs
+        # instead; neither requires a personal access token.
+        if exc.code not in (403, 429):
+            raise
+        release_page = Request(
+            f"https://github.com/{match.group(1)}/{match.group(2)}/releases/latest",
+            headers={"User-Agent": "IP-Archive-Updater"},
+        )
+        with urlopen(release_page, timeout=12) as response:
+            final_url = response.geturl()
+        release_match = re.search(r"/releases/tag/([^/?#]+)", final_url)
+        if not release_match:
+            raise ValueError("GitHub API rate limit was reached and the latest release page did not identify a release tag.") from exc
+        fallback_tag = release_match.group(1)
+        if not re.fullmatch(r"v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?", fallback_tag):
+            raise ValueError("GitHub API rate limit was reached and the latest release tag is invalid.") from exc
+        version = fallback_tag.lstrip("v")
+        refs = subprocess.run(
+            ["git", "ls-remote", f"https://github.com/{match.group(1)}/{match.group(2)}.git",
+             f"refs/tags/{fallback_tag}", f"refs/tags/{fallback_tag}^{{}}"],
+            capture_output=True, text=True, timeout=12, check=False,
+        )
+        if refs.returncode != 0:
+            raise ValueError("GitHub API rate limit was reached; could not resolve the latest release commit using public Git refs.") from exc
+        resolved = {}
+        for line in refs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and re.fullmatch(r"[0-9a-f]{40}", fields[0]):
+                resolved[fields[1]] = fields[0]
+        sha = resolved.get(f"refs/tags/{fallback_tag}^{{}}", resolved.get(f"refs/tags/{fallback_tag}", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("GitHub API rate limit was reached; the latest release commit could not be verified.") from exc
+        return {"version": version, "sha": sha, "tag": fallback_tag}
     tag = str(payload.get("tag_name", "")).strip()
     version = tag.lstrip("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
