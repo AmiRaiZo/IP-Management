@@ -29,8 +29,11 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM user_ip_access")
             db.execute("DELETE FROM user_group_access")
             db.execute("DELETE FROM ips")
+            db.execute("DELETE FROM accounts")
+            db.execute("DELETE FROM account_groups")
             db.execute("DELETE FROM groups")
             db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (archive.now(),))
+            db.execute("INSERT INTO account_groups(name,description,created_at,sort_order) VALUES('Default','Default group for saved accounts',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
             db.execute("DELETE FROM user_recovery_codes")
             db.execute("DELETE FROM telegram_login_codes")
@@ -784,6 +787,123 @@ class ArchiveTests(unittest.TestCase):
             if group_id == default_group_id
         ]
         assert_directory_order(limited_directory.get_data(as_text=True), limited_expected)
+
+    def test_account_vault_crud_uses_separate_groups_and_encrypted_passwords(self):
+        _, secret = self.create_user("account-vault-root")
+        self.assertEqual(self.login("account-vault-root", secret).status_code, 302)
+
+        response = self.client.get("/accounts")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Accounts", response.data)
+        response = self.client.get("/account-groups")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Account groups", response.data)
+
+        # A group with the same name may exist independently in both subsystems.
+        response = self.client.post("/groups", data={
+            "csrf_token": self.csrf(), "name": "Mail", "description": "IP-side group",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            ip_group = db.execute("SELECT id FROM groups WHERE name='Mail'").fetchone()
+        response = self.client.post("/account-groups", data={
+            "csrf_token": self.csrf(), "name": "Mail", "description": "Account-only group",
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            account_group = db.execute("SELECT id FROM account_groups WHERE name='Mail'").fetchone()
+            self.assertIsNotNone(db.execute("SELECT id FROM groups WHERE name='Mail'").fetchone())
+            self.assertNotEqual(
+                db.execute("SELECT description FROM groups WHERE id=?", (ip_group["id"],)).fetchone()["description"],
+                db.execute("SELECT description FROM account_groups WHERE id=?", (account_group["id"],)).fetchone()["description"],
+            )
+            default_account_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
+
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(), "return_to": f"/accounts?q=Work&group={account_group['id']}",
+            "name": "Work Email", "username": "amir.work", "email": "amir@example.com",
+            "password": "account-secret-value", "group_id": str(account_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, f"/accounts?q=Work&group={account_group['id']}")
+        with archive.connect_db() as db:
+            row = db.execute("SELECT * FROM accounts WHERE name='Work Email'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["group_id"], account_group["id"])
+        self.assertNotEqual(row["password_enc"], "account-secret-value")
+        self.assertEqual(archive.vault.decrypt(row["password_enc"].encode()).decode(), "account-secret-value")
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM ips WHERE ip_address='amir@example.com'").fetchone()[0], 0)
+
+        response = self.client.get("/accounts?q=amir")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Work Email", response.data)
+        self.assertIn(b"amir@example.com", response.data)
+        self.assertIn(b'data-copy-value="account-secret-value"', response.data)
+        self.assertIn(b"••••••••".decode("utf-8").encode("utf-8"), response.data)
+
+        account_id = row["id"]
+        original_password_enc = row["password_enc"]
+        response = self.client.post(f"/accounts/{account_id}/edit", data={
+            "csrf_token": self.csrf(), "return_to": "/accounts?q=Work",
+            "name": "Work Email", "username": "amir.work", "email": "work@example.com",
+            "password": "", "group_id": str(account_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/accounts?q=Work")
+        with archive.connect_db() as db:
+            row = db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+        self.assertEqual(row["email"], "work@example.com")
+        self.assertEqual(row["password_enc"], original_password_enc, "Blank edit password must preserve the saved secret")
+
+        response = self.client.post(f"/accounts/{account_id}/edit", data={
+            "csrf_token": self.csrf(), "name": "Work Email", "username": "amir.work",
+            "email": "work@example.com", "password": "replaced-account-secret",
+            "group_id": str(account_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT password_enc FROM accounts WHERE id=?", (account_id,)).fetchone()
+            self.assertEqual(archive.vault.decrypt(row["password_enc"].encode()).decode(), "replaced-account-secret")
+            db.execute(
+                "INSERT INTO ips(name,ip_address,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                ("Mail Gateway", "192.0.2.91", ip_group["id"], "account-vault-root", archive.now(), archive.now()),
+            )
+
+        # Deleting an account group changes only the account subsystem and moves its records to Default.
+        response = self.client.post(f"/account-groups/{account_group['id']}/delete", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT group_id FROM accounts WHERE id=?", (account_id,)).fetchone()
+            self.assertEqual(row["group_id"], default_account_group)
+            self.assertIsNotNone(db.execute("SELECT id FROM groups WHERE id=?", (ip_group["id"],)).fetchone())
+            self.assertIsNotNone(db.execute("SELECT id FROM ips WHERE ip_address='192.0.2.91'").fetchone())
+
+        response = self.client.post(f"/accounts/{account_id}/delete", data={
+            "csrf_token": self.csrf(), "return_to": "https://example.com/",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/accounts", "External return destinations must be rejected")
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM accounts WHERE id=?", (account_id,)).fetchone())
+
+    def test_account_vault_is_superadmin_only_and_validates_email(self):
+        _, secret = self.create_user("account-vault-limited", role="admin")
+        self.assertEqual(self.login("account-vault-limited", secret).status_code, 302)
+        self.assertEqual(self.client.get("/accounts").status_code, 403)
+        self.assertEqual(self.client.get("/account-groups").status_code, 403)
+        self.assertEqual(self.client.get("/accounts/new").status_code, 403)
+
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        _, root_secret = self.create_user("account-vault-validation-root")
+        self.assertEqual(self.login("account-vault-validation-root", root_secret).status_code, 302)
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(), "name": "Bad Email", "username": "bad-email",
+            "email": "not-an-email", "password": "safe-secret", "group_id": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Enter a valid email address", response.data)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts WHERE name='Bad Email'").fetchone()[0], 0)
 
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
