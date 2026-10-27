@@ -1,3 +1,13 @@
+## Version 3.0.22 release notes
+
+- Add directly visible **Edit** and **Delete** actions to each mobile IP card for super administrators, alongside the existing tap-to-open details button.
+- Keep mobile IP card actions separate from the detail button, so edit and delete do not accidentally open the details modal.
+- Preserve filtered search/group state and scroll position when editing or deleting IP records from a phone.
+- Add consistent, compact SVG icons to IP and Accounts table headers for profile/name, group, address, port, username, email, password, and last updated.
+- Style the column icons with aligned sizing and light/dark theme variants for a clearer, more polished table.
+- Add regression coverage for rendered mobile IP edit/delete links, CSRF-protected delete forms, column icon order, and the shared visual style.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.22.
+
 ## Version 3.0.21 release notes
 
 - In the separate Accounts module, make only the account name mandatory. Username, email, and password may be left blank; if an email is entered, it must still be valid.
