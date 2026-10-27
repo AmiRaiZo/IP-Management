@@ -1,6 +1,9 @@
 name: Publish versioned release
 
 on:
+  push:
+    paths:
+      - VERSION
   workflow_dispatch:
     inputs:
       version:
