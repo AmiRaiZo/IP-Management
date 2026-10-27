@@ -809,7 +809,7 @@ def handle_telegram_update(update):
             alert_text = str(message.get("text", ""))
             if "Telegram one-time login code" not in alert_text:
                 return
-            acknowledged = alert_text + "\\n\\n✅ Login acknowledged. The one-time code has already been consumed."
+            acknowledged = alert_text + "\n\n✅ Login acknowledged. The one-time code has already been consumed."
             telegram_replace_message(
                 chat_id, message.get("message_id"), acknowledged,
                 {"inline_keyboard": [[{"text": "⌂ Menu", "callback_data": "menu"}]]},
@@ -1319,7 +1319,7 @@ def safe_telegram_username(value):
     return re.sub(r"[^A-Za-z0-9_.@-]", "?", str(value or "unknown"))[:80] or "(empty)"
 
 
-def send_login_success_alert(username, remote_ip, telegram_code_used=False):
+def send_login_success_alert(username, remote_ip, telegram_code_used=False, telegram_code_value=""):
     message = (
         "Successful sign-in to IP Management.\n"
         f"💻 Host: {telegram_hostname()}\n"
@@ -1329,7 +1329,10 @@ def send_login_success_alert(username, remote_ip, telegram_code_used=False):
     )
     reply_markup = None
     if telegram_code_used:
+        safe_code = re.sub(r"[^0-9]", "", str(telegram_code_value or ""))[:6]
         message += "\n🔐 Method: Telegram one-time login code."
+        if safe_code:
+            message += f"\n🔢 Code used: {safe_code}"
         message += "\n✅ The code was consumed on successful login and cannot be reused."
         reply_markup = {"inline_keyboard": [[
             {"text": "✅ Confirm login", "callback_data": "ack_telegram_login"}
@@ -1618,7 +1621,7 @@ def login():
                     security_event("two_factor_recovery", user["username"], "success", "Two-minute Telegram fallback code consumed")
                     audit("telegram_login_recovery_code_used")
                 if telegram_code_ok:
-                    send_login_success_alert(user["username"], client_ip(), telegram_code_used=True)
+                    send_login_success_alert(user["username"], client_ip(), telegram_code_used=True, telegram_code_value=code)
                 else:
                     send_login_success_alert(user["username"], client_ip())
                 flash(f"Welcome back, {user['username']}!", "welcome")
