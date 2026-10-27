@@ -471,6 +471,7 @@
     if (!button) return;
     const value = button.dataset.copyValue || '';
     if (!value) return;
+    if (button.hasAttribute('data-reveal-password')) { const code = button.querySelector('code'); if (code) { code.textContent = value; button.classList.add('password-is-revealed'); } }
     const originalTitle = button.dataset.originalTitle || button.title || 'Click to copy value';
     button.dataset.originalTitle = originalTitle;
     if (await copyText(value)) {
