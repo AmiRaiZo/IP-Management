@@ -1,3 +1,8 @@
+## Version 3.0.27 release notes
+
+- Fix update checks when GitHub's unauthenticated REST API rate limit is exhausted by resolving the latest public release page and its verified Git tag without a personal access token.
+- Add regression coverage for the rate-limit fallback.
+
 ## Version 3.0.26 release notes
 
 - Complete the mobile IP directory with inline record details and visible edit/delete actions for authorized users, matching the Account Vault experience.
