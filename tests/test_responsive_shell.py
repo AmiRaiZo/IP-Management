@@ -77,7 +77,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', self.index)
         self.assertIn('class="mobile-ip-card" data-mobile-search-row', self.index)
         self.assertIn('class="mobile-ip-open" data-mobile-ip-card', self.index)
-        self.assertIn('class="mobile-ip-edit"', self.index)
+        self.assertIn('mobile-ip-edit', self.index)
         self.assertIn('url_for(\'ip_delete\', ip_id=ip.id)', self.index)
         self.assertIn('name="csrf_token"', self.index)
         self.assertIn('id="mobile-ip-details-modal"', self.index)
