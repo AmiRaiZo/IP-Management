@@ -212,8 +212,8 @@ class ArchiveTests(unittest.TestCase):
             count = db.execute("SELECT COUNT(*) FROM user_recovery_codes").fetchone()[0]
         self.assertEqual(count, 0)
 
-    def test_telegram_command_issues_two_minute_single_use_superadmin_code(self):
-        user_id, secret = self.create_user("telegram-code-admin", role="superadmin")
+    def test_telegram_command_issues_and_consumes_a_single_use_superadmin_code(self):
+        user_id, _ = self.create_user("telegram-code-admin", role="superadmin")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with patch.object(archive, "telegram_send") as send:
             archive.handle_telegram_update({"message": {
@@ -221,8 +221,7 @@ class ArchiveTests(unittest.TestCase):
             }})
         self.assertTrue(send.called)
         message = send.call_args.args[1]
-        import re
-        match = re.search(r"(?<!\d)(\d{6})(?!\d)", message)
+        match = re.search(r"(?<!\\d)(\\d{6})(?!\\d)", message)
         self.assertIsNotNone(match)
         code = match.group(1)
         with archive.connect_db() as db:
@@ -233,8 +232,14 @@ class ArchiveTests(unittest.TestCase):
         self.client.get("/login")
         response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
         self.assertEqual(response.status_code, 200)
-        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        with patch.object(archive, "send_login_success_alert") as success_alert:
+            response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
         self.assertEqual(response.status_code, 302)
+        success_alert.assert_called_once()
+        self.assertTrue(success_alert.call_args.kwargs.get("telegram_code_used"))
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 0)
+
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         self.client.get("/login")
         self.client.post("/login", data={"csrf_token": self.csrf(), "username": "telegram-code-admin", "password": "test-pass"})
@@ -370,14 +375,20 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(detail["message_id"], 101)
             self.assertEqual(archive.telegram_get_state()["mode"], "browse_detail")
 
-    def test_telegram_menu_has_english_2fa_button_and_callback_issues_code(self):
+    def test_telegram_menu_has_account_vault_and_2fa_actions(self):
         user_id, _ = self.create_user("telegram-button-admin", role="superadmin")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with patch.object(archive, "telegram_send") as send, patch.object(archive, "telegram_api", return_value={"ok": True}):
             archive.telegram_menu("12345")
             menu_markup = send.call_args.args[2]
-            self.assertEqual(menu_markup["inline_keyboard"][2][0]["text"], "🔐 2FA code")
-            self.assertEqual(menu_markup["inline_keyboard"][2][0]["callback_data"], "telegram_2fa_code")
+            buttons = [button for row in menu_markup["inline_keyboard"] for button in row]
+            callbacks = {button["callback_data"] for button in buttons}
+            labels = {button["text"] for button in buttons}
+            self.assertIn("telegram_2fa_code", callbacks)
+            self.assertIn("account_add", callbacks)
+            self.assertIn("account_search", callbacks)
+            self.assertIn("account_groups", callbacks)
+            self.assertIn("🔐 2FA code", labels)
             archive.handle_telegram_update({"callback_query": {
                 "id": "callback-2fa", "data": "telegram_2fa_code",
                 "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
@@ -385,7 +396,7 @@ class ArchiveTests(unittest.TestCase):
         messages = [str(call.args[1]) for call in send.call_args_list]
         code_messages = [message for message in messages if "Login code for IP Management" in message]
         self.assertEqual(len(code_messages), 1)
-        self.assertRegex(code_messages[0], r"\b\d{6}\b")
+        self.assertRegex(code_messages[0], r"\\b\\d{6}\\b")
         self.assertIn("<code>", code_messages[0])
         self.assertNotIn("2 minutes", code_messages[0])
         with archive.connect_db() as db:
@@ -1147,7 +1158,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"allowed-secret", directory.data)
         self.assertIn(b'data-copy-value="allowed-secret"', directory.data)
 
-    def test_ip_directory_values_are_boxed_and_columns_centered(self):
+    def test_ip_directory_values_are_boxed_and_table_headers_are_simple(self):
         _, secret = self.create_user("directory-layout")
         self.assertEqual(self.login("directory-layout", secret).status_code, 302)
         with archive.connect_db() as db:
@@ -1162,16 +1173,18 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
         self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
-        self.assertIn('<th class="name-column"><span class="column-heading">', page)
-        self.assertIn('class="column-icon icon-profile"', page)
-        self.assertIn('class="column-icon icon-key"', page)
-        stylesheet = (archive.BASE_DIR / 'static' / 'style.css').read_text(encoding='utf-8')
-        self.assertIn('.inventory-panel .table-scroll table th:first-child{text-align:center;padding-left:18px}', stylesheet)
-        self.assertIn('.inventory-panel .table-scroll .record-name{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:32px}', stylesheet)
-        self.assertIn('width:calc(100% - 132px);margin-left:132px', stylesheet)
-        self.assertIn('.inventory-panel .table-scroll .record-avatar{position:absolute;left:0;top:50%;transform:translateY(-50%);border-radius:50%}', stylesheet)
-        self.assertIn('.profile-info{display:grid;gap:3px;min-width:0;flex:1}', stylesheet)
-    def test_mobile_ip_directory_uses_name_cards_and_permission_gated_copy_details(self):
+        self.assertIn('<th class="name-column">Name</th>', page)
+        self.assertIn('<th>IP address / host</th>', page)
+        self.assertNotIn('class="column-icon', page)
+        self.assertIn('class="data-field-icon icon-ip"', page)
+        self.assertIn('class="data-field-icon icon-port"', page)
+        stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".mobile-data-row{display:grid;grid-template-columns:27px 92px minmax(0,1fr)", stylesheet)
+        self.assertIn(".mobile-ip-actions{display:flex!important", stylesheet)
+        self.assertIn(".inventory-panel .table-scroll .record-avatar{position:absolute;left:0;top:50%;transform:translateY(-50%);border-radius:50%}", stylesheet)
+        self.assertIn(".profile-info{display:grid;gap:3px;min-width:0;flex:1}", stylesheet)
+
+    def test_mobile_ip_directory_shows_inline_details_and_direct_edit_delete_actions(self):
         _, secret = self.create_user("mobile-ip-directory")
         self.assertEqual(self.login("mobile-ip-directory", secret).status_code, 302)
         with archive.connect_db() as db:
@@ -1185,33 +1198,35 @@ class ArchiveTests(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", page)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', page)
-        self.assertIn('data-mobile-ip-card', page)
-        self.assertIn('mobile-ip-edit', page)
-        self.assertTrue(re.search(r'href="/ips/\d+/edit"', page))
-        self.assertTrue(re.search(r'action="/ips/\d+/delete"', page))
-        self.assertIn('mobile-ip-actions', page)
-        self.assertIn('data-ip-name="Mobile router"', page)
-        self.assertIn('data-ip-address="192.0.2.99"', page)
-        self.assertIn('data-ip-port="8728"', page)
-        self.assertIn('data-ip-username="mobile-user"', page)
-        self.assertIn('data-ip-password="mobile-secret"', page)
-        self.assertIn('id="mobile-ip-details-modal"', page)
-        self.assertIn('id="mobile-ip-details-list"', page)
-        self.assertLess(page.index('column-icon icon-group'), page.index('column-icon icon-ip'))
-        self.assertIn('<span>Group</span>', page)
-        self.assertIn('<span>IP address / host</span>', page)
+        self.assertIn('class="mobile-ip-card" role="listitem"', page)
+        self.assertIn('data-scroll-record="ip-', page)
+        self.assertIn('class="mobile-ip-fields"', page)
+        self.assertIn('class="data-field-icon icon-group"', page)
+        self.assertIn('class="data-field-icon icon-ip"', page)
+        self.assertIn('class="mobile-data-label">Group</span>', page)
+        self.assertIn('class="mobile-data-label">IP address</span>', page)
+        self.assertIn('class="mobile-data-label">Port</span>', page)
+        self.assertIn('class="mobile-data-label">Username</span>', page)
+        self.assertIn('class="mobile-data-label">Notes</span>', page)
+        self.assertIn('data-copy-value="192.0.2.99"', page)
+        self.assertIn('data-copy-value="8728"', page)
+        self.assertIn('data-copy-value="mobile-user"', page)
+        self.assertIn('data-copy-value="mobile-secret"', page)
+        self.assertIn("Uplink device", page)
+        self.assertIn("mobile-ip-edit", page)
+        self.assertTrue(re.search(r'href="/ips/\\d+/edit"', page))
+        self.assertTrue(re.search(r'action="/ips/\\d+/delete"', page))
+        self.assertIn('name="csrf_token"', page)
+        self.assertNotIn('id="mobile-ip-details-modal"', page)
+        self.assertNotIn('class="column-icon', page)
         script = (archive.BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
-        self.assertIn("document.querySelectorAll('[data-mobile-ip-card]')", script)
-        self.assertLess(script.index("addMobileIpDetail('Group', data.ipGroup, false)"),
-                        script.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
+        self.assertIn("document.querySelectorAll('[data-mobile-ip-card]')", script) is False
         self.assertIn("event.target.closest('[data-copy-value]')", script)
         self.assertIn("mobileRows.forEach(row =>", script)
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
-        self.assertIn(".inventory-panel .table-scroll{display:none!important}", stylesheet)
-        self.assertIn(".mobile-ip-list{display:grid;gap:8px", stylesheet)
-        self.assertIn(".mobile-ip-list{display:grid;gap:10px;padding:14px 12px 16px}", stylesheet)
-        self.assertIn("text-align:center", stylesheet[stylesheet.index("v3.0.7: center and polish mobile IP cards"):])
-        self.assertIn("backdrop-filter:blur(8px)", stylesheet)
+        self.assertIn(".mobile-ip-list{display:grid!important;gap:11px;padding:13px12px16px!important}", "".join(stylesheet.split()))
+        self.assertIn(".mobile-ip-actions{display:flex!important", stylesheet)
+        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", "".join(stylesheet.split()))
 
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
