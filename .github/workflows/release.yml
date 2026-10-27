@@ -3,7 +3,6 @@ name: Publish versioned release
 on:
   push:
     paths:
-      - VERSION
       - templates/base.html
   workflow_dispatch:
     inputs:
