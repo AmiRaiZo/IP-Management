@@ -1,3 +1,13 @@
+## Version 3.0.23 release notes
+
+- Keep the **Accounts** module independent from IP records and IP groups, with its own account table, groups, directory, and create/edit/delete flows.
+- Make only the account name mandatory. Username, email, and password can be blank; when an email is entered, it must still be valid. A blank password on edit preserves the saved password.
+- Keep the mobile Accounts cards' **Edit account** and **Delete** actions visible and easy to tap; remove the redundant note saying account groups are not shared with IP groups.
+- Add visible **Edit** and **Delete** actions to mobile IP cards for super administrators; keep them separate from the tap-to-open details button and preserve search/group filters plus scroll position.
+- Refine IP and Accounts table-column icons with consistent SVG artwork, alignment, spacing, and light/dark theme styling.
+- Strengthen the mobile group/name sorting regression by inspecting each complete card, including the name and group metadata at the card level.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.23.
+
 ## Version 3.0.22 release notes
 
 - Add directly visible **Edit** and **Delete** actions to each mobile IP card for super administrators, alongside the existing tap-to-open details button.
