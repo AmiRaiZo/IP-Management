@@ -841,6 +841,196 @@ def handle_telegram_update(update):
                 telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
                 return
             telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
+        elif action == "account_groups":
+            telegram_browse_account_groups(chat_id, message.get("message_id"))
+        elif action.startswith("account_browse_group:"):
+            try:
+                selected_group_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                telegram_browse_account_groups(chat_id, message.get("message_id"))
+                return
+            telegram_browse_account_group(chat_id, message.get("message_id"), selected_group_id)
+        elif action.startswith("account_browse_item:"):
+            state = telegram_get_state()
+            try:
+                _, selected_group_id, selected_account_id = action.split(":", 2)
+                selected_group_id, selected_account_id = int(selected_group_id), int(selected_account_id)
+            except (TypeError, ValueError):
+                telegram_browse_account_groups(chat_id, message.get("message_id"))
+                return
+            if state.get("mode") != "browse_accounts" or str(state.get("group_id")) != str(selected_group_id):
+                telegram_browse_account_groups(chat_id, message.get("message_id"))
+                return
+            telegram_show_account(chat_id, message.get("message_id"), selected_account_id, source="browse")
+        elif action.startswith("account_search_item:"):
+            state = telegram_get_state()
+            try:
+                selected_account_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                telegram_menu(chat_id, message.get("message_id"))
+                return
+            if state.get("mode") != "account_search_results" or selected_account_id not in state.get("account_ids", []):
+                telegram_menu(chat_id, message.get("message_id"))
+                return
+            telegram_show_account(
+                chat_id, message.get("message_id"), selected_account_id,
+                source="search", search_query=state.get("query", ""),
+            )
+        elif action == "account_search_back":
+            state = telegram_get_state()
+            if state.get("mode") != "account_detail" or state.get("source") != "search":
+                telegram_menu(chat_id, message.get("message_id"))
+                return
+            telegram_search_accounts(chat_id, message.get("message_id"), state.get("search_query", ""), replace_message=True)
+        elif action == "account_add":
+            telegram_set_state({"mode": "account_add", "step": "name", "data": {}})
+            telegram_send(chat_id, "Account Vault — Step 1 of 5: enter the account name (required):")
+        elif action == "account_search":
+            telegram_set_state({"mode": "account_search", "step": "query"})
+            telegram_send(chat_id, "Send an account name, username, or email to search:")
+        elif action.startswith("account_edit:"):
+            state = telegram_get_state()
+            try:
+                selected_account_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                return
+            if state.get("mode") != "account_detail" or int(state.get("account_id", 0)) != selected_account_id:
+                return
+            with connect_db() as db:
+                row = db.execute(
+                    "SELECT accounts.*, account_groups.name AS group_name FROM accounts "
+                    "LEFT JOIN account_groups ON account_groups.id=accounts.group_id WHERE accounts.id=?",
+                    (selected_account_id,),
+                ).fetchone()
+            if not row:
+                telegram_set_state({})
+                telegram_send(chat_id, "That account no longer exists.")
+                return
+            data = {
+                "name": row["name"], "username": row["username"], "email": row["email"],
+                "group_id": str(row["group_id"] or ""), "group_name": row["group_name"] or "Default",
+                "password_action": "keep", "source": state.get("source", "browse"),
+                "search_query": state.get("search_query", ""),
+            }
+            telegram_set_state({"mode": "account_edit", "step": "name", "account_id": selected_account_id, "data": data})
+            telegram_send(chat_id, "Edit account — send a new name, or - to keep the current name:")
+        elif action.startswith("account_delete:"):
+            state = telegram_get_state()
+            try:
+                selected_account_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                return
+            if state.get("mode") != "account_detail" or int(state.get("account_id", 0)) != selected_account_id:
+                return
+            with connect_db() as db:
+                row = db.execute("SELECT name FROM accounts WHERE id=?", (selected_account_id,)).fetchone()
+            if not row:
+                telegram_set_state({})
+                telegram_send(chat_id, "That account no longer exists.")
+                return
+            telegram_set_state({
+                "mode": "account_delete_confirm", "account_id": selected_account_id,
+                "group_id": state.get("group_id"), "source": state.get("source", "browse"),
+                "search_query": state.get("search_query", ""), "name": row["name"],
+            })
+            telegram_replace_message(
+                chat_id, message.get("message_id"),
+                f"Delete account \"{html.escape(str(row['name']))}\"? This cannot be undone.",
+                {"inline_keyboard": [
+                    [{"text": "🗑 Confirm delete", "callback_data": f"account_delete_confirm:{selected_account_id}"}],
+                    [{"text": "Cancel", "callback_data": "account_delete_cancel"}],
+                ]},
+                parse_mode="HTML",
+            )
+        elif action.startswith("account_delete_confirm:"):
+            state = telegram_get_state()
+            try:
+                selected_account_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                return
+            if state.get("mode") != "account_delete_confirm" or int(state.get("account_id", 0)) != selected_account_id:
+                return
+            with connect_db() as db:
+                row = db.execute("SELECT name FROM accounts WHERE id=?", (selected_account_id,)).fetchone()
+                if row:
+                    db.execute("DELETE FROM accounts WHERE id=?", (selected_account_id,))
+            telegram_set_state({})
+            if row:
+                audit("account_deleted", f"id={selected_account_id}; name={row['name']}; source=telegram-bot")
+                telegram_replace_message(
+                    chat_id, message.get("message_id"), f"✅ Account deleted: {html.escape(str(row['name']))}",
+                    {"inline_keyboard": [[{"text": "🗂 Account groups", "callback_data": "account_groups"},
+                                          {"text": "⌂ Menu", "callback_data": "menu"}]]},
+                    parse_mode="HTML",
+                )
+            else:
+                telegram_replace_message(chat_id, message.get("message_id"), "That account was already deleted.",
+                                         {"inline_keyboard": [[{"text": "⌂ Menu", "callback_data": "menu"}]]})
+        elif action == "account_delete_cancel":
+            state = telegram_get_state()
+            if state.get("mode") != "account_delete_confirm":
+                return
+            telegram_show_account(
+                chat_id, message.get("message_id"), int(state.get("account_id")),
+                source=state.get("source", "browse"), search_query=state.get("search_query", ""),
+            )
+        elif action.startswith("account_edit_group:"):
+            state = telegram_get_state()
+            try:
+                selected_group_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                return
+            if state.get("mode") != "account_edit" or state.get("step") != "group":
+                return
+            telegram_save_account_edit(chat_id, message.get("message_id"), selected_group_id)
+        elif action == "account_edit_keep_group":
+            state = telegram_get_state()
+            if state.get("mode") != "account_edit" or state.get("step") != "group":
+                return
+            try:
+                selected_group_id = int(state.get("data", {}).get("group_id"))
+            except (TypeError, ValueError):
+                selected_group_id = None
+            telegram_save_account_edit(chat_id, message.get("message_id"), selected_group_id)
+        elif action.startswith("account_group:"):
+            state = telegram_get_state()
+            if state.get("mode") != "account_add" or state.get("step") != "group":
+                return
+            try:
+                selected_group_id = int(action.split(":", 1)[1])
+            except (TypeError, ValueError):
+                telegram_send(chat_id, "Invalid account group. Send /start to begin again.")
+                telegram_set_state({})
+                return
+            with connect_db() as db:
+                selected_group = db.execute("SELECT id,name FROM account_groups WHERE id=?", (selected_group_id,)).fetchone()
+            if not selected_group:
+                telegram_send(chat_id, "That account group no longer exists. Send /start to begin again.")
+                telegram_set_state({})
+                return
+            data = state.get("data") or {}
+            data["group_id"] = str(selected_group["id"])
+            data["group_name"] = selected_group["name"]
+            clean, error = validate_account(MultiDict(data))
+            if error:
+                telegram_set_state({})
+                telegram_send(chat_id, f"Invalid account details: {error}\nSend /start to begin again.")
+                return
+            with connect_db() as db:
+                cur = db.execute(
+                    "INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (clean["name"], clean["username"], clean["email"], clean["password_enc"] or "",
+                     clean["group_id"], "telegram-bot", now(), now()),
+                )
+            telegram_set_state({})
+            audit("account_created", f"id={cur.lastrowid}; name={clean['name']}; source=telegram-bot")
+            telegram_send(
+                chat_id,
+                f"✅ Account saved.\n📌 {html.escape(str(clean['name']))}\n📁 Group: {html.escape(str(selected_group['name']))}\nRecord ID: {cur.lastrowid}",
+                {"inline_keyboard": [[{"text": "🗂 Account groups", "callback_data": "account_groups"},
+                                      {"text": "⌂ Menu", "callback_data": "menu"}]]},
+                parse_mode="HTML",
+            )
         elif action.startswith("ip_group:"):
             state = telegram_get_state()
             if state.get("mode") != "add" or state.get("step") != "group":
