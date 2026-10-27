@@ -344,7 +344,7 @@
   group?.addEventListener('change', filterRows);
   // Preserve a user's place in long lists while edit/delete actions navigate away and back.
   const returnPositionKey = 'ip-archive-return-position';
-  const returnPositionPages = new Set(['/', '/groups', '/users']);
+  const returnPositionPages = new Set(['/', '/groups', '/users', '/accounts', '/account-groups']);
   const isReturnPositionPage = () => returnPositionPages.has(window.location.pathname.replace(/\/+$/, '') || '/');
   function visibleScrollRecords() {
     return [...document.querySelectorAll('[data-scroll-record]')].filter(record =>
@@ -352,7 +352,8 @@
     );
   }
   function currentDirectoryReturnUrl() {
-    const destination = new URL('/', window.location.origin);
+    const returnPath = window.location.pathname === '/' ? '/' : window.location.pathname;
+    const destination = new URL(returnPath, window.location.origin);
     const query = (search?.value || '').trim();
     const selectedGroup = group?.value || '';
     if (query) destination.searchParams.set('q', query);
@@ -386,7 +387,8 @@
     let destination;
     try { destination = new URL(link.href, window.location.href); } catch (_) { return; }
     if (destination.origin !== window.location.origin) return;
-    if (destination.pathname === '/ips/new' || /^\/ips\/\d+\/edit$/.test(destination.pathname)) {
+    if (destination.pathname === '/ips/new' || /^\/ips\/\d+\/edit$/.test(destination.pathname)
+        || destination.pathname === '/accounts/new' || /^\/accounts\/\d+\/edit$/.test(destination.pathname)) {
       destination.searchParams.set('return_to', currentDirectoryReturnUrl());
       link.href = destination.toString();
     }
@@ -402,7 +404,7 @@
     const actionPath = (() => {
       try { return new URL(form.action, window.location.href).pathname; } catch (_) { return ''; }
     })();
-    if (/^\/ips\/\d+\/delete$/.test(actionPath)) {
+    if (/^\/ips\/\d+\/delete$/.test(actionPath) || /^\/accounts\/\d+\/delete$/.test(actionPath)) {
       let returnInput = form.querySelector('input[name="return_to"]');
       if (!returnInput) {
         returnInput = document.createElement('input');
