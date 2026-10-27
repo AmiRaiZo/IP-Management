@@ -46,26 +46,70 @@ jobs:
           ' RELEASE_NOTES.md > release-notes.md
           test -s release-notes.md || { echo "RELEASE_NOTES.md has no release notes for $VERSION." >&2; exit 1; }
 
-      - name: Publish release for the exact commit
+      - name: Build versioned install archive
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ steps.release-meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          ASSET="station-archive-v${VERSION}.zip"
+          python3 - "$VERSION" "$ASSET" <<'PY'
+          import pathlib, sys, zipfile
+          version, output = sys.argv[1:]
+          root = pathlib.Path(".")
+          package = pathlib.Path(output)
+          # Include runtime files and deployment helpers, but not tests, workflows or local state.
+          excluded = {"test_app.py", ".gitignore"}
+          with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(root.iterdir()):
+                  if path.is_file() and path.name not in excluded and not path.name.startswith("."):
+                      archive.write(path, path.name)
+              for folder in ("templates", "static"):
+                  directory = root / folder
+                  if not directory.is_dir():
+                      raise SystemExit(f"Required package folder is missing: {folder}")
+                  for path in sorted(directory.rglob("*")):
+                      if path.is_file():
+                          archive.write(path, path.relative_to(root).as_posix())
+          with zipfile.ZipFile(package) as archive:
+              names = set(archive.namelist())
+              required = {"app.py", "requirements.txt", "VERSION", "station-archive-update",
+                          "install.sh", "reconfigure_server.sh"}
+              missing = required - names
+              if missing or not any(n.startswith("templates/") for n in names) or not any(n.startswith("static/") for n in names):
+                  raise SystemExit("Release package validation failed: " + ", ".join(sorted(missing)))
+              packaged_version = archive.read("VERSION").decode("utf-8").strip()
+              if packaged_version != version:
+                  raise SystemExit(f"Package VERSION {packaged_version!r} differs from expected {version!r}.")
+          print(f"Built and validated {package} for version {version}")
+          PY
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Create or refresh GitHub Release and upload archive
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release-meta.outputs.version }}
+          ASSET: ${{ steps.package.outputs.asset }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
-            echo "Release v$VERSION already exists; nothing to do."
-            exit 0
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "IP Management $TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "IP Management $TAG" \
+              --notes-file release-notes.md
           fi
-          gh release create "v$VERSION" \
-            --target "$GITHUB_SHA" \
-            --title "IP Management v$VERSION" \
-            --notes-file release-notes.md
+          # Always attach or refresh the installable ZIP, including for an already-published tag.
+          gh release upload "$TAG" "$ASSET" --clobber
 
       - name: Keep only the two newest published releases
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           mapfile -t OLD_TAGS < <(gh release list --limit 100 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | reverse | .[2:] | .[].tagName')
