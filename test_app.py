@@ -733,7 +733,7 @@ class ArchiveTests(unittest.TestCase):
 
         def assert_directory_order(page, expected):
             start = page.index('data-mobile-ip-list')
-            end = page.index('</div>', start)
+            end = page.index('<div class="table-scroll">', start)
             mobile_list = page[start:end]
             mobile_records = re.findall(
                 r'data-ip-name="([^"]+)"[^>]*data-ip-group="([^"]+)"', mobile_list
@@ -1074,7 +1074,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotEqual(row["password_enc"], "super-secret")
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn("super-secret", page)
-        self.assertIn("<th>Password</th>", page)
+        self.assertIn("<span>Password</span></span></th>", page)
         self.assertIn('data-copy-value="super-secret"', page)
         edit_page = self.client.get("/ips/1/edit").get_data(as_text=True)
         self.assertIn('id="password" name="password" type="password"', edit_page)
@@ -1087,13 +1087,13 @@ class ArchiveTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 302)
         page = self.client.get("/").get_data(as_text=True)
-        self.assertIn("<th>Password</th>", page)
+        self.assertIn("<span>Password</span></span></th>", page)
         self.assertIn("super-secret", page)
         response = self.client.post("/settings/directory", data={"csrf_token": self.csrf()})
         self.assertEqual(response.status_code, 302)
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn("super-secret", page)
-        self.assertIn("<th>Password</th>", page)
+        self.assertIn("<span>Password</span></span></th>", page)
 
     def test_non_superadmin_never_receives_saved_ip_passwords(self):
         user_id, secret = self.create_user("limited-password-view", role="admin")
@@ -1182,7 +1182,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", page)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', page)
         self.assertIn('data-mobile-ip-card', page)
-        self.assertIn('class="mobile-ip-edit"', page)
+        self.assertIn('mobile-ip-edit', page)
         self.assertTrue(re.search(r'href="/ips/\d+/edit"', page))
         self.assertTrue(re.search(r'action="/ips/\d+/delete"', page))
         self.assertIn('class="mobile-ip-actions"', page)
