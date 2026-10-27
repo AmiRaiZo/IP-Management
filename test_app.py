@@ -1963,6 +1963,23 @@ class ArchiveTests(unittest.TestCase):
         with archive.app.test_request_context("/", environ_overrides={"REMOTE_ADDR": "127.0.0.1"}):
             self.assertEqual(archive.jalali_datetime("2026-03-21T00:00:00+00:00")[:10], "1405/01/01")
 
+    def test_latest_release_falls_back_to_public_git_refs_when_api_rate_limited(self):
+        from urllib.error import HTTPError
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.geturl.return_value = "https://github.com/AmiRaiZo/IP-Management/releases/tag/v3.0.27"
+        commit_sha = "a" * 40
+        refs = MagicMock(returncode=0, stdout=f"{commit_sha}\\trefs/tags/v3.0.27\\n", stderr="")
+        with patch.object(archive, "urlopen", side_effect=[HTTPError("https://api.github.com", 403, "rate limit exceeded", {}, None), response]), \\
+             patch.object(archive.subprocess, "run", return_value=refs) as git_run:
+            release = archive.latest_release()
+
+        self.assertEqual(release, {"version": "3.0.27", "sha": commit_sha, "tag": "v3.0.27"})
+        self.assertEqual(git_run.call_args.args[0][1], "ls-remote")
+        self.assertEqual(git_run.call_args.kwargs["timeout"], 12)
+
 if __name__ == "__main__":
     unittest.main()
 
