@@ -55,10 +55,31 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".welcome-toast{top:58px;right:10px;left:auto;width:min(390px,calc(100%-20px))", "".join(self.css.split()))
 
 
+    def test_mobile_ip_cards_include_direct_edit_and_delete_actions_for_admins(self):
+        self.assertIn('class="mobile-ip-open" data-mobile-ip-card', self.index)
+        self.assertIn('class="mobile-ip-edit" href="{{ url_for(\'ip_edit\', ip_id=ip.id) }}"', self.index)
+        self.assertIn('action="{{ url_for(\'ip_delete\', ip_id=ip.id) }}"', self.index)
+        self.assertIn('class="mobile-ip-actions"', self.index)
+        self.assertIn("data-confirm=\"Delete this IP record?\"", self.index)
+        self.assertIn(".mobile-ip-actions{display:flex!important", self.css)
+
+    def test_table_column_icons_are_consistent_for_ip_and_accounts(self):
+        self.assertGreaterEqual(self.index.count('class="column-icon'), 7)
+        self.assertGreaterEqual(self.accounts.count('class="column-icon'), 5)
+        for kind in ("profile", "name", "group", "ip", "port", "user", "key", "date"):
+            self.assertIn(f"column-icon icon-{kind}", self.index)
+        for kind in ("name", "group", "user", "email", "key", "date"):
+            self.assertIn(f"column-icon icon-{kind}", self.accounts)
+        self.assertIn(".column-heading{display:inline-flex", self.css)
+
     def test_mobile_ip_directory_uses_name_only_cards_and_blurred_details_dialog(self):
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", self.index)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', self.index)
-        self.assertIn('class="mobile-ip-card" data-mobile-ip-card', self.index)
+        self.assertIn('class="mobile-ip-card" data-mobile-search-row', self.index)
+        self.assertIn('class="mobile-ip-open" data-mobile-ip-card', self.index)
+        self.assertIn('class="mobile-ip-edit"', self.index)
+        self.assertIn('url_for(\'ip_delete\', ip_id=ip.id)', self.index)
+        self.assertIn('name="csrf_token"', self.index)
         self.assertIn('id="mobile-ip-details-modal"', self.index)
         self.assertIn('id="mobile-ip-details-list"', self.index)
         self.assertIn('data-copy-value', self.index)
@@ -75,7 +96,11 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         mobile_css = "".join(self.css[self.css.index('v3.0.7: center and polish mobile IP cards'):].split())
         self.assertIn('justify-content:center', mobile_css)
         self.assertIn('text-align:center', mobile_css)
-        self.assertLess(self.index.index('>Group</th>'), self.index.index('>IP address / host</th>'))
+        self.assertLess(self.index.index('icon-group'), self.index.index('icon-ip'))
+        self.assertIn('class="column-heading"', self.index)
+        self.assertIn('class="column-icon icon-key"', self.index)
+        self.assertIn('class="column-heading"', self.accounts)
+        self.assertIn('class="column-icon icon-email"', self.accounts)
         self.assertLess(self.js.index("addMobileIpDetail('Group', data.ipGroup, false)"),
                         self.js.index("addMobileIpDetail('IP address', data.ipAddress, true)"))
 
