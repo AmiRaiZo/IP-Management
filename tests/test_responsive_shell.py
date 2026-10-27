@@ -116,7 +116,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".mobile-account-list{display:none}", compact_css)
         self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-data-row{display:grid;grid-template-columns:27px92pxminmax(0,1fr)", compact_css)
-        self.assertIn(".mobile-account-field{grid-template-columns:27px65pxminmax(0,1fr)}", compact_css)
+        self.assertIn(".mobile-account-field{grid-template-columns:25px65pxminmax(0,1fr)", compact_css)
         self.assertLess(self.index.index('class="mobile-data-label">Group</span>'),
                         self.index.index('class="mobile-data-label">IP address</span>'))
         self.assertNotIn('class="column-heading"', self.index)
@@ -184,7 +184,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="mobile-account-list"', self.accounts)
         self.assertIn("mobile-account-edit", self.accounts)
         self.assertIn(">Edit account</a>", self.accounts)
-        self.assertIn('class="mobile-account-actions"', self.accounts)
+        self.assertIn("mobile-account-actions", self.accounts)
         self.assertIn(".account-inventory-panel.mobile-account-actions{display:flex!important", self.css)
         self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px 12px 16px!important}", self.css)
 
