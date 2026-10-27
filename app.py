@@ -226,6 +226,11 @@ def init_db():
         if "profile_image" not in user_cols:
             db.execute("ALTER TABLE users ADD COLUMN profile_image TEXT NOT NULL DEFAULT ''")
         group_cols = {r[1] for r in db.execute("PRAGMA table_info(groups)")}
+        if "color" not in group_cols:
+            db.execute("ALTER TABLE groups ADD COLUMN color TEXT NOT NULL DEFAULT ''")
+        account_group_cols = {r[1] for r in db.execute("PRAGMA table_info(account_groups)")}
+        if "color" not in account_group_cols:
+            db.execute("ALTER TABLE account_groups ADD COLUMN color TEXT NOT NULL DEFAULT ''")
         if "sort_order" not in group_cols:
             db.execute("ALTER TABLE groups ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
             db.execute("UPDATE groups SET sort_order=id")
@@ -2344,13 +2349,15 @@ def groups():
     if request.method == "POST":
         name = request.form.get("name", "").strip()[:80]
         description = request.form.get("description", "").strip()[:300]
+        color = request.form.get("color", "").strip()[:7]
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color): color = ""
         if not name:
             flash("Group name is required.", "error")
         else:
             try:
                 with connect_db() as db:
                     next_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM groups").fetchone()[0]
-                    db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES(?,?,?,?)", (name, description, now(), next_order))
+                    db.execute("INSERT INTO groups(name,description,created_at,sort_order,color) VALUES(?,?,?,?,?)", (name, description, now(), next_order, color))
                 audit("group_created", name)
                 flash("Group created.", "success")
                 return redirect(url_for("groups"))
@@ -2555,6 +2562,8 @@ def account_groups():
     if request.method == "POST":
         name = request.form.get("name", "").strip()[:100]
         description = request.form.get("description", "").strip()[:500]
+        color = request.form.get("color", "").strip()[:7]
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color): color = ""
         if not name:
             flash("Account group name is required.", "error")
         else:
@@ -2562,8 +2571,8 @@ def account_groups():
                 with connect_db() as db:
                     next_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM account_groups").fetchone()[0]
                     db.execute(
-                        "INSERT INTO account_groups(name,description,created_at,sort_order) VALUES(?,?,?,?)",
-                        (name, description, now(), next_order),
+                        "INSERT INTO account_groups(name,description,created_at,sort_order,color) VALUES(?,?,?,?,?)",
+                        (name, description, now(), next_order, color),
                     )
                 audit("account_group_created", name)
                 flash("Account group created.", "success")
