@@ -135,7 +135,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("independent from IP groups", self.account_groups)
         self.assertIn("currentDirectoryReturnUrl()", self.js)
         self.assertIn("destination.pathname === '/accounts/new'", self.js)
-        self.assertIn("/accounts\\\\/\\\\d+\\\\/delete", self.js)
+        self.assertIn(r"^\\/accounts\\/\\d+\\/delete$", self.js)
 
     def test_assets_are_cache_busted_for_this_release(self):
         self.assertEqual(self.version, "3.0.18")
