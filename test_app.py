@@ -887,6 +887,46 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             self.assertIsNone(db.execute("SELECT id FROM accounts WHERE id=?", (account_id,)).fetchone())
 
+    def test_account_name_is_only_required_field(self):
+        _, secret = self.create_user("account-minimal-root")
+        self.assertEqual(self.login("account-minimal-root", secret).status_code, 302)
+
+        form_page = self.client.get("/accounts/new")
+        self.assertEqual(form_page.status_code, 200)
+        self.assertIn(b'name="name" required', form_page.data)
+        self.assertNotIn(b'name="username" required', form_page.data)
+        self.assertNotIn(b'name="email" type="email" required', form_page.data)
+        self.assertNotIn(b"'required' if not account else ''", form_page.data)
+        self.assertNotIn(b"Only account groups appear here; IP groups are not shared.", form_page.data)
+
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(),
+            "name": "Name Only Account",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts", response.location)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT * FROM accounts WHERE name='Name Only Account'").fetchone()
+            default_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["username"], "")
+        self.assertEqual(row["email"], "")
+        self.assertEqual(row["password_enc"], "")
+        self.assertEqual(row["group_id"], default_group["id"])
+
+        # The display name stays mandatory; optional fields never compensate for a missing name.
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(),
+            "name": "   ",
+            "username": "optional-user",
+            "email": "optional@example.com",
+            "password": "optional-password",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Account name is required.", response.data)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts WHERE username='optional-user'").fetchone()[0], 0)
+
     def test_account_vault_is_superadmin_only_and_validates_email(self):
         _, secret = self.create_user("account-vault-limited", role="admin")
         self.assertEqual(self.login("account-vault-limited", secret).status_code, 302)
