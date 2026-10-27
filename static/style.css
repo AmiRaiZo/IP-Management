@@ -637,3 +637,30 @@ html[data-theme="dark"] .mobile-ip-card,html[data-theme="dark"] .mobile-account-
 }
 html[data-theme="dark"] .mobile-ip-record-heading,html[data-theme="dark"] .mobile-account-heading{background:linear-gradient(120deg,#202b40,#1b2434)}
 html[data-theme="dark"] .mobile-ip-card,html[data-theme="dark"] .mobile-account-card{background:var(--surface);border-color:#334158}
+
+
+/* v3.5.1: group colors and account cards aligned with the IP inventory. */
+.group-tag{background:color-mix(in srgb,var(--group-color,var(--group-palette-0)) 13%,var(--surface));border-color:color-mix(in srgb,var(--group-color,var(--group-palette-0)) 30%,var(--border));color:var(--group-color,var(--group-palette-0))}
+.group-name-text{color:var(--group-color,var(--group-palette-0))!important}
+.group-symbol{color:var(--group-color,var(--group-palette-0))!important;background:color-mix(in srgb,var(--group-color,var(--group-palette-0)) 13%,var(--surface))!important;border-color:color-mix(in srgb,var(--group-color,var(--group-palette-0)) 25%,var(--border))}
+.mobile-account-fields{display:grid;min-width:0;padding:9px 15px 13px}
+.mobile-account-field{display:grid;grid-template-columns:27px 70px minmax(0,1fr);align-items:center;gap:9px;min-width:0;padding:9px 0;border-top:1px solid var(--border)}
+.mobile-account-field>.data-field-icon{font-size:inherit;margin:0}
+.mobile-account-field>.mobile-detail-label{font-size:11px;font-weight:700;color:var(--muted);line-height:1.4}
+.mobile-account-field .copy-value{justify-content:flex-start;min-width:0;max-width:100%;overflow:hidden}
+.mobile-account-field code{max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-align:left}
+.mobile-account-heading{display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:9px;min-width:0}
+.mobile-account-heading .mobile-account-avatar{order:0}
+.mobile-account-heading>strong{flex:1;min-width:0;overflow-wrap:anywhere}
+.mobile-account-heading>.group-tag{flex:0 1 auto;max-width:42%;margin-left:auto;text-align:center}
+.mobile-account-actions{display:flex;align-items:stretch;justify-content:flex-end;gap:8px;margin:0;padding:10px 14px 13px;border-top:1px solid var(--border);background:var(--surface-2)}
+.mobile-account-actions form{display:flex;flex:0 0 auto;margin:0}
+.mobile-account-actions .mobile-account-edit{display:inline-flex;flex:1 1 auto;min-width:0;min-height:38px;align-items:center;justify-content:center;white-space:normal}
+.mobile-account-actions .btn{min-height:38px;padding:8px 12px}
+html[data-theme="dark"] .mobile-account-actions{background:var(--surface-2)}
+@media(max-width:720px){
+  .mobile-account-fields{padding:2px 12px 4px}
+  .mobile-account-field{grid-template-columns:26px 70px minmax(0,1fr);gap:7px;padding:8px 0}
+  .mobile-account-actions{padding:10px 12px 12px}
+  .mobile-account-actions .btn{min-height:40px;padding:9px 12px}
+}
