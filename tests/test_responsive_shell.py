@@ -202,7 +202,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertNotIn('name="email" type="email" required', self.account_form)
         self.assertNotIn("{{ 'required' if not account else '' }}", self.account_form)
         self.assertNotIn("Only account groups appear here; IP groups are not shared.", self.account_form)
-        self.assertIn('class="btn btn-primary mobile-account-edit"', self.accounts)
+        self.assertIn('class="btn btn-primary mobile-account-edit mobile-ip-edit"', self.accounts)
         self.assertIn('>Edit account</a>', self.accounts)
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
