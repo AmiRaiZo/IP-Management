@@ -485,59 +485,7 @@
     }
   });
 
-  const mobileIpDetailsModal = document.getElementById('mobile-ip-details-modal');
-  const mobileIpDetailsTitle = document.getElementById('mobile-ip-details-title');
-  const mobileIpDetailsList = document.getElementById('mobile-ip-details-list');
-
-  function addMobileIpDetail(label, value, copyable = false) {
-    if (!mobileIpDetailsList) return;
-    const row = document.createElement('div');
-    row.className = 'mobile-ip-detail-row';
-    const labelElement = document.createElement('span');
-    labelElement.className = 'mobile-ip-detail-label';
-    labelElement.textContent = label;
-    row.appendChild(labelElement);
-
-    const normalized = String(value || '');
-    if (copyable && normalized) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'copy-value mobile-ip-copy';
-      button.dataset.copyValue = normalized;
-      button.title = 'Click to copy ' + label;
-      button.setAttribute('aria-label', 'Copy ' + label);
-      const code = document.createElement('code');
-      code.textContent = normalized;
-      button.appendChild(code);
-      row.appendChild(button);
-    } else {
-      const valueElement = document.createElement('span');
-      valueElement.className = 'mobile-ip-detail-value';
-      valueElement.textContent = normalized || '—';
-      row.appendChild(valueElement);
-    }
-    mobileIpDetailsList.appendChild(row);
-  }
-
-  document.querySelectorAll('[data-mobile-ip-card]').forEach(card => {
-    card.addEventListener('click', () => {
-      if (!mobileIpDetailsModal || !mobileIpDetailsList) return;
-      const data = card.dataset;
-      mobileIpDetailsTitle.textContent = data.ipName || data.ipAddress || 'IP details';
-      mobileIpDetailsList.replaceChildren();
-      addMobileIpDetail('Group', data.ipGroup, false);
-      addMobileIpDetail('IP address', data.ipAddress, true);
-      addMobileIpDetail('Port', data.ipPort, true);
-      addMobileIpDetail('Username', data.ipUsername, true);
-      if (card.hasAttribute('data-ip-password')) addMobileIpDetail('Password', data.ipPassword, true);
-      if (data.ipNotes) addMobileIpDetail('Notes', data.ipNotes, false);
-      if (!mobileIpDetailsModal.open) mobileIpDetailsModal.showModal();
-    });
-  });
-  document.getElementById('close-mobile-ip-details')?.addEventListener('click', () => mobileIpDetailsModal?.close());
-  mobileIpDetailsModal?.addEventListener('click', event => {
-    if (event.target === mobileIpDetailsModal) mobileIpDetailsModal.close();
-  });
+  // IP details are now rendered inline on each mobile card, matching the Accounts layout.
 
   document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copyTarget);
