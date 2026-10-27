@@ -1,3 +1,13 @@
+## Version 3.0.25 release notes
+
+- Complete the Telegram Account Vault workflow: browse account groups, search accounts, inspect credentials, add accounts, edit records, and confirm deletions. Account passwords remain encrypted in the database and conversation state.
+- When a superadmin signs in with a Telegram one-time code, consume the stored code immediately, then notify the configured bot chat with the user, code used, and a confirmation button. The code cannot be reused.
+- Replace the old mobile IP details dialog with inline detail cards matching Account Vault: group, IP address, port, username, permission-gated password, notes, and last update.
+- Keep mobile IP Edit/Delete actions directly available and retain separate filtering and scroll state for IP and account lists.
+- Restore simple text-only desktop table headings; use clean colored SVG icons beside record fields instead of decorating the headings.
+- Add regression coverage for Account Vault bot workflows, one-time code acknowledgement, mobile details and actions, simple headers, and record-group sorting.
+- Refresh CSS and JavaScript cache keys and publish v3.0.25.
+
 ## Version 3.0.24 release notes
 
 - Finalize the independent Account Vault module with its own account records, groups, forms, and CRUD operations, isolated from the IP and IP-group tables.
