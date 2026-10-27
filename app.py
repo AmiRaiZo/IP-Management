@@ -374,7 +374,7 @@ def save_secure_setting(key, value):
 
 
 def send_telegram_security_alert(message, reply_markup=None):
-    """Best-effort Telegram alert. Never include submitted passwords or TOTP codes."""
+    """Send a temporary security notice; never include passwords or reusable TOTP codes."""
     token = secure_setting("telegram_bot_token_enc")
     chat_id = secure_setting("telegram_chat_id_enc")
     if not token or not chat_id:
@@ -807,7 +807,7 @@ def handle_telegram_update(update):
         action = callback.get("data", "")
         if action == "ack_telegram_login":
             alert_text = str(message.get("text", ""))
-            if "Telegram one-time login code" not in alert_text:
+            if "Telegram one-time login code" not in alert_text or "Login acknowledged" in alert_text:
                 return
             acknowledged = alert_text + "\n\n✅ Login acknowledged. The one-time code has already been consumed."
             telegram_replace_message(
