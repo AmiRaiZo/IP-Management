@@ -174,6 +174,15 @@ def init_db():
           id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
           sort_order INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS account_groups (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS accounts (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, email TEXT NOT NULL,
+          password_enc TEXT NOT NULL DEFAULT '', group_id INTEGER REFERENCES account_groups(id) ON DELETE SET NULL,
+          created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS ips (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL,
           port INTEGER, username TEXT NOT NULL DEFAULT '', password_enc TEXT NOT NULL DEFAULT '',
@@ -223,6 +232,12 @@ def init_db():
         db.execute("INSERT OR IGNORE INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (now(),))
         default_group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
         db.execute("UPDATE ips SET group_id=? WHERE group_id IS NULL", (default_group_id,))
+        db.execute("INSERT OR IGNORE INTO account_groups(name,description,created_at,sort_order) VALUES('Default','Default group for saved accounts',?,0)", (now(),))
+        default_account_group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
+        db.execute("UPDATE accounts SET group_id=? WHERE group_id IS NULL", (default_account_group_id,))
+        db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_name ON accounts(name)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_group_id ON accounts(group_id)")
         mode_row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
         if not mode_row:
             legacy = db.execute("SELECT value FROM app_settings WHERE key='two_factor_required'").fetchone()
