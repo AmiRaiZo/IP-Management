@@ -435,3 +435,14 @@ html[data-theme="light"] .welcome-toast,html[data-theme="dark"] .welcome-toast{t
   .mobile-account-field{grid-template-columns:70px minmax(0,1fr)}
   .mobile-account-actions .btn{padding:7px 10px}
 }
+
+
+/* Ensure the Accounts mobile cards always expose a large, obvious edit action. */
+@media(max-width:720px){
+  .account-inventory-panel .mobile-account-list{display:grid!important;visibility:visible!important}
+  .account-inventory-panel .mobile-account-card{display:block!important;visibility:visible!important}
+  .account-inventory-panel .mobile-account-actions{display:flex!important;visibility:visible!important;opacity:1!important;align-items:stretch!important;gap:8px!important;width:100%;margin-top:14px;padding-top:13px;border-top:1px solid var(--border)}
+  .account-inventory-panel .mobile-account-actions .mobile-account-edit{display:inline-flex!important;flex:1 1 auto;min-width:0;min-height:42px;justify-content:center;white-space:normal}
+  .account-inventory-panel .mobile-account-actions form{display:flex!important;flex:0 0 auto;visibility:visible!important;margin:0!important}
+  .account-inventory-panel .mobile-account-actions form button{display:inline-flex!important;min-height:42px;justify-content:center}
+}
