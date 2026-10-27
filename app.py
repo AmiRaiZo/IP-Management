@@ -3312,7 +3312,7 @@ def latest_release():
         if not release_match:
             raise ValueError("GitHub API rate limit was reached and the latest release page did not identify a release tag.") from exc
         fallback_tag = release_match.group(1)
-        if not re.fullmatch(r"v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?", fallback_tag):
+        if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", fallback_tag):
             raise ValueError("GitHub API rate limit was reached and the latest release tag is invalid.") from exc
         version = fallback_tag.lstrip("v")
         refs = subprocess.run(
