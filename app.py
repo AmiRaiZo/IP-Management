@@ -1906,12 +1906,8 @@ def validate_account(form, require_password=False):
 
     if not name:
         return None, "Account name is required."
-    if not username:
-        return None, "Username is required."
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        return None, "Enter a valid email address."
-    if require_password and not password:
-        return None, "Password is required for a new account."
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return None, "Enter a valid email address when an email is provided."
     if len(password) > 2000:
         return None, "Password is too long."
 
@@ -1978,14 +1974,14 @@ def account_new():
         groups = db.execute("SELECT * FROM account_groups ORDER BY sort_order, id").fetchall()
         default_group = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()
     if request.method == "POST":
-        data, error = validate_account(request.form, require_password=True)
+        data, error = validate_account(request.form)
         if error:
             flash(error, "error")
         else:
             with connect_db() as db:
                 cursor = db.execute(
                     "INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                    (data["name"], data["username"], data["email"], data["password_enc"], data["group_id"],
+                    (data["name"], data["username"], data["email"], data["password_enc"] or "", data["group_id"],
                      request.user["username"], now(), now()),
                 )
                 account_id = cursor.lastrowid
@@ -2007,7 +2003,7 @@ def account_edit(account_id):
     if not account:
         abort(404)
     if request.method == "POST":
-        data, error = validate_account(request.form, require_password=False)
+        data, error = validate_account(request.form)
         if error:
             flash(error, "error")
         else:
