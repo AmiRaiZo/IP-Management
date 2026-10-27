@@ -411,6 +411,7 @@ class ArchiveTests(unittest.TestCase):
             patch.object(archive, "telegram_api", return_value={"ok": True}),
             patch.object(archive, "telegram_send") as send,
             patch.object(archive, "telegram_replace_message") as replace,
+            patch.object(archive, "audit"),
         ):
             archive.handle_telegram_update({"callback_query": {
                 "id": "account-add", "data": "account_add",
@@ -1205,7 +1206,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotEqual(row["password_enc"], "super-secret")
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn("super-secret", page)
-        self.assertIn("<span>Password</span></span></th>", page)
+        self.assertIn("<th>Password</th>", page)
         self.assertIn('data-copy-value="super-secret"', page)
         edit_page = self.client.get("/ips/1/edit").get_data(as_text=True)
         self.assertIn('id="password" name="password" type="password"', edit_page)
@@ -1218,13 +1219,13 @@ class ArchiveTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 302)
         page = self.client.get("/").get_data(as_text=True)
-        self.assertIn("<span>Password</span></span></th>", page)
+        self.assertIn("<th>Password</th>", page)
         self.assertIn("super-secret", page)
         response = self.client.post("/settings/directory", data={"csrf_token": self.csrf()})
         self.assertEqual(response.status_code, 302)
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn("super-secret", page)
-        self.assertIn("<span>Password</span></span></th>", page)
+        self.assertIn("<th>Password</th>", page)
 
     def test_non_superadmin_never_receives_saved_ip_passwords(self):
         user_id, secret = self.create_user("limited-password-view", role="admin")
@@ -1270,7 +1271,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.login("password-reader", user_secret).status_code, 302)
         directory = self.client.get("/")
         self.assertEqual(directory.status_code, 200)
-        self.assertIn(b"<span>Password</span></span></th>", directory.data)
+        self.assertIn(b"<th>Password</th>", directory.data)
         self.assertIn(b"allowed-secret", directory.data)
         self.assertIn(b'data-copy-value="allowed-secret"', directory.data)
 
@@ -1342,7 +1343,7 @@ class ArchiveTests(unittest.TestCase):
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".mobile-ip-list{display:grid!important;gap:11px;padding:13px12px16px!important}", "".join(stylesheet.split()))
         self.assertIn(".mobile-ip-actions{display:flex!important", stylesheet)
-        self.assertIn(".account-inventory-panel .mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", "".join(stylesheet.split()))
+        self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", "".join(stylesheet.split()))
 
     def test_update_success_button_says_ok(self):
         _, secret = self.create_user("update-success-user")
