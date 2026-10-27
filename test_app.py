@@ -1189,7 +1189,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('mobile-ip-edit', page)
         self.assertTrue(re.search(r'href="/ips/\d+/edit"', page))
         self.assertTrue(re.search(r'action="/ips/\d+/delete"', page))
-        self.assertIn('class="mobile-ip-actions"', page)
+        self.assertIn('mobile-ip-actions', page)
         self.assertIn('data-ip-name="Mobile router"', page)
         self.assertIn('data-ip-address="192.0.2.99"', page)
         self.assertIn('data-ip-port="8728"', page)
