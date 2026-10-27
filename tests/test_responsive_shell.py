@@ -58,6 +58,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_mobile_ip_cards_include_inline_details_and_direct_edit_delete_actions(self):
         self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
+        self.assertNotIn("IP record #{{ ip.id }}", self.index)
+        self.assertIn('class="mobile-account-fields"', self.accounts)
         self.assertIn("mobile-ip-edit", self.index)
         self.assertIn("url_for('ip_edit', ip_id=ip.id)", self.index)
         self.assertIn("url_for('ip_delete', ip_id=ip.id)", self.index)
@@ -200,9 +202,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.5.0")
-        self.assertIn("style.css') }}?v=3.5.0", self.base)
-        self.assertIn("app.js') }}?v=3.5.0", self.base)
+        self.assertEqual(self.version, "3.5.1")
+        self.assertIn("style.css') }}?v=3.5.1", self.base)
+        self.assertIn("app.js') }}?v=3.5.1", self.base)
 
 
 if __name__ == "__main__":
