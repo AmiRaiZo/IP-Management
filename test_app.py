@@ -221,7 +221,7 @@ class ArchiveTests(unittest.TestCase):
             }})
         self.assertTrue(send.called)
         message = send.call_args.args[1]
-        match = re.search(r"(?<!\\d)(\\d{6})(?!\\d)", message)
+        match = re.search(r"(?<!\d)(\d{6})(?!\d)", message)
         self.assertIsNotNone(match)
         code = match.group(1)
         with archive.connect_db() as db:
@@ -374,6 +374,116 @@ class ArchiveTests(unittest.TestCase):
             self.assertNotIn("copy_text", str(detail.get("reply_markup", {})))
             self.assertEqual(detail["message_id"], 101)
             self.assertEqual(archive.telegram_get_state()["mode"], "browse_detail")
+
+    def test_telegram_one_time_code_alert_contains_user_code_and_ack_button(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with patch.object(archive, "send_telegram_security_alert", return_value=True) as alert:
+            self.assertTrue(archive.send_login_success_alert(
+                "one-time-admin", "203.0.113.81", telegram_code_used=True, telegram_code_value="246810"
+            ))
+        text = alert.call_args.args[0]
+        markup = alert.call_args.kwargs["reply_markup"]
+        self.assertIn("one-time-admin", text)
+        self.assertIn("Code used: 246810", text)
+        self.assertIn("cannot be reused", text)
+        self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"], "ack_telegram_login")
+
+        with patch.object(archive, "telegram_api", return_value={"ok": True}), \\
+             patch.object(archive, "telegram_replace_message") as replace:
+            archive.handle_telegram_update({"callback_query": {
+                "id": "confirm-one-time", "data": "ack_telegram_login",
+                "message": {"message_id": 222, "text": text, "chat": {"id": 12345, "type": "private"}},
+            }})
+        replace.assert_called_once()
+        acknowledged = replace.call_args.args[2]
+        self.assertIn("Login acknowledged", acknowledged)
+        self.assertIn("one-time code has already been consumed", acknowledged)
+
+    def test_telegram_account_vault_supports_add_search_browse_edit_and_confirmed_delete(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        with archive.connect_db() as db:
+            group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
+
+        with patch.object(archive, "telegram_api", return_value={"ok": True}), \\
+             patch.object(archive, "telegram_send") as send, \\
+             patch.object(archive, "telegram_replace_message") as replace:
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-add", "data": "account_add",
+                "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
+            }})
+            for message_id, value in ((11, "Bot Work Email"), (12, "-"),
+                                       (13, "bot-work@example.com"), (14, "vault-password-42")):
+                archive.handle_telegram_update({"message": {
+                    "message_id": message_id, "chat": {"id": 12345, "type": "private"}, "text": value,
+                }})
+            group_prompt = next(call for call in send.call_args_list if "choose an account group" in call.args[1].lower())
+            self.assertEqual(group_prompt.args[2]["inline_keyboard"][0][0]["callback_data"], f"account_group:{group_id}")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-add-group", "data": f"account_group:{group_id}",
+                "message": {"message_id": 15, "chat": {"id": 12345, "type": "private"}},
+            }})
+            with archive.connect_db() as db:
+                row = db.execute("SELECT * FROM accounts WHERE name='Bot Work Email'").fetchone()
+            self.assertIsNotNone(row)
+            account_id = row["id"]
+            encrypted_password = row["password_enc"]
+            self.assertNotEqual(encrypted_password, "vault-password-42")
+            self.assertEqual(archive.vault.decrypt(encrypted_password.encode()).decode(), "vault-password-42")
+            self.assertEqual(row["email"], "bot-work@example.com")
+            self.assertEqual(row["group_id"], group_id)
+
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-search", "data": "account_search",
+                "message": {"message_id": 20, "chat": {"id": 12345, "type": "private"}},
+            }})
+            archive.handle_telegram_update({"message": {
+                "message_id": 21, "chat": {"id": 12345, "type": "private"}, "text": "bot-work@example.com",
+            }})
+            self.assertEqual(archive.telegram_get_state()["mode"], "account_search_results")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-select-search", "data": f"account_search_item:{account_id}",
+                "message": {"message_id": 22, "chat": {"id": 12345, "type": "private"}},
+            }})
+            detail = replace.call_args.args[2]
+            self.assertIn("Bot Work Email", detail)
+            self.assertIn("bot-work@example.com", detail)
+            self.assertIn("vault-password-42", detail)
+            markup = replace.call_args.args[3]
+            self.assertIn(f"account_edit:{account_id}", str(markup))
+            self.assertIn(f"account_delete:{account_id}", str(markup))
+
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-edit", "data": f"account_edit:{account_id}",
+                "message": {"message_id": 23, "chat": {"id": 12345, "type": "private"}},
+            }})
+            for message_id, value in ((24, "Bot Work Email Updated"), (25, "-"), (26, "-"), (27, "-")):
+                archive.handle_telegram_update({"message": {
+                    "message_id": message_id, "chat": {"id": 12345, "type": "private"}, "text": value,
+                }})
+            edit_state = archive.telegram_get_state()
+            self.assertEqual(edit_state["mode"], "account_edit")
+            self.assertEqual(edit_state["step"], "group")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-edit-keep-group", "data": "account_edit_keep_group",
+                "message": {"message_id": 28, "chat": {"id": 12345, "type": "private"}},
+            }})
+            with archive.connect_db() as db:
+                edited = db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+            self.assertEqual(edited["name"], "Bot Work Email Updated")
+            self.assertEqual(edited["password_enc"], encrypted_password, "Edit should keep password when '-' is sent")
+
+            archive.telegram_show_account("12345", 29, account_id, source="browse")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-delete", "data": f"account_delete:{account_id}",
+                "message": {"message_id": 29, "chat": {"id": 12345, "type": "private"}},
+            }})
+            self.assertEqual(archive.telegram_get_state()["mode"], "account_delete_confirm")
+            archive.handle_telegram_update({"callback_query": {
+                "id": "account-delete-confirm", "data": f"account_delete_confirm:{account_id}",
+                "message": {"message_id": 29, "chat": {"id": 12345, "type": "private"}},
+            }})
+            with archive.connect_db() as db:
+                self.assertIsNone(db.execute("SELECT id FROM accounts WHERE id=?", (account_id,)).fetchone())
 
     def test_telegram_menu_has_account_vault_and_2fa_actions(self):
         user_id, _ = self.create_user("telegram-button-admin", role="superadmin")
@@ -1214,13 +1324,13 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('data-copy-value="mobile-secret"', page)
         self.assertIn("Uplink device", page)
         self.assertIn("mobile-ip-edit", page)
-        self.assertTrue(re.search(r'href="/ips/\\d+/edit"', page))
-        self.assertTrue(re.search(r'action="/ips/\\d+/delete"', page))
+        self.assertTrue(re.search(r'href="/ips/\d+/edit"', page))
+        self.assertTrue(re.search(r'action="/ips/\d+/delete"', page))
         self.assertIn('name="csrf_token"', page)
         self.assertNotIn('id="mobile-ip-details-modal"', page)
         self.assertNotIn('class="column-icon', page)
         script = (archive.BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
-        self.assertIn("document.querySelectorAll('[data-mobile-ip-card]')", script) is False
+        self.assertNotIn("document.querySelectorAll('[data-mobile-ip-card]')", script)
         self.assertIn("event.target.closest('[data-copy-value]')", script)
         self.assertIn("mobileRows.forEach(row =>", script)
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
