@@ -1,3 +1,8 @@
+## Version 3.0.28 release notes
+
+- Refresh sidebar navigation with crisp, custom line icons for IP addresses, groups, accounts, users, settings, security, and updates.
+- Add soft per-section color accents, polished hover motion, and a stronger active-state icon treatment in both light and dark themes.
+
 ## Version 3.0.27 release notes
 
 - Fix update checks when GitHub's unauthenticated REST API rate limit is exhausted by resolving the latest public release page and its verified Git tag without a personal access token.
