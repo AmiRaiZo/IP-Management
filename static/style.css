@@ -610,7 +610,7 @@ html[data-theme="dark"] .mobile-ip-card,html[data-theme="dark"] .mobile-account-
 
 
 /* v3.5.0 inventory refresh */
-.group-tag{--group-color:#6478df;display:inline-flex;align-items:center;max-width:100%;padding:5px 10px;border-radius:999px;background:color-mix(in srgb,var(--group-color) 13%,var(--surface));border:1px solid color-mix(in srgb,var(--group-color) 30%,var(--border));color:var(--group-color);font-weight:750;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.group-tag{display:inline-flex;align-items:center;max-width:100%;padding:5px 10px;border-radius:999px;background:color-mix(in srgb,var(--group-color) 13%,var(--surface));border:1px solid color-mix(in srgb,var(--group-color) 30%,var(--border));color:var(--group-color);font-weight:750;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .group-name-text{color:var(--group-color,#6478df)!important}
 .group-symbol{color:var(--group-color,#6478df)!important;background:color-mix(in srgb,var(--group-color,#6478df) 13%,var(--surface))!important;border:1px solid color-mix(in srgb,var(--group-color,#6478df) 25%,var(--border))}
 .group-inline-color{display:flex;align-items:center;gap:5px;margin:0;padding:3px 5px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)}
