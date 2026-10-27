@@ -583,3 +583,27 @@ html[data-theme="dark"] .nav-icon-security{background:#3c2831;color:#ff9cac}
 html[data-theme="dark"] .nav-icon-updates{background:#1c383e;color:#7be0e5}
 html[data-theme="dark"] .nav-links a.active .nav-icon{background:linear-gradient(145deg,#708bff,#526be7);color:#fff}
 @media(max-width:720px){.nav-icon{width:24px;height:24px;flex-basis:24px;border-radius:7px}.nav-icon svg{width:14px;height:14px}.nav-links a{gap:7px}}
+
+
+/* v3.0.29: card-first responsive inventories, group color chips and password reveal */
+:root{--group-palette-0:#5575e8;--group-palette-1:#169b78;--group-palette-2:#b7791f;--group-palette-3:#8b5bd6;--group-palette-4:#d14d72;--group-palette-5:#168ca0;--group-palette-6:#3b82c4;--group-palette-7:#65758b}
+.group-color-0{--group-color:var(--group-palette-0)}.group-color-1{--group-color:var(--group-palette-1)}.group-color-2{--group-color:var(--group-palette-2)}.group-color-3{--group-color:var(--group-palette-3)}.group-color-4{--group-color:var(--group-palette-4)}.group-color-5{--group-color:var(--group-palette-5)}.group-color-6{--group-color:var(--group-palette-6)}.group-color-7{--group-color:var(--group-palette-7)}
+.group-tag{display:inline-flex;align-items:center;max-width:100%;padding:5px 10px;border-radius:999px;background:color-mix(in srgb,var(--group-color,var(--group-palette-0)) 12%,transparent);border:1px solid color-mix(in srgb,var(--group-color,var(--group-palette-0)) 28%,transparent);color:var(--group-color,var(--group-palette-0));font-weight:750;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.group-color-text-0{color:var(--group-palette-0)}.group-color-text-1{color:var(--group-palette-1)}.group-color-text-2{color:var(--group-palette-2)}.group-color-text-3{color:var(--group-palette-3)}.group-color-text-4{color:var(--group-palette-4)}.group-color-text-5{color:var(--group-palette-5)}.group-color-text-6{color:var(--group-palette-6)}.group-color-text-7{color:var(--group-palette-7)}
+.group-symbol.group-color-0,.group-symbol.group-color-1,.group-symbol.group-color-2,.group-symbol.group-color-3,.group-symbol.group-color-4,.group-symbol.group-color-5,.group-symbol.group-color-6,.group-symbol.group-color-7{color:var(--group-color);background:color-mix(in srgb,var(--group-color) 13%,transparent);border:1px solid color-mix(in srgb,var(--group-color) 25%,transparent);border-radius:10px}
+.group-color-picker{display:flex;align-items:center;gap:10px}.group-color-picker input[type=color]{width:48px;height:38px;padding:3px;border:1px solid var(--border,#dbe2ed);border-radius:10px;background:var(--surface,#fff);cursor:pointer}
+.password-reveal-copy code{letter-spacing:.08em}.password-reveal-copy.password-is-revealed code{letter-spacing:normal;overflow-wrap:anywhere}.password-reveal-copy{max-width:100%;text-align:left}
+.mobile-ip-avatar,.mobile-account-avatar{width:29px;height:29px;min-width:29px;flex:0 0 29px;border-radius:9px;font-size:12px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;background:linear-gradient(145deg,#e8edff,#d8e1ff);color:#465fc2;border:1px solid #cdd8ff}
+.mobile-ip-record-heading{align-items:center}.mobile-ip-title{min-width:0;flex:1}.mobile-ip-title strong{overflow-wrap:anywhere}
+.mobile-account-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.mobile-account-heading>strong{flex:1;min-width:0;overflow-wrap:anywhere}.mobile-account-heading .mobile-account-avatar{order:-1}
+@media(min-width:721px){
+.mobile-ip-list,.mobile-account-list{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(min(100%,390px),1fr));gap:14px;padding:16px}
+.table-scroll:not(.keep-table){display:none!important}
+.mobile-ip-card,.mobile-account-card{min-width:0;border:1px solid var(--border,#e2e8f2);border-radius:16px;background:var(--surface,#fff);box-shadow:0 4px 15px #1b315008;overflow:hidden;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.mobile-ip-card:hover,.mobile-account-card:hover{transform:translateY(-2px);box-shadow:0 10px 25px #1b315012;border-color:#c6d2f0}
+.mobile-ip-record-heading,.mobile-account-heading{padding:15px 16px;background:linear-gradient(120deg,#f7f9ff,#fff);border-bottom:1px solid var(--border,#e8edf5)}
+.mobile-ip-fields,.mobile-account-fields{padding:10px 16px 14px}
+.mobile-ip-actions,.mobile-account-actions{padding:0 16px 15px;justify-content:flex-end}
+}
+html[data-theme="dark"] .mobile-ip-record-heading,html[data-theme="dark"] .mobile-account-heading{background:linear-gradient(120deg,#202b40,#1b2434)}
+html[data-theme="dark"] .mobile-ip-card,html[data-theme="dark"] .mobile-account-card{background:var(--surface,#182131);border-color:#334158}
