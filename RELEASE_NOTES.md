@@ -1,3 +1,11 @@
+## Version 3.5.0 release notes
+
+- IP and account passwords stay masked until clicked; clicking reveals and copies the value in one action.
+- Added persistent per-group colors for IP groups and account groups, with a color picker on creation and a saveable color control on each existing group.
+- Group labels and names use coordinated color accents across the IP and account directories.
+- Desktop IP/account inventories now use the same responsive cards as mobile instead of wide record tables.
+- Profile initial badges are smaller and sit before record names; Edit actions are more subtle and compact.
+
 ## Version 3.0.28 release notes
 
 - Refresh sidebar navigation with crisp, custom line icons for IP addresses, groups, accounts, users, settings, security, and updates.
