@@ -388,8 +388,10 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("cannot be reused", text)
         self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"], "ack_telegram_login")
 
-        with patch.object(archive, "telegram_api", return_value={"ok": True}), \\
-             patch.object(archive, "telegram_replace_message") as replace:
+        with (
+            patch.object(archive, "telegram_api", return_value={"ok": True}),
+            patch.object(archive, "telegram_replace_message") as replace,
+        ):
             archive.handle_telegram_update({"callback_query": {
                 "id": "confirm-one-time", "data": "ack_telegram_login",
                 "message": {"message_id": 222, "text": text, "chat": {"id": 12345, "type": "private"}},
@@ -399,14 +401,17 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("Login acknowledged", acknowledged)
         self.assertIn("one-time code has already been consumed", acknowledged)
 
+
     def test_telegram_account_vault_supports_add_search_browse_edit_and_confirmed_delete(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with archive.connect_db() as db:
             group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
 
-        with patch.object(archive, "telegram_api", return_value={"ok": True}), \\
-             patch.object(archive, "telegram_send") as send, \\
-             patch.object(archive, "telegram_replace_message") as replace:
+        with (
+            patch.object(archive, "telegram_api", return_value={"ok": True}),
+            patch.object(archive, "telegram_send") as send,
+            patch.object(archive, "telegram_replace_message") as replace,
+        ):
             archive.handle_telegram_update({"callback_query": {
                 "id": "account-add", "data": "account_add",
                 "message": {"message_id": 10, "chat": {"id": 12345, "type": "private"}},
@@ -484,6 +489,7 @@ class ArchiveTests(unittest.TestCase):
             }})
             with archive.connect_db() as db:
                 self.assertIsNone(db.execute("SELECT id FROM accounts WHERE id=?", (account_id,)).fetchone())
+
 
     def test_telegram_menu_has_account_vault_and_2fa_actions(self):
         user_id, _ = self.create_user("telegram-button-admin", role="superadmin")
