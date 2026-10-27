@@ -1122,6 +1122,123 @@ def handle_telegram_update(update):
                       {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]},
                       parse_mode="HTML")
         return
+    if state.get("mode") == "account_search":
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
+        telegram_search_accounts(chat_id, None, text)
+        return
+    if state.get("mode") == "account_add":
+        # Delete chat input best-effort; this flow may include account passwords.
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
+        step = state.get("step")
+        data = state.get("data") or {}
+        if step == "name":
+            if not text:
+                telegram_send(chat_id, "Account name is required. Please send a name:")
+                return
+            data["name"] = text[:120]
+            state.update(step="username", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Step 2 of 5 — send the username, or - to leave it blank:")
+            return
+        if step == "username":
+            data["username"] = "" if text == "-" else text[:120]
+            state.update(step="email", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Step 3 of 5 — send the email, or - to leave it blank:")
+            return
+        if step == "email":
+            data["email"] = "" if text == "-" else text[:254]
+            state.update(step="password", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Step 4 of 5 — send the password, or - to leave it blank:")
+            return
+        if step == "password":
+            data["password"] = "" if text == "-" else text[:2000]
+            with connect_db() as db:
+                groups = db.execute("SELECT id,name FROM account_groups ORDER BY sort_order,id").fetchall()
+            if not groups:
+                telegram_set_state({})
+                telegram_send(chat_id, "No account groups are available. Reopen Account Vault and try again.")
+                return
+            state.update(step="group", data=data)
+            telegram_set_state(state)
+            markup = {"inline_keyboard": [[
+                {"text": str(group["name"])[:60], "callback_data": f"account_group:{group['id']}"}
+            ] for group in groups]}
+            markup["inline_keyboard"].append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+            telegram_send(chat_id, "Step 5 of 5 — choose an account group:", markup)
+            return
+        telegram_set_state({})
+        telegram_send(chat_id, "The account setup session expired. Start again from Account Vault.")
+        return
+    if state.get("mode") == "account_edit":
+        if message.get("message_id"):
+            telegram_delete_message(chat_id, message["message_id"])
+        step = state.get("step")
+        data = state.get("data") or {}
+        if step == "name":
+            if text and text != "-":
+                data["name"] = text[:120]
+            if not data.get("name"):
+                telegram_send(chat_id, "Account name is required. Send a name:")
+                return
+            state.update(step="username", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Edit username — send a new value, - to keep it, or /clear to empty it:")
+            return
+        if step == "username":
+            if text == "/clear":
+                data["username"] = ""
+            elif text != "-":
+                data["username"] = text[:120]
+            state.update(step="email", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Edit email — send a new value, - to keep it, or /clear to empty it:")
+            return
+        if step == "email":
+            if text == "/clear":
+                data["email"] = ""
+            elif text != "-":
+                data["email"] = text[:254]
+            state.update(step="password", data=data)
+            telegram_set_state(state)
+            telegram_send(chat_id, "Edit password — send a new password, - to keep it, or /clear to remove it:")
+            return
+        if step == "password":
+            if text == "/clear":
+                data["password_action"] = "clear"
+                data.pop("password", None)
+            elif text == "-":
+                data["password_action"] = "keep"
+                data.pop("password", None)
+            else:
+                data["password_action"] = "set"
+                data["password"] = text[:2000]
+            with connect_db() as db:
+                groups = db.execute("SELECT id,name FROM account_groups ORDER BY sort_order,id").fetchall()
+            if not groups:
+                telegram_set_state({})
+                telegram_send(chat_id, "No account groups are available. Reopen Account Vault and try again.")
+                return
+            state.update(step="group", data=data)
+            telegram_set_state(state)
+            keyboard = [[
+                {"text": str(group["name"])[:55], "callback_data": f"account_edit_group:{group['id']}"}
+            ] for group in groups]
+            if data.get("group_id"):
+                keyboard.insert(0, [{"text": f"✅ Keep current group: {str(data.get('group_name') or 'Default')[:35]}",
+                                     "callback_data": "account_edit_keep_group"}])
+            keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+            telegram_send(chat_id, "Choose the account group to save the edit:", {"inline_keyboard": keyboard})
+            return
+        if step == "group":
+            telegram_send(chat_id, "Choose an account group using the buttons above.")
+            return
+        telegram_set_state({})
+        telegram_send(chat_id, "The edit session expired. Open the account again.")
+        return
     if state.get("mode") == "add":
         # Best-effort deletion also removes submitted passwords from the private bot chat.
         if message.get("message_id"):
