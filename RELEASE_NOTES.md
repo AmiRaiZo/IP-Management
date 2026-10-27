@@ -1,3 +1,10 @@
+## Version 3.5.1 release notes
+
+- Removed the unnecessary internal “IP record #…” line from IP card headers.
+- Applied saved group colors reliably to group names, group icons, and IP/account group badges, with a consistent fallback palette.
+- Reworked account card field spacing and footer actions to match the IP cards; fixed avatar alignment and missing inner field padding.
+- Bumped static asset cache keys so browsers load the corrected CSS immediately.
+
 ## Version 3.5.0 release notes
 
 - IP and account passwords stay masked until clicked; clicking reveals and copies the value in one action.
