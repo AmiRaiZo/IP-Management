@@ -1,3 +1,13 @@
+## Version 3.0.21 release notes
+
+- In the separate Accounts module, make only the account name mandatory. Username, email, and password may be left blank; if an email is entered, it must still be valid.
+- Allow new account records without a password and store an empty value safely; a blank password while editing continues to preserve the current saved password.
+- Remove the redundant “Only account groups appear here; IP groups are not shared” note from the account form.
+- Make the phone account card's **Edit account** action prominent, larger, and explicitly visible; retain a separate delete action.
+- Display a dash instead of empty copy buttons when an optional username or email is blank.
+- Add regression tests for saving name-only accounts, enforcing the name requirement, and confirming the account edit action appears in the list.
+- Refresh stylesheet and JavaScript cache keys and publish v3.0.21.
+
 ## Version 3.0.20 release notes
 
 - Add a standalone **Accounts** section to save a display name, username, email address, and password for websites or services.
