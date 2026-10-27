@@ -558,3 +558,28 @@ html[data-theme="dark"] .mobile-ip-avatar{background:linear-gradient(145deg,#1b2
   .account-inventory-panel .mobile-account-actions{display:flex!important;visibility:visible!important;opacity:1!important;align-items:stretch!important}
   .account-inventory-panel .mobile-account-actions .mobile-account-edit{display:inline-flex!important;min-height:42px;flex:1 1 auto}
 }
+
+
+/* Refined sidebar icon system */
+.nav-links a{gap:11px;min-height:43px}
+.nav-icon{width:27px;height:27px;flex:0 0 27px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;background:#edf1ff;color:#526de5;transition:transform .18s ease,background .18s ease,color .18s ease,box-shadow .18s ease}
+.nav-icon svg{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-icon-groups{background:#e8f7f1;color:#1d9a75}
+.nav-icon-accounts{background:#fff2df;color:#bd7b22}
+.nav-icon-account-groups{background:#f2eaff;color:#8a5ad3}
+.nav-icon-users{background:#e5f3ff;color:#347fc0}
+.nav-icon-settings{background:#edf0f5;color:#68758b}
+.nav-icon-security{background:#ffe9eb;color:#d04f64}
+.nav-icon-updates{background:#e5f7f8;color:#198d98}
+.nav-links a:hover .nav-icon{transform:translateY(-1px);box-shadow:0 3px 9px #172b4d12}
+.nav-links a.active .nav-icon{background:linear-gradient(145deg,#627fff,#405fe0);color:#fff;box-shadow:0 4px 10px #4569e82e}
+html[data-theme="dark"] .nav-icon{background:#283254;color:#a9b7ff}
+html[data-theme="dark"] .nav-icon-groups{background:#18382f;color:#69d9ae}
+html[data-theme="dark"] .nav-icon-accounts{background:#3a3022;color:#f0bd70}
+html[data-theme="dark"] .nav-icon-account-groups{background:#332744;color:#c6a1ff}
+html[data-theme="dark"] .nav-icon-users{background:#203448;color:#8bcaff}
+html[data-theme="dark"] .nav-icon-settings{background:#293142;color:#bac5d8}
+html[data-theme="dark"] .nav-icon-security{background:#3c2831;color:#ff9cac}
+html[data-theme="dark"] .nav-icon-updates{background:#1c383e;color:#7be0e5}
+html[data-theme="dark"] .nav-links a.active .nav-icon{background:linear-gradient(145deg,#708bff,#526be7);color:#fff}
+@media(max-width:720px){.nav-icon{width:24px;height:24px;flex-basis:24px;border-radius:7px}.nav-icon svg{width:14px;height:14px}.nav-links a{gap:7px}}
