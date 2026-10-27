@@ -100,7 +100,12 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('data-copy-value="{{ ip.password_plain }}"', self.index)
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn('class="mobile-account-list"', self.accounts)
-        self.assertIn('class="mobile-account-field"', self.accounts)
+        self.assertIn('class="mobile-data-row mobile-account-group-row"', self.accounts)
+        self.assertIn('class="mobile-ip-card mobile-account-card"', self.accounts)
+        self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
+        self.assertIn('color: {{ card_group_color }} !important', self.accounts)
+        self.assertIn('color: {{ card_group_color }} !important', self.index)
+        self.assertIn('color: {{ group_color }} !important', self.groups)
         self.assertNotIn('id="mobile-ip-details-modal"', self.index)
         self.assertNotIn("mobileIpDetailsModal", self.js)
         self.assertIn("event.target.closest('[data-copy-value]')", self.js)
@@ -202,9 +207,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.5.1")
-        self.assertIn("style.css') }}?v=3.5.1", self.base)
-        self.assertIn("app.js') }}?v=3.5.1", self.base)
+        self.assertEqual(self.version, "3.5.2")
+        self.assertIn("style.css') }}?v=3.5.2", self.base)
+        self.assertIn("app.js') }}?v=3.5.2", self.base)
 
 
 if __name__ == "__main__":
