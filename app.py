@@ -582,6 +582,183 @@ def telegram_browse_ip(chat_id, message_id, group_id, ip_id):
     telegram_replace_message(chat_id, message_id, detail, {"inline_keyboard": keyboard}, parse_mode="HTML")
 
 
+
+def telegram_browse_account_groups(chat_id, message_id):
+    with connect_db() as db:
+        groups = db.execute("SELECT id,name FROM account_groups ORDER BY sort_order,id").fetchall()
+    keyboard = [[{"text": str(group["name"])[:60], "callback_data": f"account_browse_group:{group['id']}"}]
+                for group in groups]
+    keyboard.extend([
+        [{"text": "➕ Add account", "callback_data": "account_add"},
+         {"text": "🔎 Search accounts", "callback_data": "account_search"}],
+        [{"text": "⬅️ Menu", "callback_data": "menu"}],
+    ])
+    telegram_set_state({"mode": "browse_account_groups"})
+    text = "Account Vault — choose an account group:" if groups else "No account groups are available yet."
+    telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
+
+
+def telegram_browse_account_group(chat_id, message_id, group_id):
+    with connect_db() as db:
+        group = db.execute("SELECT id,name FROM account_groups WHERE id=?", (group_id,)).fetchone()
+        if not group:
+            telegram_browse_account_groups(chat_id, message_id)
+            return
+        rows = db.execute(
+            "SELECT id,name,username,email FROM accounts WHERE group_id=? ORDER BY name COLLATE NOCASE,id",
+            (group_id,),
+        ).fetchall()
+    keyboard = []
+    for row in rows:
+        label = str(row["name"] or "Unnamed account")
+        if row["username"]:
+            label += f" · {row['username']}"
+        keyboard.append([{"text": label[:60], "callback_data": f"account_browse_item:{group_id}:{row['id']}"}])
+    keyboard.extend([
+        [{"text": "➕ Add account", "callback_data": "account_add"}],
+        [{"text": "⬅️ Account groups", "callback_data": "account_groups"},
+         {"text": "⌂ Menu", "callback_data": "menu"}],
+    ])
+    telegram_set_state({"mode": "browse_accounts", "group_id": int(group["id"]), "group_name": group["name"]})
+    text = f"Account group: {group['name']}\nChoose an account:" if rows else f"Account group: {group['name']}\nNo accounts in this group yet."
+    telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
+
+
+def telegram_show_account(chat_id, message_id, account_id, source="browse", search_query=""):
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT accounts.*, account_groups.name AS group_name FROM accounts "
+            "LEFT JOIN account_groups ON account_groups.id=accounts.group_id WHERE accounts.id=?",
+            (account_id,),
+        ).fetchone()
+    if not row:
+        telegram_replace_message(
+            chat_id, message_id, "That account no longer exists.",
+            {"inline_keyboard": [[{"text": "⬅️ Account groups", "callback_data": "account_groups"},
+                                  {"text": "⌂ Menu", "callback_data": "menu"}]]},
+        )
+        telegram_set_state({})
+        return
+    try:
+        password = vault.decrypt((row["password_enc"] or "").encode("ascii")).decode("utf-8") if row["password_enc"] else "-"
+    except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+        password = "-"
+    detail = (
+        f"📌 Name: {html.escape(str(row['name'] or '-'))}\n"
+        f"👤 Username: {telegram_code(row['username'])}\n"
+        f"✉️ Email: {telegram_code(row['email'])}\n"
+        f"🔑 Password: {telegram_code(password)}\n"
+        f"📁 Account group: {html.escape(str(row['group_name'] or 'Default'))}\n"
+        f"⏰ Last updated: {html.escape(str((row['updated_at'] or '-')[:19]))}"
+    )
+    group_id = row["group_id"]
+    if source == "search":
+        back_button = {"text": "⬅️ Search results", "callback_data": "account_search_back"}
+    else:
+        back_button = {"text": "⬅️ Group accounts", "callback_data": f"account_browse_group:{group_id}"}
+    keyboard = [
+        [{"text": "✏️ Edit account", "callback_data": f"account_edit:{row['id']}"},
+         {"text": "🗑 Delete account", "callback_data": f"account_delete:{row['id']}"}],
+        [back_button, {"text": "⌂ Menu", "callback_data": "menu"}],
+    ]
+    telegram_set_state({
+        "mode": "account_detail", "account_id": int(row["id"]), "group_id": group_id,
+        "source": source, "search_query": search_query[:100],
+    })
+    telegram_replace_message(chat_id, message_id, detail, {"inline_keyboard": keyboard}, parse_mode="HTML")
+
+
+def telegram_search_accounts(chat_id, message_id, term, replace_message=False):
+    query = str(term or "").strip()[:100]
+    if not query:
+        telegram_set_state({"mode": "account_search", "step": "query"})
+        telegram_send(chat_id, "Please send an account name, username, or email to search.")
+        return
+    like = f"%{query}%"
+    with connect_db() as db:
+        rows = db.execute(
+            "SELECT id,name,username,email FROM accounts "
+            "WHERE name LIKE ? OR username LIKE ? OR email LIKE ? "
+            "ORDER BY name COLLATE NOCASE,id LIMIT 10",
+            (like, like, like),
+        ).fetchall()
+    if not rows:
+        telegram_set_state({"mode": "account_search", "step": "query"})
+        text = "No account matched that search. Send another name, username, or email, or use /menu to cancel."
+        keyboard = {"inline_keyboard": [[{"text": "⬅️ Menu", "callback_data": "menu"}]]}
+        if replace_message and message_id:
+            telegram_replace_message(chat_id, message_id, text, keyboard)
+        else:
+            telegram_send(chat_id, text, keyboard)
+        return
+    ids = [int(row["id"]) for row in rows]
+    keyboard = []
+    for row in rows:
+        label = str(row["name"] or "Unnamed account")
+        if row["username"]:
+            label += f" · {row['username']}"
+        keyboard.append([{"text": label[:60], "callback_data": f"account_search_item:{row['id']}"}])
+    keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+    telegram_set_state({"mode": "account_search_results", "query": query, "account_ids": ids})
+    text = f"Account search results for “{query}” — choose a record:"
+    if replace_message and message_id:
+        telegram_replace_message(chat_id, message_id, text, {"inline_keyboard": keyboard})
+    else:
+        telegram_send(chat_id, text, {"inline_keyboard": keyboard})
+
+
+def telegram_save_account_edit(chat_id, message_id, selected_group_id=None):
+    state = telegram_get_state()
+    if state.get("mode") != "account_edit" or state.get("step") != "group":
+        return
+    try:
+        account_id = int(state.get("account_id"))
+    except (TypeError, ValueError):
+        telegram_set_state({})
+        telegram_send(chat_id, "The edit session expired. Open the account again.")
+        return
+    data = state.get("data") or {}
+    password_action = data.get("password_action", "keep")
+    form_data = {
+        "name": data.get("name", ""),
+        "username": data.get("username", ""),
+        "email": data.get("email", ""),
+        "password": data.get("password", "") if password_action == "set" else "",
+        "group_id": str(selected_group_id if selected_group_id is not None else data.get("group_id", "")),
+    }
+    clean, error = validate_account(MultiDict(form_data))
+    if error:
+        telegram_set_state(state)
+        telegram_send(chat_id, f"Invalid account details: {error}\nPlease run Edit account again.")
+        return
+    with connect_db() as db:
+        current = db.execute("SELECT id,name,password_enc FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if not current:
+            telegram_set_state({})
+            telegram_send(chat_id, "That account was deleted before the edit could be saved.")
+            return
+        if password_action == "set":
+            encrypted_password = clean["password_enc"] or ""
+        elif password_action == "clear":
+            encrypted_password = ""
+        else:
+            encrypted_password = current["password_enc"] or ""
+        db.execute(
+            "UPDATE accounts SET name=?,username=?,email=?,password_enc=?,group_id=?,updated_at=? WHERE id=?",
+            (clean["name"], clean["username"], clean["email"], encrypted_password,
+             clean["group_id"], now(), account_id),
+        )
+    audit("account_updated", f"id={account_id}; name={clean['name']}; source=telegram-bot")
+    telegram_set_state({})
+    telegram_replace_message(
+        chat_id, message_id,
+        f"✅ Account updated.\n📌 {html.escape(str(clean['name']))}\nAccount ID: {account_id}",
+        {"inline_keyboard": [[{"text": "⬅️ Account groups", "callback_data": "account_groups"},
+                              {"text": "⌂ Menu", "callback_data": "menu"}]]},
+        parse_mode="HTML",
+    )
+
+
 def telegram_set_state(state):
     save_secure_setting("telegram_conversation_state_enc", json.dumps(state, ensure_ascii=False))
 
