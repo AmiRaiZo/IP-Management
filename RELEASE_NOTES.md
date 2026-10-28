@@ -4,6 +4,7 @@
 - Remove fixed palette classes from account-group names and symbols so the saved color is authoritative.
 - Make each existing group color picker show the same effective color rendered in its group row, including legacy groups with no saved color.
 - Bump CSS and JavaScript cache keys so installations load the corrected assets.
+- Add regression assertions for the exact mobile selectors and saved group-color markup.
 
 ## Version 4.0.3 release notes
 
