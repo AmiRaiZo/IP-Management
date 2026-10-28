@@ -5,6 +5,7 @@
 - Make each existing group color picker show the same effective color rendered in its group row, including legacy groups with no saved color.
 - Bump CSS and JavaScript cache keys so installations load the corrected assets.
 - Add regression assertions for the exact mobile selectors and saved group-color markup.
+- Ensure both stylesheet and JavaScript asset URLs carry the v4.0.4 cache key.
 
 ## Version 4.0.3 release notes
 
