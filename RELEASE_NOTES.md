@@ -1,3 +1,9 @@
+## Version 4.0.2 release notes
+
+- Remove the separate Group column from the desktop IP directory and the duplicate Group detail row from mobile cards.
+- Keep each selected group badge beside the IP name, and color the IP name to match that group on desktop and mobile.
+- Apply the selected group color and adjacent group badge to the username/account label on desktop and mobile.
+
 ## Version 3.5.2 release notes
 
 - Render group text, borders, and tinted backgrounds with explicit color values directly in the HTML instead of relying solely on CSS variables or color-mix rendering.
