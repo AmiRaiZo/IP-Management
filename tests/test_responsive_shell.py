@@ -205,10 +205,22 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('>Edit account</a>', self.accounts)
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
+    def test_v404_mobile_action_spacing_overrides_legacy_account_rules(self):
+        self.assertIn(".mobile-ip-card > .mobile-ip-actions{margin-top:12px!important;padding:18px 12px 12px!important;gap:10px!important}", self.css)
+        self.assertIn(".account-inventory-panel .mobile-account-card > .mobile-account-actions.mobile-ip-actions{margin-top:12px!important;padding:18px 12px 12px!important;gap:10px!important}", self.css)
+
+    def test_group_color_controls_and_rendering_use_the_same_saved_color(self):
+        self.assertNotIn("group-color-{{ (group.id or 0) % 8 }}", self.account_groups)
+        self.assertNotIn("group-color-text-{{ (group.id or 0) % 8 }}", self.account_groups)
+        self.assertIn('value="{{ group_color }}"', self.account_groups)
+        self.assertIn('value="{{ group_color }}"', self.groups)
+        self.assertIn(".group-list .group-symbol{color:var(--group-color)!important", self.css)
+        self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
+
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.3")
-        self.assertIn("style.css') }}?v=4.0.3", self.base)
-        self.assertIn("app.js') }}?v=4.0.3", self.base)
+        self.assertEqual(self.version, "4.0.4")
+        self.assertIn("style.css') }}?v=4.0.4", self.base)
+        self.assertIn("app.js') }}?v=4.0.4", self.base)
 
 
 if __name__ == "__main__":
