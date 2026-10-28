@@ -866,7 +866,7 @@ class ArchiveTests(unittest.TestCase):
             mobile_cards = re.findall(r'<article class="mobile-ip-card".*?</article>', page, re.S)
             mobile_records = []
             for card in mobile_cards:
-                name_match = re.search(r'class="mobile-ip-title"><strong>(.*?)</strong>', card, re.S)
+                name_match = re.search(r'class="mobile-ip-title"><strong[^>]*>(.*?)</strong>', card, re.S)
                 group_match = re.search(r'<span class="group-tag"[^>]*>([^<]+)</span>', card)
                 if name_match and group_match:
                     mobile_records.append((name_match.group(1), group_match.group(1)))
@@ -879,7 +879,7 @@ class ArchiveTests(unittest.TestCase):
             desktop_rows = re.findall(r'<tr data-search-row.*?</tr>', table, re.S)
             desktop_records = []
             for row in desktop_rows:
-                name_match = re.search(r'<strong>(.*?)</strong>', row, re.S)
+                name_match = re.search(r'<strong[^>]*>(.*?)</strong>', row, re.S)
                 group_match = re.search(r'<span class="group-tag"[^>]*>(.*?)</span>', row, re.S)
                 if name_match and group_match:
                     desktop_records.append((name_match.group(1), group_match.group(1)))
