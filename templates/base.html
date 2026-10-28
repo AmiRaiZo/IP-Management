@@ -4,9 +4,9 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}IP Archive{% endblock %}</title>
-  <!-- v3.5.2 reliable group colors and shared account cards -->
+  <!-- v4.0.2 reliable group colors and shared account cards -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3.5.2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.0.2">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -40,5 +40,5 @@
     </main>
   </div>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=3.5.2" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=4.0.2" defer></script>
 </body></html>

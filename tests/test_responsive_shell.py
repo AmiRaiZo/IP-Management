@@ -77,7 +77,6 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('<th>IP address / host</th>', self.index)
         self.assertIn("<th>Name</th>", self.accounts)
         self.assertIn("<th>Email</th>", self.accounts)
-        self.assertIn('class="data-field-icon icon-group"', self.index)
         self.assertIn('class="data-field-icon icon-ip"', self.index)
         self.assertIn('class="data-field-icon icon-user"', self.accounts)
         self.assertIn('class="data-field-icon icon-email"', self.accounts)
@@ -92,7 +91,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('data-scroll-record="ip-{{ ip.id }}"', self.index)
         self.assertIn('class="mobile-ip-record-heading"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
-        for label in ("Group", "IP address", "Port", "Username", "Password", "Notes", "Updated"):
+        for label in ("IP address", "Port", "Username", "Password", "Notes", "Updated"):
             self.assertIn(f'class="mobile-data-label">{label}</span>', self.index)
         self.assertIn('data-copy-value="{{ ip.ip_address }}"', self.index)
         self.assertIn('data-copy-value="{{ ip.port }}"', self.index)
@@ -100,7 +99,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('data-copy-value="{{ ip.password_plain }}"', self.index)
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn('class="mobile-account-list"', self.accounts)
-        self.assertIn('class="mobile-data-row mobile-account-group-row"', self.accounts)
+        self.assertNotIn('class="mobile-data-row mobile-account-group-row"', self.accounts)
         self.assertIn('class="mobile-ip-card mobile-account-card"', self.accounts)
         self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
         self.assertIn('color: {{ card_group_color }} !important', self.accounts)
@@ -124,8 +123,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", compact_css)
         self.assertIn(".mobile-data-row{display:grid;grid-template-columns:27px92pxminmax(0,1fr)", compact_css)
         self.assertIn(".mobile-account-field{grid-template-columns:25px65pxminmax(0,1fr)", compact_css)
-        self.assertLess(self.index.index('class="mobile-data-label">Group</span>'),
-                        self.index.index('class="mobile-data-label">IP address</span>'))
+        self.assertNotIn('class="mobile-data-label">Group</span>', self.index)
+        self.assertNotIn('class="mobile-data-label">Group</span>', self.accounts)
         self.assertNotIn('class="column-heading"', self.index)
         self.assertNotIn('class="column-heading"', self.accounts)
 
@@ -207,8 +206,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("account-inventory-panel .mobile-account-actions{display:flex!important", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "3.5.2")
-        self.assertIn("style.css') }}?v=3.5.2", self.base)
+        self.assertEqual(self.version, "4.0.2")
+        self.assertIn("style.css') }}?v=4.0.2", self.base)
         self.assertIn("app.js') }}?v=3.5.2", self.base)
 
 

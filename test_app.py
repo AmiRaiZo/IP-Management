@@ -1288,7 +1288,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
         self.assertIn('aria-label="Copy port"><code>8291</code></button>', page)
-        self.assertIn('aria-label="Copy username"><code>netadmin</code></button>', page)
+        self.assertIn('data-copy-value="netadmin"', page)
         self.assertIn('aria-label="Copy IP address"><code>192.0.2.55</code></button>', page)
         self.assertIn('<th class="name-column">Name</th>', page)
         self.assertIn('<th>IP address / host</th>', page)
