@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - VERSION
 
 permissions:
   contents: write
@@ -112,16 +110,3 @@ jobs:
           fi
           # Always attach or refresh the installable ZIP, including for an already-published tag.
           gh release upload "$TAG" "$ASSET" --clobber
-
-      - name: Keep only the two newest published releases
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mapfile -t OLD_TAGS < <(gh release list --limit 100 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | reverse | .[2:] | .[].tagName')
-          for TAG in "${OLD_TAGS[@]}"; do
-            [[ -n "$TAG" ]] || continue
-            echo "Deleting old release and tag: $TAG"
-            gh release delete "$TAG" --yes --cleanup-tag
-          done
