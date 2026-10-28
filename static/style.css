@@ -703,3 +703,6 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 .record-title{display:inline-flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .record-title>strong{color:var(--group-color,var(--text))}
 @media(max-width:720px){.mobile-ip-title{min-width:0;overflow-wrap:anywhere}.mobile-account-title{min-width:0}.mobile-account-heading .group-tag{flex:0 0 auto}}
+
+/* v4.0.3: give mobile edit/delete actions clear separation from the content above. */
+@media(max-width:720px){.mobile-ip-actions{margin-top:10px!important;padding-top:18px!important;gap:10px!important}.account-inventory-panel .mobile-account-actions{margin-top:16px!important;padding-top:18px!important;gap:10px!important}}
