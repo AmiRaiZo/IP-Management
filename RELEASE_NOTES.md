@@ -1,3 +1,9 @@
+## Version 4.0.3 release notes
+
+- Add more space above mobile IP and account Edit/Delete actions so the buttons do not crowd the preceding divider or content.
+- Ensure the selected color saved for each group is used directly in the group list, with fixed palette classes removed from group names and symbols.
+- Bust the stylesheet cache so existing browsers load the updated responsive spacing rules.
+
 ## Version 4.0.2 release notes
 
 - Remove the separate Group column from the desktop IP directory and the duplicate Group detail row from mobile IP cards.
