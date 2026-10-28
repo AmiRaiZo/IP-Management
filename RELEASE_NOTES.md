@@ -1,3 +1,10 @@
+## Version 4.0.4 release notes
+
+- Fix mobile Edit/Delete spacing using selectors that override the existing account-card rules, with real separation from the divider and content above.
+- Remove fixed palette classes from account-group names and symbols so the saved color is authoritative.
+- Make each existing group color picker show the same effective color rendered in its group row, including legacy groups with no saved color.
+- Bump CSS and JavaScript cache keys so installations load the corrected assets.
+
 ## Version 4.0.3 release notes
 
 - Add more space above mobile IP and account Edit/Delete actions so the buttons do not crowd the preceding divider or content.
