@@ -207,8 +207,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
     def test_assets_are_cache_busted_for_this_release(self):
         self.assertEqual(self.version, "4.0.3")
-        self.assertIn("style.css') }}?v=4.0.2", self.base)
-        self.assertIn("app.js') }}?v=4.0.2", self.base)
+        self.assertIn("style.css') }}?v=4.0.3", self.base)
+        self.assertIn("app.js') }}?v=4.0.3", self.base)
 
 
 if __name__ == "__main__":
