@@ -223,9 +223,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.1.0")
-        self.assertIn("style.css') }}?v=4.1.0", self.base)
-        self.assertIn("app.js') }}?v=4.1.0", self.base)
+        self.assertEqual(self.version, "4.1.1")
+        self.assertIn("style.css') }}?v=4.1.1", self.base)
+        self.assertIn("app.js') }}?v=4.1.1", self.base)
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)
@@ -293,12 +293,19 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".mobile-account-fields{display:grid", self.css)
         self.assertIn(".mobile-ip-actions{display:flex", self.css)
 
-    def test_telegram_login_approval_screen_refreshes_and_has_no_bot_menu_action(self):
-        self.assertIn("stage == 'approval'", self.login)
-        self.assertIn("Waiting for approval", self.login)
-        self.assertIn("This page checks for the decision automatically", self.login)
-        self.assertIn("http-equiv=\"refresh\" content=\"3;url=", self.base)
-        self.assertIn("url_for('login')", self.login)
+    def test_telegram_login_approval_is_silent_on_the_normal_code_screen(self):
+        self.assertNotIn("stage == 'approval'", self.login)
+        self.assertIn("stage == 'verify'", self.login)
+        self.assertIn("data-login-approval-status", self.login)
+        self.assertIn("data-login-approval-complete", self.login)
+        self.assertNotIn('http-equiv="refresh"', self.base)
+        self.assertIn("fetch(statusUrl", self.js)
+        self.assertIn("window.location.assign(outcome.redirect)", self.js)
+        self.assertIn('overflow-y:auto', self.css)
+        self.assertIn('scrollbar-width:thin', self.css)
+        self.assertIn('@app.get("/login/approval-status")', self.app_source)
+        self.assertIn('@app.post("/login/approval-complete")', self.app_source)
+        self.assertIn('bypass_two_factor=True', self.app_source)
         self.assertIn("elif action == \"ack_telegram_login\":", self.app_source)
         self.assertIn("Legacy audit callbacks are intentionally inert", self.app_source)
         self.assertNotIn('"text": "⌂ Menu", "callback_data": "menu"', self.app_source[self.app_source.index("def send_login_success_alert"):self.app_source.index("def send_login_failure_alert")])

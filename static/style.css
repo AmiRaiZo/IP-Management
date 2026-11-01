@@ -774,3 +774,13 @@ html[data-theme="dark"] .note-card-avatar{background:#1b2b4a;border-color:#30446
 .login-approval-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 16px;border-radius:16px;background:var(--surface-2);color:var(--primary);font-size:26px}
 .login-approval-hint{margin:18px 0 4px;color:var(--muted);font-size:12px;line-height:1.7;text-align:center}
 .approval-stage .back-to-password{margin-top:16px}
+
+/* v4.1.1: keep every navigation item reachable without scrolling the main page. */
+.sidebar{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#aab5ca transparent}
+.sidebar::-webkit-scrollbar{width:7px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{background:#aab5ca88;border:2px solid transparent;border-radius:999px;background-clip:padding-box}
+.sidebar-bottom{flex:0 0 auto}
+.brand{flex:0 0 auto}
+.login-approval-transport{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.login-approval-feedback{margin:14px 0 0;color:#c44b58;font-size:12px;text-align:center}

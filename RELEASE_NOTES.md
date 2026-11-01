@@ -1,3 +1,12 @@
+## Version 4.1.1 release notes
+
+- Keep the existing authenticator-code screen visible immediately after password validation while sending the Telegram approval request in parallel; no separate approval/waiting screen is shown.
+- Replace periodic full-page refreshes with silent background status checks. Administrator approval can complete sign-in directly without requiring the user to enter a second-factor code; a code entered before approval is verified and held securely until the administrator decides.
+- Preserve the first-time authenticator enrollment requirement and keep authenticated session creation blocked until the administrator approves.
+- Validate one-time recovery and Telegram fallback codes without consuming them while approval is pending; consume them only when the approved login is finalized.
+- Add an internal vertical scrollbar to the fixed left navigation so every menu option remains reachable on shorter screens; keep the profile/logout area accessible.
+- Add regression coverage for the normal code-screen flow, silent approval transport, administrator 2FA bypass, and sidebar scrolling.
+- Refresh CSS and JavaScript asset cache keys.
 ## Version 4.1.0 release notes
 
 - Require Telegram administrator approval after a correct username/password pair and before creating an authenticated session; requests expire after five minutes and are protected by a one-use signed callback token.
@@ -307,4 +316,4 @@
 - Add regression coverage for viewport-locked layout and bump static asset cache keys to v3.0.0 so browsers fetch the fix.
 - Keep README.md focused on installation, upgrade, updating, access recovery, and server-operation instructions. Release notes are published on the GitHub release page instead.
 - Configure release automation to retain only the two latest published releases and delete older release entries and tags.
-
+319

@@ -61,6 +61,57 @@
       if (event.key === 'Escape') closeMobileSidebar();
     });
   }
+  // Telegram approval is checked silently in the background. The visible page
+  // remains the ordinary authenticator screen; no periodic page reload occurs.
+  const approvalTransport = document.querySelector('[data-login-approval-status]');
+  if (approvalTransport) {
+    const statusUrl = approvalTransport.dataset.loginApprovalStatus;
+    const completeUrl = approvalTransport.dataset.loginApprovalComplete;
+    const csrfToken = approvalTransport.dataset.csrfToken || '';
+    const feedback = document.querySelector('[data-login-approval-feedback]');
+    let checking = false;
+    let finished = false;
+    async function checkLoginApproval() {
+      if (checking || finished) return;
+      checking = true;
+      try {
+        const response = await fetch(statusUrl, {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}});
+        const result = await response.json();
+        if (result.status === 'approved') {
+          finished = true;
+          const body = new URLSearchParams({csrf_token: csrfToken});
+          const completed = await fetch(completeUrl, {
+            method: 'POST', credentials: 'same-origin', cache: 'no-store',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
+            body
+          });
+          const outcome = await completed.json();
+          if (completed.ok && outcome.ok && outcome.redirect) {
+            window.location.assign(outcome.redirect);
+            return;
+          }
+          throw new Error('The sign-in could not be completed. Please sign in again.');
+        }
+        if (['denied', 'expired', 'delivery_failed', 'canceled', 'missing'].includes(result.status)) {
+          finished = true;
+          if (feedback) {
+            feedback.textContent = 'Unable to sign in. Please try again.';
+            feedback.hidden = false;
+          }
+          document.querySelectorAll('.verify-stage form').forEach(form => {
+            if (!form.classList.contains('back-to-password')) form.hidden = true;
+          });
+          return;
+        }
+      } catch (_) {
+        // Temporary network errors are intentionally silent; retry in the background.
+      } finally {
+        checking = false;
+      }
+      if (!finished) window.setTimeout(checkLoginApproval, 2200);
+    }
+    window.setTimeout(checkLoginApproval, 1200);
+  }
   document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
     let dismissed = false;
     const dismissOnClick = () => dismiss();
