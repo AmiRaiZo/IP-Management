@@ -1,3 +1,10 @@
+## Version 4.0.7 release notes
+
+- Keep IP and account record names in the normal interface text color on desktop and mobile.
+- Apply each saved group's selected color only to its adjacent group badge, including its text and border.
+- Remove inherited group-color variables from record-name wrappers and add regression coverage for both directories.
+- Refresh CSS and JavaScript asset cache keys.
+
 ## Version 4.0.6 release notes
 
 - Fix the root cause of group text colors not changing: the Content Security Policy blocked all inline style attributes used to render each group's saved color.

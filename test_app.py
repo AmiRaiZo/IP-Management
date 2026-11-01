@@ -1322,7 +1322,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertNotIn('class="mobile-data-label">Group</span>', page)
         self.assertIn('class="record-title"', page)
         self.assertIn('class="record-title"', page)
-        self.assertIn('style="--group-color: #169b78"', page)
+        self.assertIn('<span class="record-title"><strong>Mobile router</strong><span class="group-tag"', page)
+        self.assertNotIn('style="--group-color: #169b78"', page)
         self.assertIn('class="mobile-data-label">IP address</span>', page)
         self.assertIn('class="mobile-data-label">Port</span>', page)
         self.assertIn('class="mobile-data-label">Username</span>', page)
@@ -1382,6 +1383,9 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("color: #db2777 !important", page)
         self.assertIn("background-color: #db277722 !important", page)
         self.assertIn('class="group-tag" data-group-color="#db2777" style="--group-color: #db2777 !important; color: #db2777 !important;', page)
+        self.assertIn('<div class="mobile-ip-title"><strong>Colored router</strong></div>', page)
+        self.assertIn('<span class="record-title"><strong>Colored router</strong><span class="group-tag"', page)
+        self.assertNotIn('<strong style="color: #db2777 !important">Colored router</strong>', page)
         groups_page = self.client.get("/groups").get_data(as_text=True)
         self.assertIn('style="--group-color: #db2777; color: #db2777 !important"', groups_page)
 
@@ -1412,8 +1416,9 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('class="group-tag" data-group-color="#0f766e" style="--group-color: #0f766e !important; color: #0f766e !important;', account_page)
         self.assertIn('class="mobile-ip-card mobile-account-card"', account_page)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', account_page)
-        self.assertIn('class="record-title" style="--group-color: #0f766e"', account_page)
-        self.assertIn('<strong style="color: #0f766e !important">Colored mailbox</strong>', account_page)
+        self.assertIn('class="record-title"><strong>Colored mailbox</strong>', account_page)
+        self.assertNotIn('<strong style="color: #0f766e !important">Colored mailbox</strong>', account_page)
+        self.assertIn('class="mobile-ip-title mobile-account-title"><strong>Colored mailbox</strong>', account_page)
 
     def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
         _, secret = self.create_user("grouporder")

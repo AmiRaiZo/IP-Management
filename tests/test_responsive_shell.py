@@ -218,10 +218,22 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.6")
-        self.assertIn("style.css') }}?v=4.0.6", self.base)
-        self.assertIn("app.js') }}?v=4.0.6", self.base)
+        self.assertEqual(self.version, "4.0.7")
+        self.assertIn("style.css') }}?v=4.0.7", self.base)
+        self.assertIn("app.js') }}?v=4.0.7", self.base)
 
 
 if __name__ == "__main__":
     unittest.main()
+    def test_record_names_keep_normal_text_color_while_group_badges_use_selected_color(self):
+        self.assertIn('<div class="mobile-ip-title"><strong>{{ ip.name or ip.ip_address or \'Unnamed IP\' }}</strong></div>', self.index)
+        self.assertIn('<strong>{{ ip.name or \'Unnamed IP\' }}</strong><span class="group-tag"', self.index)
+        self.assertIn('<div class="mobile-ip-title mobile-account-title"><strong>{{ account.name or account.username or account.email or \'Unnamed account\' }}</strong></div>', self.accounts)
+        self.assertIn('<strong>{{ account.name or account.username or account.email or \'Unnamed account\' }}</strong><span class="group-tag"', self.accounts)
+        self.assertNotIn('style="color: {{ card_group_color }} !important"', self.index)
+        self.assertNotIn('style="color: {{ card_group_color }} !important"', self.accounts)
+        self.assertNotIn('style="--group-color: {{ card_group_color }}"', self.index)
+        self.assertNotIn('style="--group-color: {{ card_group_color }}"', self.accounts)
+        self.assertIn('.mobile-ip-title>strong{color:var(--text)!important}', self.css)
+        self.assertIn('.record-title>strong{color:var(--text)!important}', self.css)
+

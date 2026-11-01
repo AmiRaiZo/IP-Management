@@ -4,9 +4,9 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}IP Archive{% endblock %}</title>
-  <!-- v4.0.6 permit per-group inline style attributes under CSP -->
+  <!-- v4.0.7 keep record names neutral and tint only group labels -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.0.6">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.0.7">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -40,5 +40,5 @@
     </main>
   </div>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=4.0.6" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=4.0.7" defer></script>
 </body></html>

@@ -691,9 +691,9 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 }
 
 /* Keep the selected group color visible on record names and account labels. */
-.mobile-ip-title strong{color:var(--group-color,var(--text))}
+.mobile-ip-title>strong{color:var(--text)!important}
 .record-title{display:inline-flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
-.record-title>strong{color:var(--group-color,var(--text))}
+.record-title>strong{color:var(--text)!important}
 .account-record-title{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:0;max-width:100%;flex-wrap:wrap;--group-color:var(--muted)}
 .account-record-title .copy-value{min-width:0;max-width:100%}
 .account-record-title code{color:var(--group-color,var(--text));overflow-wrap:anywhere;white-space:normal}
@@ -701,7 +701,7 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 
 /* Group badges stay beside record names on desktop and mobile. */
 .record-title{display:inline-flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
-.record-title>strong{color:var(--group-color,var(--text))}
+.record-title>strong{color:var(--text)!important}
 @media(max-width:720px){.mobile-ip-title{min-width:0;overflow-wrap:anywhere}.mobile-account-title{min-width:0}.mobile-account-heading .group-tag{flex:0 0 auto}}
 
 /* v4.0.4: mobile action spacing with selectors stronger than legacy account-card rules. */
