@@ -179,9 +179,22 @@ def init_db():
           id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS note_groups (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '',
+          color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS accounts (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, email TEXT NOT NULL,
           password_enc TEXT NOT NULL DEFAULT '', group_id INTEGER REFERENCES account_groups(id) ON DELETE SET NULL,
+          created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notes (
+          id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT '', service_url TEXT NOT NULL DEFAULT '',
+          ip_name TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '', ip_port INTEGER,
+          ip_username TEXT NOT NULL DEFAULT '', ip_password_enc TEXT NOT NULL DEFAULT '',
+          account_name TEXT NOT NULL DEFAULT '', account_username TEXT NOT NULL DEFAULT '',
+          account_email TEXT NOT NULL DEFAULT '', account_password_enc TEXT NOT NULL DEFAULT '',
+          note_text TEXT NOT NULL DEFAULT '', group_id INTEGER REFERENCES note_groups(id) ON DELETE SET NULL,
           created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS ips (
@@ -246,9 +259,14 @@ def init_db():
         db.execute("INSERT OR IGNORE INTO account_groups(name,description,created_at,sort_order) VALUES('Default','Default group for saved accounts',?,0)", (now(),))
         default_account_group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
         db.execute("UPDATE accounts SET group_id=? WHERE group_id IS NULL", (default_account_group_id,))
+        db.execute("INSERT OR IGNORE INTO note_groups(name,description,color,created_at,sort_order) VALUES('Default','Default group for saved notes','#65758b',?,0)", (now(),))
+        default_note_group_id = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()["id"]
+        db.execute("UPDATE notes SET group_id=? WHERE group_id IS NULL", (default_note_group_id,))
         db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_name ON accounts(name)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_accounts_group_id ON accounts(group_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_notes_group_id ON notes(group_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title)")
         mode_row = db.execute("SELECT value FROM app_settings WHERE key='two_factor_mode'").fetchone()
         if not mode_row:
             legacy = db.execute("SELECT value FROM app_settings WHERE key='two_factor_required'").fetchone()
@@ -1628,8 +1646,10 @@ def security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    # Per-record colors are rendered through validated inline style attributes.
-    # Permit style attributes, but keep style elements and inline scripts blocked.
+    # The UI deliberately emits validated, server-rendered style attributes for
+    # per-group colors and responsive details. Keep scripts locked to self, but
+    # explicitly allow style attributes (not inline style elements) so browsers
+    # do not silently discard the selected group colors under this CSP.
     response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -2735,6 +2755,278 @@ def account_group_delete(group_id):
     audit("account_group_deleted", f"id={group_id}; name={group['name']}")
     flash("Account group deleted. Its accounts were moved to Default.", "success")
     return redirect(url_for("account_groups"))
+
+
+def safe_notes_return_url(value):
+    """Accept only a local URL for the independent Notes directory."""
+    default = url_for("notes")
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 2048 or "\\" in candidate:
+        return default
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return default
+    if parsed.scheme or parsed.netloc or parsed.path != "/notes" or candidate.startswith("//"):
+        return default
+    return "/notes" + ("?" + parsed.query if parsed.query else "")
+
+
+def validate_note(form):
+    """Validate an all-optional composite note/IP/account record."""
+    title = str(form.get("title", "")).strip()[:160]
+    service_url = str(form.get("service_url", "")).strip()[:500]
+    ip_name = str(form.get("ip_name", "")).strip()[:120]
+    ip_address = str(form.get("ip_address", "")).strip()[:255]
+    ip_port_raw = str(form.get("ip_port", "")).strip()
+    ip_username = str(form.get("ip_username", "")).strip()[:120]
+    ip_password = form.get("ip_password", "")
+    account_name = str(form.get("account_name", "")).strip()[:120]
+    account_username = str(form.get("account_username", "")).strip()[:120]
+    account_email = str(form.get("account_email", "")).strip()[:254]
+    account_password = form.get("account_password", "")
+    note_text = str(form.get("note_text", "")).strip()[:20000]
+    group_raw = str(form.get("group_id", "")).strip()
+
+    if ip_port_raw:
+        if not re.fullmatch(r"\d{1,5}", ip_port_raw) or not 1 <= int(ip_port_raw) <= 65535:
+            return None, "IP port must be a number between 1 and 65535."
+        ip_port = int(ip_port_raw)
+    else:
+        ip_port = None
+    if account_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", account_email):
+        return None, "Enter a valid account email address when one is provided."
+    if len(ip_password) > 2000 or len(account_password) > 2000:
+        return None, "Passwords must be 2000 characters or fewer."
+
+    try:
+        group_id = int(group_raw) if group_raw else None
+    except ValueError:
+        return None, "Select a valid notes group."
+    with connect_db() as db:
+        if group_id is None:
+            default_group = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()
+            group_id = default_group["id"] if default_group else None
+        if group_id and not db.execute("SELECT id FROM note_groups WHERE id=?", (group_id,)).fetchone():
+            return None, "Selected notes group does not exist."
+
+    return {
+        "title": title,
+        "service_url": service_url,
+        "ip_name": ip_name,
+        "ip_address": ip_address,
+        "ip_port": ip_port,
+        "ip_username": ip_username,
+        "ip_password_enc": vault.encrypt(ip_password.encode("utf-8")).decode("ascii") if ip_password else None,
+        "account_name": account_name,
+        "account_username": account_username,
+        "account_email": account_email,
+        "account_password_enc": vault.encrypt(account_password.encode("utf-8")).decode("ascii") if account_password else None,
+        "note_text": note_text,
+        "group_id": group_id,
+    }, None
+
+
+@app.get("/notes")
+@superadmin_required
+def notes():
+    term = request.args.get("q", "").strip()[:100]
+    group_filter = request.args.get("group", "").strip()
+    with connect_db() as db:
+        groups = db.execute("SELECT * FROM note_groups ORDER BY sort_order, id").fetchall()
+        rows = db.execute("""
+            SELECT notes.*, note_groups.name AS group_name, note_groups.color AS group_color
+            FROM notes LEFT JOIN note_groups ON note_groups.id=notes.group_id
+            ORDER BY COALESCE(NULLIF(TRIM(note_groups.name), ''), 'Default') COLLATE NOCASE,
+                     COALESCE(NULLIF(TRIM(notes.title), ''), printf('Entry %08d', notes.id)) COLLATE NOCASE,
+                     notes.id DESC
+        """).fetchall()
+    rows = list(rows)
+    if group_filter == "ungrouped":
+        rows = [row for row in rows if row["group_id"] is None]
+    elif group_filter.isdigit():
+        rows = [row for row in rows if row["group_id"] == int(group_filter)]
+    if term:
+        needle = term.casefold()
+        searchable = ("title", "service_url", "ip_name", "ip_address", "ip_username",
+                      "account_name", "account_username", "account_email", "note_text", "group_name")
+        rows = [row for row in rows if any(needle in str(row[key] or "").casefold() for key in searchable)]
+    prepared = []
+    for row in rows:
+        item = dict(row)
+        for encrypted_key, plain_key in (("ip_password_enc", "ip_password_plain"),
+                                          ("account_password_enc", "account_password_plain")):
+            try:
+                item[plain_key] = vault.decrypt((row[encrypted_key] or "").encode("ascii")).decode("utf-8") if row[encrypted_key] else ""
+            except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+                item[plain_key] = ""
+        prepared.append(item)
+    return render_template("notes.html", notes=prepared, groups=groups, q=term, group_filter=group_filter)
+
+
+@app.route("/notes/new", methods=["GET", "POST"])
+@superadmin_required
+def note_new():
+    return_to = safe_notes_return_url(request.form.get("return_to") or request.args.get("return_to"))
+    with connect_db() as db:
+        groups = db.execute("SELECT * FROM note_groups ORDER BY sort_order, id").fetchall()
+        default_group = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()
+    if request.method == "POST":
+        data, error = validate_note(request.form)
+        if error:
+            flash(error, "error")
+        else:
+            with connect_db() as db:
+                cursor = db.execute("""
+                    INSERT INTO notes(title,service_url,ip_name,ip_address,ip_port,ip_username,ip_password_enc,
+                                      account_name,account_username,account_email,account_password_enc,note_text,
+                                      group_id,created_by,created_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (data["title"], data["service_url"], data["ip_name"], data["ip_address"], data["ip_port"],
+                      data["ip_username"], data["ip_password_enc"] or "", data["account_name"],
+                      data["account_username"], data["account_email"], data["account_password_enc"] or "",
+                      data["note_text"], data["group_id"], request.user["username"], now(), now()))
+                note_id = cursor.lastrowid
+            audit("note_created", f"id={note_id}; group_id={data['group_id']}")
+            flash("Note saved.", "success")
+            return redirect(return_to)
+    return render_template("notes_form.html", note=None, groups=groups,
+                           default_group_id=default_group["id"] if default_group else None,
+                           return_to=return_to, form_data=request.form if request.method == "POST" else {})
+
+
+@app.route("/notes/<int:note_id>/edit", methods=["GET", "POST"])
+@superadmin_required
+def note_edit(note_id):
+    return_to = safe_notes_return_url(request.form.get("return_to") or request.args.get("return_to"))
+    with connect_db() as db:
+        note = db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
+        groups = db.execute("SELECT * FROM note_groups ORDER BY sort_order, id").fetchall()
+    if not note:
+        abort(404)
+    if request.method == "POST":
+        data, error = validate_note(request.form)
+        if error:
+            flash(error, "error")
+        else:
+            ip_password_enc = data["ip_password_enc"] if data["ip_password_enc"] is not None else note["ip_password_enc"]
+            account_password_enc = data["account_password_enc"] if data["account_password_enc"] is not None else note["account_password_enc"]
+            with connect_db() as db:
+                db.execute("""
+                    UPDATE notes SET title=?,service_url=?,ip_name=?,ip_address=?,ip_port=?,ip_username=?,
+                        ip_password_enc=?,account_name=?,account_username=?,account_email=?,account_password_enc=?,
+                        note_text=?,group_id=?,updated_at=? WHERE id=?
+                """, (data["title"], data["service_url"], data["ip_name"], data["ip_address"], data["ip_port"],
+                      data["ip_username"], ip_password_enc, data["account_name"], data["account_username"],
+                      data["account_email"], account_password_enc, data["note_text"], data["group_id"], now(), note_id))
+            audit("note_updated", f"id={note_id}; group_id={data['group_id']}")
+            flash("Note updated.", "success")
+            return redirect(return_to)
+    return render_template("notes_form.html", note=note, groups=groups, default_group_id=None,
+                           return_to=return_to, form_data=request.form if request.method == "POST" else {})
+
+
+@app.post("/notes/<int:note_id>/delete")
+@superadmin_required
+def note_delete(note_id):
+    return_to = safe_notes_return_url(request.form.get("return_to"))
+    with connect_db() as db:
+        row = db.execute("SELECT id,title FROM notes WHERE id=?", (note_id,)).fetchone()
+        if row:
+            db.execute("DELETE FROM notes WHERE id=?", (note_id,))
+    if row:
+        audit("note_deleted", f"id={note_id}; title={row['title']}")
+        flash("Note deleted.", "success")
+    return redirect(return_to)
+
+
+@app.route("/note-groups", methods=["GET", "POST"])
+@superadmin_required
+def note_groups():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()[:100]
+        description = request.form.get("description", "").strip()[:500]
+        color = request.form.get("color", "").strip()[:7]
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+            color = "#65758b"
+        if not name:
+            flash("Notes group name is required.", "error")
+        else:
+            try:
+                with connect_db() as db:
+                    next_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM note_groups").fetchone()[0]
+                    db.execute("INSERT INTO note_groups(name,description,color,created_at,sort_order) VALUES(?,?,?,?,?)",
+                               (name, description, color, now(), next_order))
+                audit("note_group_created", name)
+                flash("Notes group created.", "success")
+                return redirect(url_for("note_groups"))
+            except sqlite3.IntegrityError:
+                flash("A notes group with that name already exists.", "error")
+    with connect_db() as db:
+        rows = db.execute("""
+            SELECT note_groups.*, COUNT(notes.id) AS note_count
+            FROM note_groups LEFT JOIN notes ON notes.group_id=note_groups.id
+            GROUP BY note_groups.id ORDER BY note_groups.sort_order, note_groups.id
+        """).fetchall()
+    return render_template("note_groups.html", groups=rows)
+
+
+@app.post("/note-groups/<int:group_id>/color")
+@superadmin_required
+def note_group_color_update(group_id):
+    color = request.form.get("color", "").strip()[:7]
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+        flash("Choose a valid notes group color.", "error")
+    else:
+        with connect_db() as db:
+            cur = db.execute("UPDATE note_groups SET color=? WHERE id=?", (color, group_id))
+            if not cur.rowcount:
+                abort(404)
+        audit("note_group_color_updated", f"{group_id}:{color}")
+        flash("Notes group color updated.", "success")
+    return redirect(url_for("note_groups"))
+
+
+@app.post("/note-groups/<int:group_id>/move")
+@superadmin_required
+def note_group_move(group_id):
+    direction = request.form.get("direction", "")
+    if direction not in ("up", "down"):
+        abort(400)
+    moved = False
+    with connect_db() as db:
+        ordered = db.execute("SELECT id,sort_order FROM note_groups ORDER BY sort_order,id").fetchall()
+        ids = [row["id"] for row in ordered]
+        if group_id not in ids:
+            abort(404)
+        current = ids.index(group_id)
+        target = current - 1 if direction == "up" else current + 1
+        if 0 <= target < len(ids):
+            first, second = ordered[current], ordered[target]
+            db.execute("UPDATE note_groups SET sort_order=? WHERE id=?", (second["sort_order"], first["id"]))
+            db.execute("UPDATE note_groups SET sort_order=? WHERE id=?", (first["sort_order"], second["id"]))
+            moved = True
+    if moved:
+        audit("note_group_reordered", f"id={group_id}; direction={direction}")
+    return redirect(url_for("note_groups"))
+
+
+@app.post("/note-groups/<int:group_id>/delete")
+@superadmin_required
+def note_group_delete(group_id):
+    with connect_db() as db:
+        group = db.execute("SELECT id,name FROM note_groups WHERE id=?", (group_id,)).fetchone()
+        if not group:
+            abort(404)
+        if group["name"] == "Default":
+            flash("The Default notes group cannot be deleted.", "error")
+            return redirect(url_for("note_groups"))
+        default_group = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()
+        db.execute("UPDATE notes SET group_id=? WHERE group_id=?", (default_group["id"], group_id))
+        db.execute("DELETE FROM note_groups WHERE id=?", (group_id,))
+    audit("note_group_deleted", f"id={group_id}; name={group['name']}")
+    flash("Notes group deleted. Its entries were moved to Default.", "success")
+    return redirect(url_for("note_groups"))
 
 
 @app.route("/users", methods=["GET", "POST"])

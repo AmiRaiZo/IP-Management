@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit note' if note else 'Add note' }} | Notes Vault{% endblock %}
+{% block content %}
+{% set title_value = form_data.get('title', note.title if note else '') %}
+{% set url_value = form_data.get('service_url', note.service_url if note else '') %}
+{% set ip_name_value = form_data.get('ip_name', note.ip_name if note else '') %}
+{% set ip_address_value = form_data.get('ip_address', note.ip_address if note else '') %}
+{% set ip_port_value = form_data.get('ip_port', note.ip_port if note and note.ip_port else '') %}
+{% set ip_username_value = form_data.get('ip_username', note.ip_username if note else '') %}
+{% set account_name_value = form_data.get('account_name', note.account_name if note else '') %}
+{% set account_username_value = form_data.get('account_username', note.account_username if note else '') %}
+{% set account_email_value = form_data.get('account_email', note.account_email if note else '') %}
+{% set note_text_value = form_data.get('note_text', note.note_text if note else '') %}
+<div class="page-heading"><div><p class="eyebrow">NOTES VAULT</p><h1>{{ 'Edit note' if note else 'Add note' }}</h1><p class="muted">Nothing is required. Save a note, IP information, account information, or any combination of them.</p></div><a class="btn btn-secondary" href="{{ return_to|default(url_for('notes')) }}">← Back to notes</a></div>
+<form class="panel form-panel notes-form" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ return_to|default(url_for('notes')) }}">
+  <div class="panel-heading form-heading"><div><h2>General details</h2><p>Use a title to identify the entry. It can also be left blank.</p></div></div>
+  <div class="form-grid">
+    <div class="field full-field"><label for="title">Title / Name (optional)</label><input id="title" name="title" maxlength="160" value="{{ title_value }}" placeholder="e.g. Main office router or Hosting details"></div>
+    <div class="field full-field"><label for="service_url">Website / URL</label><input id="service_url" name="service_url" maxlength="500" value="{{ url_value }}" dir="ltr" placeholder="https://example.com"></div>
+    <div class="field full-field"><label for="group_id">Notes group</label><select id="group_id" name="group_id">{% for group in groups %}<option value="{{ group.id }}" {% if (note and note.group_id|string == group.id|string) or (not note and default_group_id|string == group.id|string) %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="note-form-section"><div class="note-form-section-heading"><span class="data-field-icon icon-ip" aria-hidden="true">⌘</span><div><h2>IP information</h2><p>All IP fields are optional.</p></div></div><div class="form-grid">
+    <div class="field"><label for="ip_name">IP / Server name</label><input id="ip_name" name="ip_name" maxlength="120" value="{{ ip_name_value }}" placeholder="Server label"></div>
+    <div class="field"><label for="ip_address">IP address / Host</label><input id="ip_address" name="ip_address" maxlength="255" value="{{ ip_address_value }}" dir="ltr" placeholder="192.0.2.10 or host.example.com"></div>
+    <div class="field"><label for="ip_port">Port</label><input id="ip_port" name="ip_port" type="number" min="1" max="65535" value="{{ ip_port_value }}" placeholder="Optional port"></div>
+    <div class="field"><label for="ip_username">IP username</label><input id="ip_username" name="ip_username" maxlength="120" value="{{ ip_username_value }}" autocomplete="off" placeholder="Optional username"></div>
+    <div class="field full-field"><label for="ip_password">IP password</label><div class="password-field"><input id="ip_password" name="ip_password" type="password" maxlength="2000" autocomplete="new-password" placeholder="{{ 'Leave blank to keep the saved IP password' if note else 'Optional IP password' }}"><button type="button" class="password-toggle" data-toggle-password="ip_password" aria-label="Show IP password" title="Show password">◉</button></div>{% if note and note.ip_password_enc %}<small class="muted">A password is already saved. Leave this blank to keep it, or enter a replacement.</small>{% endif %}</div>
+  </div></div>
+  <div class="note-form-section"><div class="note-form-section-heading"><span class="data-field-icon icon-user" aria-hidden="true">♙</span><div><h2>Account information</h2><p>Account fields are independent from the IP fields and are also optional.</p></div></div><div class="form-grid">
+    <div class="field"><label for="account_name">Account name</label><input id="account_name" name="account_name" maxlength="120" value="{{ account_name_value }}" placeholder="Service or account label"></div>
+    <div class="field"><label for="account_username">Account username</label><input id="account_username" name="account_username" maxlength="120" value="{{ account_username_value }}" autocomplete="off" placeholder="Optional username"></div>
+    <div class="field full-field"><label for="account_email">Email</label><input id="account_email" name="account_email" type="email" maxlength="254" value="{{ account_email_value }}" autocomplete="off" placeholder="name@example.com" dir="ltr"></div>
+    <div class="field full-field"><label for="account_password">Account password</label><div class="password-field"><input id="account_password" name="account_password" type="password" maxlength="2000" autocomplete="new-password" placeholder="{{ 'Leave blank to keep the saved account password' if note else 'Optional account password' }}"><button type="button" class="password-toggle" data-toggle-password="account_password" aria-label="Show account password" title="Show password">◉</button></div>{% if note and note.account_password_enc %}<small class="muted">A password is already saved. Leave this blank to keep it, or enter a replacement.</small>{% endif %}</div>
+  </div></div>
+  <div class="note-form-section"><div class="note-form-section-heading"><span class="data-field-icon icon-notes" aria-hidden="true">✎</span><div><h2>Note</h2><p>Write any additional information. This field is optional too.</p></div></div><div class="form-grid"><div class="field full-field"><label for="note_text">Note / Description</label><textarea id="note_text" name="note_text" rows="5" maxlength="20000" placeholder="Write a note, instructions, reminders or other details…">{{ note_text_value }}</textarea></div></div></div>
+  <div class="form-footer form-footer-compact"><div class="actions"><a class="btn btn-quiet" href="{{ return_to|default(url_for('notes')) }}">Cancel</a><button class="btn btn-primary" type="submit">{{ 'Save changes' if note else 'Save note' }}</button></div></div>
+</form>
+{% endblock %}

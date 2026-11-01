@@ -690,7 +690,7 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
  .account-inventory-panel .mobile-account-actions.mobile-ip-actions{padding:10px 12px 12px}
 }
 
-/* Keep the selected group color visible on record names and account labels. */
+/* Record names keep the normal interface text color; only group badges are tinted. */
 .mobile-ip-title>strong{color:var(--text)!important}
 .record-title{display:inline-flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .record-title>strong{color:var(--text)!important}
@@ -719,3 +719,53 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 }
 /* The group badge label always uses the saved color passed by its record. */
 .group-tag{color:var(--group-color,var(--group-palette-0))!important}
+
+/* Independent Notes vault: fixed-size cards with a stable two-column field grid. */
+.notes-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:14px;padding:16px}
+.note-card{height:500px;min-height:500px;min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--border);border-radius:15px;background:var(--surface);box-shadow:0 4px 15px #1b315008;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.note-card:hover{transform:translateY(-2px);box-shadow:0 10px 25px #1b315012;border-color:#c6d2f0}
+.note-card-heading{height:70px;min-height:70px;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);background:linear-gradient(120deg,var(--surface-2),var(--surface))}
+.note-card-avatar{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(145deg,#edf2ff,#e2e9ff);border:1px solid #dce5ff;color:#4e66d5;font-size:13px;font-weight:800}
+.note-card-title{display:grid;gap:3px;min-width:0;flex:1}
+.note-card-title strong{font-size:12px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.note-card-title small{font-size:9px;color:var(--muted)}
+.note-group-tag{flex:0 0 auto;max-width:36%;font-size:9px;padding:4px 7px;text-align:center}
+.note-card-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(48px,auto);align-content:start;gap:0 13px;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 14px 10px;scrollbar-width:thin}
+.note-field{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:4px;min-width:0;min-height:48px;padding:7px 0;border-bottom:1px solid var(--border)}
+.note-field-label{min-width:0;color:var(--muted);font-size:9px;font-weight:750;line-height:1.3;letter-spacing:.15px}
+.note-field-value{min-width:0;max-width:100%;overflow:visible;color:var(--text);font-size:10px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
+.note-field-value code{max-width:100%;padding:3px 5px;font-size:10px;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.note-field-value .copy-value{display:inline-flex;justify-content:flex-start;max-width:100%;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--text)}
+.note-field-long{grid-column:1/-1;min-height:76px}
+.note-field-long .note-field-value{white-space:pre-wrap}
+.note-card-actions{height:54px;min-height:54px;display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:auto;padding:9px 13px;border-top:1px solid var(--border);background:var(--surface-2)}
+.note-card-actions form{display:flex;margin:0}
+.note-card-actions .btn{min-height:34px}
+.note-form-section{margin-top:18px;padding-top:5px;border-top:1px solid var(--border)}
+.note-form-section-heading{display:flex;align-items:center;gap:11px;padding:15px 24px 8px}
+.note-form-section-heading>.data-field-icon{flex:0 0 32px;width:32px;height:32px;font-size:17px}
+.note-form-section-heading h2{margin:0 0 4px;color:var(--text);font:750 14px Manrope,sans-serif}
+.note-form-section-heading p{margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+.notes-form>.form-grid,.notes-form .note-form-section>.form-grid{padding:0 24px 12px}
+.notes-form textarea{min-height:110px}
+.nav-icon-notes,.nav-icon-note-groups{color:#6172c9;background:#edf0ff}
+html[data-theme="dark"] .note-card{background:var(--surface);border-color:var(--border)}
+html[data-theme="dark"] .note-card-heading{background:linear-gradient(120deg,var(--surface-2),var(--surface))}
+html[data-theme="dark"] .note-card-avatar{background:#1b2b4a;border-color:#304467;color:#b5c5ff}
+@media(max-width:720px){
+  .notes-card-grid{grid-template-columns:minmax(0,1fr);gap:11px;padding:13px 12px 16px}
+  .note-card{height:500px;min-height:500px;border-radius:14px}
+  .note-card-heading{height:66px;min-height:66px;padding:10px 11px;gap:8px}
+  .note-card-avatar{width:30px;height:30px;flex-basis:30px}
+  .note-card-title strong{font-size:11px}
+  .note-group-tag{max-width:34%;font-size:8px;padding:4px 6px}
+  .note-card-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;padding:6px 11px 8px}
+  .note-field{min-height:49px;padding:7px 0}
+  .note-field-label{font-size:8px}
+  .note-field-value{font-size:9px}
+  .note-field-value code{font-size:9px}
+  .note-field-long{min-height:72px}
+  .note-card-actions{height:50px;min-height:50px;padding:8px 11px}
+  .note-form-section-heading{padding:14px 15px 8px}
+  .notes-form>.form-grid,.notes-form .note-form-section>.form-grid{padding:0 15px 10px}
+}

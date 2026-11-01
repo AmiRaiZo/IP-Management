@@ -17,6 +17,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.accounts = (ROOT / "templates" / "accounts.html").read_text(encoding="utf-8")
         cls.account_form = (ROOT / "templates" / "account_form.html").read_text(encoding="utf-8")
         cls.account_groups = (ROOT / "templates" / "account_groups.html").read_text(encoding="utf-8")
+        cls.notes = (ROOT / "templates" / "notes.html").read_text(encoding="utf-8")
+        cls.notes_form = (ROOT / "templates" / "notes_form.html").read_text(encoding="utf-8")
+        cls.note_groups = (ROOT / "templates" / "note_groups.html").read_text(encoding="utf-8")
         cls.app_source = (ROOT / "app.py").read_text(encoding="utf-8")
         cls.groups = (ROOT / "templates" / "groups.html").read_text(encoding="utf-8")
         cls.users = (ROOT / "templates" / "users.html").read_text(encoding="utf-8")
@@ -218,13 +221,10 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.7")
-        self.assertIn("style.css') }}?v=4.0.7", self.base)
-        self.assertIn("app.js') }}?v=4.0.7", self.base)
+        self.assertEqual(self.version, "4.0.8")
+        self.assertIn("style.css') }}?v=4.0.8", self.base)
+        self.assertIn("app.js') }}?v=4.0.8", self.base)
 
-
-if __name__ == "__main__":
-    unittest.main()
     def test_record_names_keep_normal_text_color_while_group_badges_use_selected_color(self):
         self.assertIn('<div class="mobile-ip-title"><strong>{{ ip.name or ip.ip_address or \'Unnamed IP\' }}</strong></div>', self.index)
         self.assertIn('<strong>{{ ip.name or \'Unnamed IP\' }}</strong><span class="group-tag"', self.index)
@@ -237,3 +237,33 @@ if __name__ == "__main__":
         self.assertIn('.mobile-ip-title>strong{color:var(--text)!important}', self.css)
         self.assertIn('.record-title>strong{color:var(--text)!important}', self.css)
 
+    def test_notes_vault_is_separate_has_optional_composite_fields_and_fixed_cards(self):
+        self.assertIn("url_for('notes')", self.base)
+        self.assertIn("url_for('note_groups')", self.base)
+        self.assertIn("NOTES VAULT", self.base)
+        self.assertIn("CREATE TABLE IF NOT EXISTS note_groups", self.app_source)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notes", self.app_source)
+        self.assertIn("REFERENCES note_groups(id)", self.app_source)
+        self.assertIn("def validate_note", self.app_source)
+        self.assertIn("def safe_notes_return_url", self.app_source)
+        for field in ("title", "service_url", "ip_name", "ip_address", "ip_port", "ip_username", "ip_password",
+                      "account_name", "account_username", "account_email", "account_password", "note_text"):
+            self.assertIn(f'name="{field}"', self.notes_form)
+            self.assertNotIn(f'name="{field}" required', self.notes_form)
+        self.assertIn("data-live-search", self.notes)
+        self.assertIn("data-group-filter", self.notes)
+        self.assertIn('data-scroll-record="note-{{ note.id }}"', self.notes)
+        self.assertIn("url_for('note_groups')", self.base)
+        self.assertIn("COUNT(notes.id) AS note_count", self.app_source)
+        self.assertIn(".notes-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))", self.css)
+        self.assertIn(".note-card{height:500px;min-height:500px", self.css)
+        self.assertIn(".note-card-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))", self.css)
+        self.assertIn(".note-field-long{grid-column:1/-1", self.css)
+        self.assertIn(".note-card-actions{height:54px;min-height:54px", self.css)
+        self.assertIn("data-reveal-password", self.notes)
+        self.assertIn("vault.encrypt(ip_password.encode", self.app_source)
+        self.assertIn("vault.encrypt(account_password.encode", self.app_source)
+
+
+if __name__ == "__main__":
+    unittest.main()

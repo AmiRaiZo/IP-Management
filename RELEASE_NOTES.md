@@ -1,3 +1,12 @@
+## Version 4.0.8 release notes
+
+- Add a separate Notes Vault with its own independent groups, colors, ordering, and delete behavior, isolated from IP and account groups.
+- Add one optional composite entry form for title, URL, IP connection details, account details, and free-form notes; no content field is required.
+- Encrypt IP and account passwords at rest, preserve existing passwords when edit fields are left blank, and support reveal/copy from the note cards.
+- Render only populated fields in a uniform two-column card grid with fixed card dimensions and pinned actions, on desktop and mobile.
+- Add regression coverage for fully blank notes, mixed IP/account/note entries, independent groups, password encryption, validation, and fixed card layout.
+- Refresh CSS and JavaScript asset cache keys.
+
 ## Version 4.0.7 release notes
 
 - Keep IP and account record names in the normal interface text color on desktop and mobile.
@@ -280,4 +289,4 @@
 - Add regression coverage for viewport-locked layout and bump static asset cache keys to v3.0.0 so browsers fetch the fix.
 - Keep README.md focused on installation, upgrade, updating, access recovery, and server-operation instructions. Release notes are published on the GitHub release page instead.
 - Configure release automation to retain only the two latest published releases and delete older release entries and tags.
-
+292

@@ -30,10 +30,13 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM user_group_access")
             db.execute("DELETE FROM ips")
             db.execute("DELETE FROM accounts")
+            db.execute("DELETE FROM notes")
             db.execute("DELETE FROM account_groups")
+            db.execute("DELETE FROM note_groups")
             db.execute("DELETE FROM groups")
             db.execute("INSERT INTO groups(name,description,created_at,sort_order) VALUES('Default','Default group for IP records',?,0)", (archive.now(),))
             db.execute("INSERT INTO account_groups(name,description,created_at,sort_order) VALUES('Default','Default group for saved accounts',?,0)", (archive.now(),))
+            db.execute("INSERT INTO note_groups(name,description,color,created_at,sort_order) VALUES('Default','Default group for saved notes','#65758b',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
             db.execute("DELETE FROM user_recovery_codes")
             db.execute("DELETE FROM telegram_login_codes")
@@ -1079,6 +1082,145 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts WHERE name='Bad Email'").fetchone()[0], 0)
 
+    def test_notes_vault_stores_optional_ip_account_and_note_fields_with_independent_groups(self):
+        _, secret = self.create_user("notes-vault-root")
+        self.assertEqual(self.login("notes-vault-root", secret).status_code, 302)
+
+        for path in ("/notes", "/note-groups", "/notes/new"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+        form_page = self.client.get("/notes/new").get_data(as_text=True)
+        self.assertIn('name="ip_address"', form_page)
+        self.assertIn('name="account_email"', form_page)
+        self.assertIn('name="note_text"', form_page)
+        self.assertNotIn('name="title" required', form_page)
+        self.assertNotIn('name="ip_address" required', form_page)
+        self.assertNotIn('name="account_email" type="email" required', form_page)
+        self.assertNotIn('name="note_text" required', form_page)
+
+        # Group names are independent across all three directories.
+        self.assertEqual(self.client.post("/groups", data={
+            "csrf_token": self.csrf(), "name": "Shared",
+        }).status_code, 302)
+        self.assertEqual(self.client.post("/account-groups", data={
+            "csrf_token": self.csrf(), "name": "Shared",
+        }).status_code, 302)
+        self.assertEqual(self.client.post("/note-groups", data={
+            "csrf_token": self.csrf(), "name": "Shared", "description": "Mixed references", "color": "#d97706",
+        }).status_code, 302)
+        with archive.connect_db() as db:
+            ip_group = db.execute("SELECT id FROM groups WHERE name='Shared'").fetchone()
+            account_group = db.execute("SELECT id FROM account_groups WHERE name='Shared'").fetchone()
+            note_group = db.execute("SELECT id FROM note_groups WHERE name='Shared'").fetchone()
+            default_note_group = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT description FROM groups WHERE id=?", (ip_group["id"],)).fetchone()["description"], "")
+            self.assertEqual(db.execute("SELECT description FROM account_groups WHERE id=?", (account_group["id"],)).fetchone()["description"], "")
+            self.assertEqual(db.execute("SELECT name FROM note_groups WHERE id=?", (note_group["id"],)).fetchone()["name"], "Shared")
+
+        # Even an entirely blank entry can be saved; no content field is mandatory.
+        response = self.client.post("/notes/new", data={
+            "csrf_token": self.csrf(), "group_id": str(default_note_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            empty = db.execute("SELECT * FROM notes WHERE title='' AND ip_address='' AND account_email='' AND note_text=''").fetchone()
+        self.assertIsNotNone(empty)
+        empty_page = self.client.get("/notes").get_data(as_text=True)
+        empty_card = empty_page.split(f'data-scroll-record="note-{empty["id"]}"', 1)[1].split("</article>", 1)[0]
+        for label in ("Website / URL", "IP address", "IP port", "IP username", "IP password", "Account name", "Account username", "Account email", "Account password", "Note"):
+            self.assertNotIn(label, empty_card)
+        self.assertIn(f"Saved note #{empty['id']}", empty_card)
+
+        response = self.client.post("/notes/new", data={
+            "csrf_token": self.csrf(), "return_to": f"/notes?q=Gateway&group={note_group['id']}",
+            "title": "Edge gateway credentials", "service_url": "https://router.example.test",
+            "ip_name": "Remote gateway", "ip_address": "192.0.2.44", "ip_port": "8291",
+            "ip_username": "router-admin", "ip_password": "ip-vault-secret",
+            "account_name": "Monitoring portal", "account_username": "monitor-user",
+            "account_email": "monitor@example.test", "account_password": "account-vault-secret",
+            "note_text": "Primary access details\\nUse the backup link during maintenance.",
+            "group_id": str(note_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, f"/notes?q=Gateway&group={note_group['id']}")
+        with archive.connect_db() as db:
+            saved = db.execute("SELECT * FROM notes WHERE title='Edge gateway credentials'").fetchone()
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["group_id"], note_group["id"])
+        self.assertEqual(saved["ip_port"], 8291)
+        self.assertNotEqual(saved["ip_password_enc"], "ip-vault-secret")
+        self.assertNotEqual(saved["account_password_enc"], "account-vault-secret")
+        self.assertEqual(archive.vault.decrypt(saved["ip_password_enc"].encode()).decode(), "ip-vault-secret")
+        self.assertEqual(archive.vault.decrypt(saved["account_password_enc"].encode()).decode(), "account-vault-secret")
+
+        listing = self.client.get("/notes?q=Gateway&group=" + str(note_group["id"]))
+        self.assertEqual(listing.status_code, 200)
+        card = listing.get_data(as_text=True).split(f'data-scroll-record="note-{saved["id"]}"', 1)[1].split("</article>", 1)[0]
+        for value in ("Edge gateway credentials", "router.example.test", "Remote gateway", "192.0.2.44", "8291",
+                      "router-admin", "Monitoring portal", "monitor-user", "monitor@example.test", "Primary access details"):
+            self.assertIn(value, card)
+        self.assertIn('data-copy-value="ip-vault-secret"', card)
+        self.assertIn('data-copy-value="account-vault-secret"', card)
+        self.assertEqual(len(re.findall(r'class="note-field(?:\s|")', card)), 11)
+
+        # Blank replacement passwords preserve the encrypted values, while other fields update normally.
+        response = self.client.post(f"/notes/{saved['id']}/edit", data={
+            "csrf_token": self.csrf(), "return_to": "/notes?q=Gateway", "title": "Updated gateway",
+            "ip_address": "192.0.2.45", "ip_port": "8291", "account_email": "monitor@example.test",
+            "group_id": str(note_group["id"]),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/notes?q=Gateway")
+        with archive.connect_db() as db:
+            updated = db.execute("SELECT * FROM notes WHERE id=?", (saved["id"],)).fetchone()
+        self.assertEqual(updated["title"], "Updated gateway")
+        self.assertEqual(updated["ip_address"], "192.0.2.45")
+        self.assertEqual(updated["ip_password_enc"], saved["ip_password_enc"])
+        self.assertEqual(updated["account_password_enc"], saved["account_password_enc"])
+
+        # Invalid optional values are rejected only when supplied.
+        response = self.client.post("/notes/new", data={
+            "csrf_token": self.csrf(), "title": "Invalid port", "ip_port": "70000",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"IP port must be a number", response.data)
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM notes WHERE title='Invalid port'").fetchone())
+
+        # Group color/order/delete operations affect only notes, not IPs or Accounts.
+        response = self.client.post(f"/note-groups/{note_group['id']}/color", data={
+            "csrf_token": self.csrf(), "color": "#c2410c",
+        })
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(f"/note-groups/{note_group['id']}/move", data={
+            "csrf_token": self.csrf(), "direction": "up",
+        })
+        self.assertEqual(response.status_code, 302)
+        groups_page = self.client.get("/note-groups").get_data(as_text=True)
+        self.assertIn("#c2410c", groups_page)
+        response = self.client.post(f"/note-groups/{note_group['id']}/delete", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT group_id FROM notes WHERE id=?", (saved["id"],)).fetchone()["group_id"], default_note_group["id"])
+            self.assertIsNotNone(db.execute("SELECT id FROM groups WHERE id=?", (ip_group["id"],)).fetchone())
+            self.assertIsNotNone(db.execute("SELECT id FROM account_groups WHERE id=?", (account_group["id"],)).fetchone())
+
+        response = self.client.post(f"/notes/{saved['id']}/delete", data={
+            "csrf_token": self.csrf(), "return_to": "https://example.com/",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/notes", "External return destinations must be rejected")
+        with archive.connect_db() as db:
+            self.assertIsNone(db.execute("SELECT id FROM notes WHERE id=?", (saved["id"],)).fetchone())
+            self.assertIsNotNone(db.execute("SELECT id FROM notes WHERE id=?", (empty["id"],)).fetchone())
+
+    def test_notes_vault_is_superadmin_only(self):
+        _, secret = self.create_user("notes-vault-limited", role="admin")
+        self.assertEqual(self.login("notes-vault-limited", secret).status_code, 302)
+        for path in ("/notes", "/notes/new", "/note-groups"):
+            self.assertEqual(self.client.get(path).status_code, 403, path)
+
     def test_superadmin_can_create_group_and_ip_password_is_encrypted(self):
         _, secret = self.create_user("rootadmin")
         self.assertEqual(self.login("rootadmin", secret).status_code, 302)
@@ -1419,6 +1561,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('class="record-title"><strong>Colored mailbox</strong>', account_page)
         self.assertNotIn('<strong style="color: #0f766e !important">Colored mailbox</strong>', account_page)
         self.assertIn('class="mobile-ip-title mobile-account-title"><strong>Colored mailbox</strong>', account_page)
+        self.assertIn('class="group-tag" data-group-color="#0f766e" style="--group-color: #0f766e !important;', account_page)
 
     def test_superadmin_can_reorder_groups_and_order_is_persisted(self):
         _, secret = self.create_user("grouporder")
