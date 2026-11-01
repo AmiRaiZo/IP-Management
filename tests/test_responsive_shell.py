@@ -228,6 +228,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("app.js') }}?v=4.1.0", self.base)
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
+        self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)
         self.assertIn('"release", "list", "--limit", "100", "--json", "tagName,publishedAt"', self.release_workflow)
         self.assertIn('"release", "delete", tag, "--yes", "--cleanup-tag"', self.release_workflow)
         self.assertIn('if len(remaining) > 2:', self.release_workflow)
