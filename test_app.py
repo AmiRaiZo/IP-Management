@@ -1882,7 +1882,12 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
-        self.assertIn("default-src 'self'", response.headers.get("Content-Security-Policy", ""))
+        csp = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'self'", csp)
+        self.assertIn("style-src-attr 'unsafe-inline'", csp)
+        self.assertIn("style-src-elem 'self'", csp)
+        self.assertIn("script-src 'self'", csp)
+        self.assertNotIn("script-src 'unsafe-inline'", csp)
         for path in ("/security", "/settings/deployment/status", "/update/check", "/update/status"):
             with self.subTest(path=path):
                 guarded = self.client.get(path)

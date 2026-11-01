@@ -218,9 +218,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.5")
-        self.assertIn("style.css') }}?v=4.0.5", self.base)
-        self.assertIn("app.js') }}?v=4.0.5", self.base)
+        self.assertEqual(self.version, "4.0.6")
+        self.assertIn("style.css') }}?v=4.0.6", self.base)
+        self.assertIn("app.js') }}?v=4.0.6", self.base)
 
 
 if __name__ == "__main__":

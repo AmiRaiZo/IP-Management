@@ -1,3 +1,10 @@
+## Version 4.0.6 release notes
+
+- Fix the root cause of group text colors not changing: the Content Security Policy blocked all inline style attributes used to render each group's saved color.
+- Allow inline style attributes while keeping inline style elements blocked and JavaScript restricted to same-origin sources.
+- Add security-header regression checks so group color styles remain functional without weakening the script policy.
+- Refresh CSS and JavaScript asset cache keys.
+
 ## Version 4.0.5 release notes
 
 - Add visible spacing between the IP card footer separator and its Edit/Delete actions on desktop.
