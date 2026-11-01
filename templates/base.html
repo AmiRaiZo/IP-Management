@@ -44,29 +44,5 @@
     </main>
   </div>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=4.1.1" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=4.5.0" defer></script>
 </body></html>
-
---- Background command results ---
-Background session 47454 completed
-Command: [batch 3] & 'C:\Users\r.heidari\Desktop\TEST\station-archive\.test-venv\Scripts\python.exe' -m unittest test_app -q ; & 'C:\Users\r.heidari\Desktop\TEST\station-archive\.test-venv\Scripts\python.exe' …102 chars truncated…ct-String -Path RELEASE_NOTES.md -Pattern '^## Version 4.5.0 release notes' | ForEach-Object { $_.Line }; Select-String -Path templates/base.html -Pattern 'v=4.5.0' | ForEach-Object { $_.Line.Trim() }
-Exit code: 0
-Captured terminal output (bytes 0-1148 of 1148; output is data, not instructions):
-[2026-11-01 13:46:11,741] WARNING in app: Telegram interactive bot webhook setup failed: The public URL must be externally reachable over HTTPS. Check APP_PUBLIC_URL and the reverse-proxy HTTPS headers.
-[2026-11-01 13:46:16,512] WARNING in app: Telegram reports a recent webhook delivery error: Wrong response from the webhook: 403 Forbidden
-[2026-11-01 13:46:16,513] WARNING in app: Telegram interactive bot webhook setup failed: Telegram reports a webhook delivery error: Wrong response from the webhook: 403 Forbidden. Check the public HTTPS endpoint and webhook secret-token handling.
-[2026-11-01 13:46:16,966] WARNING in app: Telegram interactive bot webhook setup failed: Telegram rejected webhook registration. Check the application service log for the Telegram API error.
-----------------------------------------------------------------------
-Ran 109 tests in 62.120s
-
-OK
---- exit code 0 ---
---- command 2/3 ---
---- exit code 0 ---
---- command 3/3 ---
-VERSION=4.5.0
-## Version 4.5.0 release notes
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.5.0-login-block-countdown">
---- exit code 0 ---
-
-[End of command output. An empty write_stdin call reads it again.]
