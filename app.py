@@ -167,7 +167,8 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS telegram_login_codes (
           id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          code_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+          code_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+          chat_id TEXT NOT NULL DEFAULT '', message_id INTEGER
         );
         CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS groups (
@@ -219,6 +220,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_ips_name ON ips(name);
         """)
         # In-place migrations preserve the database created by the first release.
+        telegram_code_cols = {r[1] for r in db.execute("PRAGMA table_info(telegram_login_codes)")}
+        if "chat_id" not in telegram_code_cols:
+            db.execute("ALTER TABLE telegram_login_codes ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''")
+        if "message_id" not in telegram_code_cols:
+            db.execute("ALTER TABLE telegram_login_codes ADD COLUMN message_id INTEGER")
         user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)")}
         for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1"), ("can_view_passwords", "INTEGER NOT NULL DEFAULT 0")):
             if name not in user_cols:
@@ -344,21 +350,40 @@ def issue_telegram_login_code():
     return code
 
 
-def consume_telegram_login_code(user_id, submitted):
-    """Atomically consume a short-lived Telegram fallback code; never stores it in plaintext."""
-    if not re.fullmatch(r"\d{6}", str(submitted or "").strip()):
+def telegram_bind_login_code_message(code, chat_id, message_id):
+    """Associate the short-lived code with its Telegram message so it can be replaced after use."""
+    try:
+        normalized_message_id = int(message_id)
+    except (TypeError, ValueError):
         return False
     with connect_db() as db:
-        row = db.execute("SELECT id,code_hash,expires_at FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()
+        row = db.execute("SELECT id,user_id,code_hash FROM telegram_login_codes ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return False
+        expected_hash = telegram_login_code_hash(row["user_id"], code)
+        if not hmac.compare_digest(row["code_hash"], expected_hash):
+            return False
+        db.execute("UPDATE telegram_login_codes SET chat_id=?,message_id=? WHERE id=?",
+                   (str(chat_id)[:80], normalized_message_id, row["id"]))
+    return True
+
+
+def consume_telegram_login_code(user_id, submitted):
+    """Atomically consume a short-lived code and return its source message metadata."""
+    if not re.fullmatch(r"\d{6}", str(submitted or "").strip()):
+        return None
+    with connect_db() as db:
+        row = db.execute("SELECT id,code_hash,expires_at,chat_id,message_id FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()
         if not row or row["expires_at"] < now():
             if row:
                 db.execute("DELETE FROM telegram_login_codes WHERE id=?", (row["id"],))
-            return False
+            return None
         candidate = telegram_login_code_hash(user_id, submitted)
         if not hmac.compare_digest(row["code_hash"], candidate):
-            return False
+            return None
+        message = {"chat_id": row["chat_id"], "message_id": row["message_id"]}
         db.execute("DELETE FROM telegram_login_codes WHERE id=?", (row["id"],))
-    return True
+    return message
 
 
 def secure_setting(key):
@@ -378,7 +403,7 @@ def save_secure_setting(key, value):
         db.execute("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, encrypted))
 
 
-def send_telegram_security_alert(message, reply_markup=None):
+def send_telegram_security_alert(message, reply_markup=None, delete_after=120):
     """Send a temporary security notice; never include passwords or reusable TOTP codes."""
     token = secure_setting("telegram_bot_token_enc")
     chat_id = secure_setting("telegram_chat_id_enc")
@@ -393,8 +418,8 @@ def send_telegram_security_alert(message, reply_markup=None):
         with urlopen(req, timeout=5) as response:
             result = json.loads(response.read(65536).decode("utf-8"))
         message_id = (result.get("result") or {}).get("message_id") if isinstance(result, dict) else None
-        if result.get("ok") and message_id:
-            telegram_schedule_delete(chat_id, message_id, 120)
+        if result.get("ok") and message_id and delete_after:
+            telegram_schedule_delete(chat_id, message_id, delete_after)
         return bool(result.get("ok"))
     except (URLError, HTTPError, TimeoutError, ValueError, OSError):
         app.logger.warning("Telegram security notification failed")
@@ -516,6 +541,23 @@ def telegram_replace_message(chat_id, message_id, text, reply_markup=None, parse
             return result
         telegram_delete_message(chat_id, message_id)
     return telegram_send(chat_id, text, reply_markup, parse_mode)
+
+
+def telegram_edit_persistent_message(chat_id, message_id, text, reply_markup=None, parse_mode=None):
+    """Edit an existing message and keep it permanently by cancelling its expiry timer."""
+    try:
+        payload = {"chat_id": str(chat_id), "message_id": int(message_id), "text": str(text)[:3900],
+                   "disable_web_page_preview": True}
+    except (TypeError, ValueError):
+        return {}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    result = telegram_api("editMessageText", payload)
+    if result:
+        telegram_cancel_scheduled_delete(chat_id, message_id)
+    return result
 
 
 def telegram_browse_groups(chat_id, message_id):
@@ -812,10 +854,10 @@ def handle_telegram_update(update):
         action = callback.get("data", "")
         if action == "ack_telegram_login":
             alert_text = str(message.get("text", ""))
-            if "Telegram one-time login code" not in alert_text or "Login acknowledged" in alert_text:
+            if "Login method: Telegram one-time code." not in alert_text or "Login acknowledged" in alert_text:
                 return
             acknowledged = alert_text + "\n\n✅ Login acknowledged. The one-time code has already been consumed."
-            telegram_replace_message(
+            telegram_edit_persistent_message(
                 chat_id, message.get("message_id"), acknowledged,
                 {"inline_keyboard": [[{"text": "⌂ Menu", "callback_data": "menu"}]]},
             )
@@ -845,7 +887,10 @@ def handle_telegram_update(update):
             if not code:
                 telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
                 return
-            telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
+            sent = telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML", delete_after=0)
+            sent_message_id = (sent.get("result") or {}).get("message_id") if isinstance(sent, dict) else None
+            if sent_message_id:
+                telegram_bind_login_code_message(code, chat_id, sent_message_id)
         elif action == "account_groups":
             telegram_browse_account_groups(chat_id, message.get("message_id"))
         elif action.startswith("account_browse_group:"):
@@ -1077,7 +1122,10 @@ def handle_telegram_update(update):
         if not code:
             telegram_send(chat_id, "No enabled superadmin account is available for login recovery.")
             return
-        telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML")
+        sent = telegram_send(chat_id, f"Login code for IP Management:\n<code>{code}</code>", parse_mode="HTML", delete_after=0)
+        sent_message_id = (sent.get("result") or {}).get("message_id") if isinstance(sent, dict) else None
+        if sent_message_id:
+            telegram_bind_login_code_message(code, chat_id, sent_message_id)
         return
     if command in ("ربات", "/start", "/menu"):
         if message.get("message_id"):
@@ -1324,24 +1372,41 @@ def safe_telegram_username(value):
     return re.sub(r"[^A-Za-z0-9_.@-]", "?", str(value or "unknown"))[:80] or "(empty)"
 
 
-def send_login_success_alert(username, remote_ip, telegram_code_used=False, telegram_code_value=""):
+def send_login_success_alert(username, remote_ip, telegram_code_used=False, telegram_code_value="",
+                             telegram_code_message=None, user_agent=""):
+    client_details = re.sub(r"[\r\n\t]+", " ", str(user_agent or "")).strip()[:350] or "Unknown"
     message = (
-        "Successful sign-in to IP Management.\n"
+        "✅ Successful sign-in to IP Management.\n"
         f"💻 Host: {telegram_hostname()}\n"
         f"👤 Username: {safe_telegram_username(username)}\n"
+        f"🛡 Account role: {'Superadmin' if telegram_code_used else 'Authenticated user'}\n"
         f"🌐 IP address: {remote_ip}\n"
+        f"🧭 Browser / device: {client_details}\n"
         f"⏰ Time (Iran): {jalali_datetime(now())}"
     )
     reply_markup = None
     if telegram_code_used:
         safe_code = re.sub(r"[^0-9]", "", str(telegram_code_value or ""))[:6]
-        message += "\n🔐 Method: Telegram one-time login code."
+        message += "\n🔐 Login method: Telegram one-time code."
         if safe_code:
             message += f"\n🔢 Code used: {safe_code}"
-        message += "\n✅ The code was consumed on successful login and cannot be reused."
+        message += "\n✅ The code was consumed by this sign-in and cannot be reused."
         reply_markup = {"inline_keyboard": [[
             {"text": "✅ Confirm login", "callback_data": "ack_telegram_login"}
         ]]}
+        if telegram_code_message:
+            source_chat = telegram_code_message.get("chat_id")
+            source_message_id = telegram_code_message.get("message_id")
+            if source_chat and source_message_id:
+                updated = telegram_edit_persistent_message(
+                    source_chat, source_message_id, message, reply_markup=reply_markup
+                )
+                if updated:
+                    return True
+                # Never leave a consumed login credential visible if Telegram rejects the edit.
+                telegram_delete_message(source_chat, source_message_id)
+        # Keep the audit notice even if Telegram no longer allows editing the original code message.
+        return send_telegram_security_alert(message, reply_markup=reply_markup, delete_after=0)
     return send_telegram_security_alert(message, reply_markup=reply_markup)
 
 
@@ -1614,8 +1679,10 @@ def login():
             secret = shared_two_factor_secret() if mode == "shared" else (decrypt_authenticator_secret(user["totp_secret"]) if user else "")
             totp_ok = bool(user and user_requires_two_factor(user) and secret and pyotp.TOTP(secret).verify(code, valid_window=1))
             recovery_ok = bool(user and user_requires_two_factor(user) and not totp_ok and consume_recovery_code(user["id"], code))
-            telegram_code_ok = bool(user and user["role"] == "superadmin" and user_requires_two_factor(user)
-                                    and not totp_ok and not recovery_ok and consume_telegram_login_code(user["id"], code))
+            telegram_code_message = None
+            if user and user["role"] == "superadmin" and user_requires_two_factor(user) and not totp_ok and not recovery_ok:
+                telegram_code_message = consume_telegram_login_code(user["id"], code)
+            telegram_code_ok = telegram_code_message is not None
             if user and user_requires_two_factor(user) and (totp_ok or recovery_ok or telegram_code_ok):
                 establish_login(user)
                 session["two_factor_verified"] = True
@@ -1626,9 +1693,13 @@ def login():
                     security_event("two_factor_recovery", user["username"], "success", "Two-minute Telegram fallback code consumed")
                     audit("telegram_login_recovery_code_used")
                 if telegram_code_ok:
-                    send_login_success_alert(user["username"], client_ip(), telegram_code_used=True, telegram_code_value=code)
+                    send_login_success_alert(
+                        user["username"], client_ip(), telegram_code_used=True, telegram_code_value=code,
+                        telegram_code_message=telegram_code_message,
+                        user_agent=request.headers.get("User-Agent", ""),
+                    )
                 else:
-                    send_login_success_alert(user["username"], client_ip())
+                    send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 response = redirect(safe_login_target())
                 if totp_ok:
@@ -1656,7 +1727,7 @@ def login():
             if user_requires_two_factor(user) and remembered_two_factor(user["id"]):
                 establish_login(user)
                 session["two_factor_verified"] = True
-                send_login_success_alert(user["username"], client_ip())
+                send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 return redirect(safe_login_target())
             if user_requires_two_factor(user):
@@ -1679,7 +1750,7 @@ def login():
                 security_event("login", username, "password_ok_2fa_pending", "Password accepted; waiting for second factor")
                 return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
             establish_login(user)
-            send_login_success_alert(user["username"], client_ip())
+            send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
             flash(f"Welcome back, {user['username']}!", "welcome")
             return redirect(safe_login_target())
         time.sleep(0.35)

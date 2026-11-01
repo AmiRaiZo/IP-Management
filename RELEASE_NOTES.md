@@ -1,3 +1,11 @@
+## Version 4.0.5 release notes
+
+- Add visible spacing between the IP card footer separator and its Edit/Delete actions on desktop.
+- Apply the saved IP-group and account-group color directly to each group label so the displayed text always matches the selected color.
+- Replace a used Telegram login-code message with a permanent sign-in record containing the account, role, server host, remote IP, browser/device, timestamp, and consumed code.
+- Keep the Telegram code message out of automatic deletion, edit it in place after successful authentication, and preserve it when the login is acknowledged.
+- Add regression coverage for the Telegram message lifecycle, group label colors, and desktop action spacing; refresh static asset cache keys.
+
 ## Version 4.0.4 release notes
 
 - Fix mobile Edit/Delete spacing using selectors that override the existing account-card rules, with real separation from the divider and content above.
@@ -258,4 +266,4 @@
 - Add regression coverage for viewport-locked layout and bump static asset cache keys to v3.0.0 so browsers fetch the fix.
 - Keep README.md focused on installation, upgrade, updating, access recovery, and server-operation instructions. Release notes are published on the GitHub release page instead.
 - Configure release automation to retain only the two latest published releases and delete older release entries and tags.
-
+269

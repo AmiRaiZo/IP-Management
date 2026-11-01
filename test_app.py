@@ -390,7 +390,7 @@ class ArchiveTests(unittest.TestCase):
 
         with (
             patch.object(archive, "telegram_api", return_value={"ok": True}),
-            patch.object(archive, "telegram_replace_message") as replace,
+            patch.object(archive, "telegram_edit_persistent_message") as replace,
         ):
             archive.handle_telegram_update({"callback_query": {
                 "id": "confirm-one-time", "data": "ack_telegram_login",
@@ -1345,6 +1345,7 @@ class ArchiveTests(unittest.TestCase):
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".mobile-ip-list{display:grid!important;gap:11px;padding:13px12px16px!important}", "".join(stylesheet.split()))
         self.assertIn(".mobile-ip-actions{display:flex!important", stylesheet)
+        self.assertIn(".mobile-ip-list.mobile-ip-card>.mobile-ip-actions{padding:12px15px13px!important}", "".join(stylesheet.split()))
         self.assertIn(".account-inventory-panel.mobile-account-list{display:grid!important;gap:10px;padding:13px12px16px!important}", "".join(stylesheet.split()))
 
     def test_update_success_button_says_ok(self):
@@ -1380,6 +1381,7 @@ class ArchiveTests(unittest.TestCase):
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn("color: #db2777 !important", page)
         self.assertIn("background-color: #db277722 !important", page)
+        self.assertIn('class="group-tag" data-group-color="#db2777" style="--group-color: #db2777 !important; color: #db2777 !important;', page)
         groups_page = self.client.get("/groups").get_data(as_text=True)
         self.assertIn('style="--group-color: #db2777; color: #db2777 !important"', groups_page)
 
@@ -1407,6 +1409,7 @@ class ArchiveTests(unittest.TestCase):
         account_page = self.client.get("/accounts").get_data(as_text=True)
         self.assertIn("color: #0f766e !important", account_page)
         self.assertIn("background-color: #0f766e22 !important", account_page)
+        self.assertIn('class="group-tag" data-group-color="#0f766e" style="--group-color: #0f766e !important; color: #0f766e !important;', account_page)
         self.assertIn('class="mobile-ip-card mobile-account-card"', account_page)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', account_page)
         self.assertIn('class="record-title" style="--group-color: #0f766e"', account_page)
@@ -1983,6 +1986,85 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(message.kwargs.get("parse_mode"), "HTML")
         self.assertNotIn("Expires", message.args[1])
         self.assertNotIn("IP Archive", message.args[1])
+
+    def test_telegram_code_login_replaces_original_message_with_permanent_audit_record(self):
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("telegram-audit-admin", role="superadmin")
+        calls = []
+
+        def telegram_api_stub(method, payload):
+            calls.append((method, payload))
+            if method == "sendMessage":
+                return {"ok": True, "result": {"message_id": 77}}
+            if method == "editMessageText":
+                return {"ok": True, "result": {"message_id": 77}}
+            return {"ok": True}
+
+        callback = {"callback_query": {"id": "cb-audit", "data": "telegram_2fa_code", "message": {
+            "message_id": 1, "chat": {"id": 12345, "type": "private"}}}}
+        with patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+            archive.handle_telegram_update(callback)
+            with archive.connect_db() as db:
+                saved_message = db.execute(
+                    "SELECT chat_id,message_id FROM telegram_login_codes ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            self.assertEqual((saved_message["chat_id"], saved_message["message_id"]), ("12345", 77))
+            self.assertNotIn(("12345", 77), archive._TELEGRAM_DELETE_TIMERS)
+
+            code_message = next(payload["text"] for method, payload in calls if method == "sendMessage")
+            code = re.search(r"<code>(\d{6})</code>", code_message).group(1)
+            self.client.get("/login")
+            password_response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "telegram-audit-admin", "password": "test-pass",
+            })
+            self.assertEqual(password_response.status_code, 200)
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "code": code,
+            }, headers={"User-Agent": "Test Browser/42 (Windows 11)"})
+
+        self.assertEqual(response.status_code, 302)
+        edited = [payload for method, payload in calls if method == "editMessageText"]
+        self.assertEqual(len(edited), 1)
+        self.assertEqual((edited[0]["chat_id"], edited[0]["message_id"]), ("12345", 77))
+        self.assertIn("telegram-audit-admin", edited[0]["text"])
+        self.assertIn("Account role: Superadmin", edited[0]["text"])
+        self.assertIn("127.0.0.1", edited[0]["text"])
+        self.assertIn("Test Browser/42 (Windows 11)", edited[0]["text"])
+        self.assertIn(f"Code used: {code}", edited[0]["text"])
+        self.assertIn("cannot be reused", edited[0]["text"])
+        self.assertNotIn(("12345", 77), archive._TELEGRAM_DELETE_TIMERS)
+        self.assertFalse(any(method == "deleteMessage" for method, _ in calls))
+
+        acknowledge = {"callback_query": {"id": "cb-ack", "data": "ack_telegram_login", "message": {
+            "message_id": 77, "chat": {"id": 12345, "type": "private"}, "text": edited[0]["text"]}}}
+        with patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+            archive.handle_telegram_update(acknowledge)
+        follow_up_edits = [payload for method, payload in calls if method == "editMessageText"]
+        self.assertEqual(len(follow_up_edits), 2)
+        self.assertIn("Login acknowledged", follow_up_edits[-1]["text"])
+        self.assertNotIn(("12345", 77), archive._TELEGRAM_DELETE_TIMERS)
+        self.assertFalse(any(method == "deleteMessage" for method, _ in calls))
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes").fetchone()[0], 0)
+
+    def test_telegram_code_login_removes_code_message_when_in_place_edit_fails(self):
+        with (
+            patch.object(archive, "telegram_edit_persistent_message", return_value={}) as edit,
+            patch.object(archive, "telegram_delete_message") as delete,
+            patch.object(archive, "send_telegram_security_alert", return_value=True) as alert,
+        ):
+            result = archive.send_login_success_alert(
+                "telegram-fallback-admin", "203.0.113.19", telegram_code_used=True,
+                telegram_code_value="654321", telegram_code_message={"chat_id": "12345", "message_id": 91},
+                user_agent="Firefox on Linux",
+            )
+
+        self.assertTrue(result)
+        edit.assert_called_once()
+        delete.assert_called_once_with("12345", 91)
+        alert.assert_called_once()
+        self.assertEqual(alert.call_args.kwargs.get("delete_after"), 0)
+        self.assertIn("Code used: 654321", alert.call_args.args[0])
 
     def test_telegram_search_results_include_saved_connection_password_for_configured_chat(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")

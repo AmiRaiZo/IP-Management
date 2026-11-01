@@ -712,3 +712,10 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 /* Use the chosen color directly; avoid fixed palette classes overriding group styling. */
 .group-list .group-symbol{color:var(--group-color)!important;border-color:var(--group-color)!important;background-color:color-mix(in srgb,var(--group-color) 13%,var(--surface))!important}
 .group-list .group-name-text{color:var(--group-color)!important}
+
+/* Keep IP card actions clear of the separator on desktop as well as mobile. */
+@media(min-width:721px){
+  .mobile-ip-list .mobile-ip-card>.mobile-ip-actions{padding:12px 15px 13px!important}
+}
+/* The group badge label always uses the saved color passed by its record. */
+.group-tag{color:var(--group-color,var(--group-palette-0))!important}

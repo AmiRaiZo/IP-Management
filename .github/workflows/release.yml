@@ -155,8 +155,8 @@ jobs:
                   break
               page += 1
           releases.sort(key=lambda item: item.get("published_at") or item.get("created_at") or "", reverse=True)
-          stale = releases[1:]
-          print(f"Found {len(releases)} releases; keeping the newest release and deleting {len(stale)} older releases.")
+          stale = releases[2:]
+          print(f"Found {len(releases)} releases; keeping the newest two and deleting {len(stale)} older releases.")
           for release in stale:
               rid = release["id"]
               tag = release.get("tag_name", "")
