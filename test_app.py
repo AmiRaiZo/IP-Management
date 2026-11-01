@@ -2330,8 +2330,12 @@ class ArchiveTests(unittest.TestCase):
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         self.create_user("approval-denied")
-        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 88}}) as send, \
-             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 88}}):
+        with patch.object(archive, "telegram_send", side_effect=[
+                 {"ok": True, "result": {"message_id": 88}},
+                 {"ok": True, "result": {"message_id": 89}},
+             ]) as send, \
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 89}}), \
+             patch.object(archive, "telegram_start_login_block_countdown") as start_countdown:
             self.client.get("/login")
             response = self.client.post("/login", data={
                 "csrf_token": self.csrf(), "username": "approval-denied", "password": "test-pass",
@@ -2341,6 +2345,7 @@ class ArchiveTests(unittest.TestCase):
             with self.client.session_transaction() as sess:
                 approval_id = sess["pending_login_approval_id"]
             archive.handle_telegram_update({"callback_query": {"id": "approval-no", "data": callback_data,
+                "from": {"id": 12345},
                 "message": {"message_id": 88, "chat": {"id": 12345, "type": "private"}}}})
             response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
@@ -2349,7 +2354,82 @@ class ArchiveTests(unittest.TestCase):
             self.assertNotIn("user_id", sess)
             self.assertNotIn("pending_login_approval_id", sess)
         with archive.connect_db() as db:
-            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "denied")
+            approval = db.execute("SELECT status,user_id FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()
+            self.assertEqual(approval["status"], "denied")
+            blocked_user = db.execute("SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                                      (approval["user_id"],)).fetchone()
+            blocked_until = blocked_user["login_blocked_until"]
+        self.assertGreater(blocked_until, archive.now())
+        self.assertEqual(blocked_user["login_block_message_id"], 89)
+        self.assertEqual(blocked_user["login_block_chat_id"], "12345")
+        self.assertIn("15:00", send.call_args_list[1].args[1])
+        self.assertIn("login_unblock:", send.call_args_list[1].args[2]["inline_keyboard"][0][0]["callback_data"])
+        start_countdown.assert_called_once_with(approval["user_id"], "approval-denied", "12345", 89)
+        blocked_response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "approval-denied", "password": "test-pass",
+        })
+        self.assertEqual(blocked_response.status_code, 429)
+        self.assertEqual(blocked_response.headers.get("Retry-After"), "899")
+        with patch.object(archive, "telegram_api", return_value={"ok": True}) as telegram_api_mock:
+            archive.handle_telegram_update({"callback_query": {
+                "id": "manual-unblock", "data": f"login_unblock:{approval['user_id']}",
+                "from": {"id": 12345},
+                "message": {"message_id": 89, "chat": {"id": 12345, "type": "private"}},
+            }})
+        with archive.connect_db() as db:
+            released = db.execute("SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                                  (approval["user_id"],)).fetchone()
+        self.assertEqual(released["login_blocked_until"], "")
+        self.assertIsNone(released["login_block_message_id"])
+        self.assertEqual(released["login_block_chat_id"], "")
+        self.assertTrue(any(call.args and call.args[0] == "editMessageText"
+                            for call in telegram_api_mock.call_args_list))
+
+    def test_login_block_countdown_formats_minutes_and_seconds(self):
+        self.assertEqual(archive.login_block_countdown_text("test-user", 899).splitlines()[2],
+                         "⏳ زمان باقی‌مانده: 14:59")
+        self.assertEqual(archive.login_block_countdown_text("test-user", 65).splitlines()[2],
+                         "⏳ زمان باقی‌مانده: 01:05")
+
+    def test_login_unblock_callback_requires_authorized_sender_and_exact_message(self):
+        user_id, _ = self.create_user("countdown-auth")
+        blocked_until = (archive.datetime.now(archive.timezone.utc) + archive.timedelta(minutes=10)).isoformat(timespec="seconds")
+        with archive.connect_db() as db:
+            db.execute("UPDATE users SET login_blocked_until=?,login_block_message_id=456,login_block_chat_id='12345' WHERE id=?",
+                       (blocked_until, user_id))
+        unauthorized = {"data": f"login_unblock:{user_id}", "from": {"id": 99999},
+                        "message": {"message_id": 456, "chat": {"id": 12345, "type": "private"}}}
+        self.assertFalse(archive.handle_login_unblock_callback(unauthorized, "12345"))
+        stale_message = {"data": f"login_unblock:{user_id}", "from": {"id": 12345},
+                         "message": {"message_id": 455, "chat": {"id": 12345, "type": "private"}}}
+        self.assertFalse(archive.handle_login_unblock_callback(stale_message, "12345"))
+        with archive.connect_db() as db:
+            still_blocked = db.execute("SELECT login_blocked_until FROM users WHERE id=?", (user_id,)).fetchone()[0]
+        self.assertEqual(still_blocked, blocked_until)
+        authorized = {"data": f"login_unblock:{user_id}", "from": {"id": 12345},
+                      "message": {"message_id": 456, "chat": {"id": 12345, "type": "private"}}}
+        with patch.object(archive, "telegram_api", return_value={"ok": True}):
+            self.assertTrue(archive.handle_login_unblock_callback(authorized, "12345"))
+        with archive.connect_db() as db:
+            released = db.execute("SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                                  (user_id,)).fetchone()
+        self.assertEqual(released["login_blocked_until"], "")
+        self.assertIsNone(released["login_block_message_id"])
+        self.assertEqual(released["login_block_chat_id"], "")
+
+    def test_login_block_countdown_uses_one_shared_worker(self):
+        first = archive.telegram_start_login_block_countdown(1, "one", "12345", 1)
+        second = archive.telegram_start_login_block_countdown(2, "two", "12345", 2)
+        self.assertIs(first, second)
+        self.assertTrue(first.is_alive())
+
+    def test_ip_and_account_cards_pin_action_footers_and_scroll_fields(self):
+        stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        compact = "".join(stylesheet.split())
+        self.assertIn(".mobile-ip-card,.mobile-account-card{display:flex!important;flex-direction:column!important;height:500px;min-height:500px;max-height:500px}", compact)
+        self.assertIn(".mobile-ip-fields,.mobile-account-fields{flex:11auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}", compact)
+        self.assertIn(".mobile-ip-actions,.mobile-account-actions{flex:00auto;margin-top:auto!important;min-height:62px;align-items:center}", compact)
+        self.assertIn(".account-inventory-panel.mobile-account-card.mobile-ip-card{display:flex!important;flex-direction:column!important}", compact)
 
     def test_admin_can_approve_login_without_authenticator_code(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True

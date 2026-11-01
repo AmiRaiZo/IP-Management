@@ -249,7 +249,7 @@ def init_db():
         if "message_id" not in telegram_code_cols:
             db.execute("ALTER TABLE telegram_login_codes ADD COLUMN message_id INTEGER")
         user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)")}
-        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1"), ("can_view_passwords", "INTEGER NOT NULL DEFAULT 0")):
+        for name, definition in (("role", "TEXT NOT NULL DEFAULT 'admin'"), ("totp_secret", "TEXT NOT NULL DEFAULT ''"), ("two_factor_enabled", "INTEGER NOT NULL DEFAULT 0"), ("two_factor_enrolled", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "INTEGER NOT NULL DEFAULT 1"), ("can_view_passwords", "INTEGER NOT NULL DEFAULT 0"), ("login_blocked_until", "TEXT NOT NULL DEFAULT ''"), ("login_block_message_id", "INTEGER"), ("login_block_chat_id", "TEXT NOT NULL DEFAULT ''")):
             if name not in user_cols:
                 db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
         if "profile_image" not in user_cols:
@@ -615,6 +615,186 @@ def telegram_edit_persistent_message(chat_id, message_id, text, reply_markup=Non
     return result
 
 
+def login_block_remaining(blocked_until):
+    try:
+        expiry = datetime.fromisoformat(str(blocked_until).replace("Z", "+00:00"))
+        seconds = max(0, int((expiry - datetime.now(timezone.utc)).total_seconds() + 0.999))
+    except (TypeError, ValueError):
+        seconds = 0
+    return seconds
+
+
+def login_block_countdown_text(username, seconds):
+    minutes, remainder = divmod(max(0, int(seconds)), 60)
+    return (f"🔒 مسدودسازی ورود برای حساب: {username}\n\n"
+            f"⏳ زمان باقی‌مانده: {minutes:02d}:{remainder:02d}\n"
+            "با پایان زمان، امکان تلاش مجدد به‌صورت خودکار فعال می‌شود.")
+
+
+_LOGIN_BLOCK_WORKER = None
+_LOGIN_BLOCK_WORKER_LOCK = threading.Lock()
+_LOGIN_BLOCK_WORKER_WAKE = threading.Event()
+_LOGIN_BLOCK_WORKER_OWNER = secrets.token_hex(16)
+
+
+def _claim_login_block_worker_lease():
+    """Ensure only one WSGI process edits countdown messages at a time."""
+    lease_until = (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(timespec="seconds")
+    lease_value = f"{_LOGIN_BLOCK_WORKER_OWNER}|{lease_until}"
+    with connect_db() as db:
+        db.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('telegram_login_block_worker_lease','')")
+        claimed = db.execute(
+            "UPDATE app_settings SET value=? WHERE key='telegram_login_block_worker_lease' "
+            "AND (value='' OR substr(value,instr(value,'|')+1)<=? "
+            "OR substr(value,1,instr(value,'|')-1)=?)",
+            (lease_value, now(), _LOGIN_BLOCK_WORKER_OWNER),
+        )
+    return claimed.rowcount == 1
+
+
+def _login_block_countdown_worker():
+    """One process-local worker refreshes every active Telegram lock, including after restart."""
+    while True:
+        try:
+            if not _claim_login_block_worker_lease():
+                _LOGIN_BLOCK_WORKER_WAKE.wait(2)
+                _LOGIN_BLOCK_WORKER_WAKE.clear()
+                continue
+            with connect_db() as db:
+                rows = db.execute(
+                    "SELECT id,username,login_blocked_until,login_block_message_id,login_block_chat_id "
+                    "FROM users WHERE login_block_message_id IS NOT NULL AND login_block_chat_id!=''"
+                ).fetchall()
+            for row in rows:
+                user_id = int(row["id"])
+                message_id = int(row["login_block_message_id"] or 0)
+                chat_id = str(row["login_block_chat_id"] or "")
+                if not message_id or not chat_id:
+                    continue
+                remaining = login_block_remaining(row["login_blocked_until"])
+                if remaining <= 0:
+                    with connect_db() as db:
+                        updated = db.execute(
+                            "UPDATE users SET login_blocked_until='',login_block_message_id=NULL,login_block_chat_id='' "
+                            "WHERE id=? AND login_block_message_id=? AND login_block_chat_id=? "
+                            "AND login_blocked_until=?",
+                            (user_id, message_id, chat_id, str(row["login_blocked_until"] or "")),
+                        )
+                    if updated.rowcount == 1:
+                        telegram_edit_persistent_message(
+                            chat_id, message_id,
+                            f"✅ زمان مسدودسازی حساب {row['username']} به پایان رسید.\nامکان ورود مجدد فعال است.",
+                            reply_markup={"inline_keyboard": []},
+                        )
+                    continue
+                # Re-read the authoritative row immediately before editing, avoiding stale edits
+                # after a manual release or a newer rejection replaced this message.
+                with connect_db() as db:
+                    current = db.execute(
+                        "SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                        (user_id,),
+                    ).fetchone()
+                if (not current or str(current["login_block_chat_id"] or "") != chat_id
+                        or int(current["login_block_message_id"] or 0) != message_id
+                        or str(current["login_blocked_until"] or "") != str(row["login_blocked_until"] or "")):
+                    continue
+                telegram_api("editMessageText", {
+                    "chat_id": chat_id, "message_id": message_id,
+                    "text": login_block_countdown_text(row["username"], remaining),
+                    "reply_markup": {"inline_keyboard": [[{
+                        "text": "🔓 رفع فوری مسدودی", "callback_data": f"login_unblock:{user_id}",
+                    }]]},
+                    "disable_web_page_preview": True,
+                })
+        except Exception:
+            app.logger.exception("Telegram login-block countdown worker failed")
+        _LOGIN_BLOCK_WORKER_WAKE.wait(2)
+        _LOGIN_BLOCK_WORKER_WAKE.clear()
+
+
+def _ensure_login_block_countdown_worker():
+    global _LOGIN_BLOCK_WORKER
+    with _LOGIN_BLOCK_WORKER_LOCK:
+        if _LOGIN_BLOCK_WORKER is None or not _LOGIN_BLOCK_WORKER.is_alive():
+            _LOGIN_BLOCK_WORKER = threading.Thread(
+                target=_login_block_countdown_worker, name="telegram-login-block-countdowns", daemon=True,
+            )
+            _LOGIN_BLOCK_WORKER.start()
+    _LOGIN_BLOCK_WORKER_WAKE.set()
+    return _LOGIN_BLOCK_WORKER
+
+
+def telegram_start_login_block_countdown(user_id, username, chat_id, message_id):
+    """Wake the shared countdown worker; it also recovers persisted timers at process startup."""
+    return _ensure_login_block_countdown_worker()
+
+
+def telegram_send_login_block_countdown(user_id, username, chat_id, blocked_until):
+    seconds = login_block_remaining(blocked_until)
+    markup = {"inline_keyboard": [[{
+        "text": "🔓 رفع فوری مسدودی", "callback_data": f"login_unblock:{int(user_id)}",
+    }]]}
+    sent = telegram_send(chat_id, login_block_countdown_text(username, seconds), markup,
+                         delete_after=0)
+    message_id = (sent.get("result") or {}).get("message_id") if isinstance(sent, dict) else None
+    if not message_id:
+        return False
+    with connect_db() as db:
+        db.execute("UPDATE users SET login_block_message_id=?,login_block_chat_id=? WHERE id=?",
+                   (int(message_id), str(chat_id), int(user_id)))
+    telegram_start_login_block_countdown(user_id, username, chat_id, message_id)
+    return True
+
+
+def handle_login_unblock_callback(callback, configured_chat_id):
+    message = callback.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = str(chat.get("id", ""))
+    sender_id = str((callback.get("from") or {}).get("id", ""))
+    try:
+        match = re.fullmatch(r"login_unblock:(\d+)", str(callback.get("data") or ""))
+        if not match:
+            return False
+        user_id = int(match.group(1))
+        message_id = int(message.get("message_id") or 0)
+    except (IndexError, TypeError, ValueError):
+        return False
+    if chat_id != str(configured_chat_id):
+        return False
+    if chat.get("type") == "private":
+        if not sender_id or sender_id != chat_id:
+            return False
+    else:
+        configured_admin = secure_setting("telegram_admin_user_id_enc")
+        if not configured_admin or sender_id != str(configured_admin):
+            return False
+    with connect_db() as db:
+        row = db.execute("SELECT username,login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                         (user_id,)).fetchone()
+        if (not row or str(row["login_block_chat_id"] or "") != chat_id
+                or int(row["login_block_message_id"] or 0) != message_id
+                or login_block_remaining(row["login_blocked_until"]) <= 0):
+            return False
+        updated = db.execute(
+            "UPDATE users SET login_blocked_until='',login_block_message_id=NULL,login_block_chat_id='' "
+            "WHERE id=? AND login_block_message_id=? AND login_block_chat_id=? AND login_blocked_until=?",
+            (user_id, message_id, chat_id, row["login_blocked_until"]),
+        )
+        if updated.rowcount != 1:
+            return False
+        username = str(row["username"])
+    telegram_edit_persistent_message(
+        chat_id, message_id,
+        f"✅ مسدودی حساب {username} به‌صورت فوری برداشته شد.\nامکان ورود مجدد فعال است.",
+        reply_markup={"inline_keyboard": []},
+    )
+    return True
+
+
+# Recover any persisted countdown messages when this application process starts.
+_ensure_login_block_countdown_worker()
+
+
 def telegram_browse_groups(chat_id, message_id):
     with connect_db() as db:
         groups = db.execute("SELECT id,name FROM groups ORDER BY sort_order,id").fetchall()
@@ -909,6 +1089,8 @@ def handle_telegram_update(update):
         action = callback.get("data", "")
         if action.startswith("login_approval:"):
             handle_login_approval_callback(callback, configured_chat)
+        elif action.startswith("login_unblock:"):
+            handle_login_unblock_callback(callback, configured_chat)
         elif action == "ack_telegram_login":
             # Legacy audit callbacks are intentionally inert; audit messages never open the bot menu.
             return
@@ -1628,6 +1810,10 @@ def handle_login_approval_callback(callback, configured_chat_id):
         )
         if updated.rowcount != 1:
             return False
+        if status == "denied":
+            blocked_until = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(timespec="seconds")
+            db.execute("UPDATE users SET login_blocked_until=?,login_block_message_id=NULL,login_block_chat_id='' WHERE id=?",
+                       (blocked_until, row["user_id"]))
         saved = dict(row)
     edited = telegram_edit_persistent_message(
         message_chat, message.get("message_id"), login_approval_message(saved, status),
@@ -1638,6 +1824,8 @@ def handle_login_approval_callback(callback, configured_chat_id):
             "chat_id": message_chat, "message_id": message.get("message_id"),
             "reply_markup": {"inline_keyboard": []},
         })
+    if status == "denied":
+        telegram_send_login_block_countdown(saved["user_id"], saved["username"], message_chat, blocked_until)
     return True
 
 
@@ -2008,6 +2196,24 @@ def login():
         limited = auth_throttle_response(request.form.get("username", ""))
         if limited:
             return limited
+        attempted_username = str(request.form.get("username", "")).strip()
+        if attempted_username:
+            with connect_db() as db:
+                blocked_user = db.execute(
+                    "SELECT login_blocked_until FROM users WHERE username=? COLLATE NOCASE AND enabled=1",
+                    (attempted_username,),
+                ).fetchone()
+            blocked_until = str(blocked_user["login_blocked_until"] or "") if blocked_user else ""
+            if blocked_until and blocked_until > now():
+                security_event("login_rejection_lock", attempted_username[:80], "throttled",
+                               "Login approval was rejected; account is blocked for 15 minutes")
+                response = app.make_response(("This account is temporarily blocked after a rejected login request. Wait 15 minutes and try again.", 429))
+                response.headers["Retry-After"] = str(max(1, int((datetime.fromisoformat(blocked_until) - datetime.now(timezone.utc)).total_seconds())))
+                return response
+            if blocked_until:
+                with connect_db() as db:
+                    db.execute("UPDATE users SET login_blocked_until='' WHERE username=? COLLATE NOCASE "
+                               "AND login_blocked_until=?", (attempted_username, blocked_until))
     if request.method == "GET" and request.args.get("reset") == "1":
         pending_approval_id = session.pop("pending_login_approval_id", None) or session.pop("login_approval_id", None)
         if pending_approval_id:

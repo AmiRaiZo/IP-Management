@@ -1,3 +1,14 @@
+## Version 4.5.0 release notes
+
+- Block an account for 15 minutes after an administrator rejects its Telegram login approval request.
+- Send a separate persistent Telegram message showing the remaining lock time as a live `MM:SS` countdown, refreshed every two seconds, with an inline **Remove lock now** action.
+- Allow immediate unlock only from the configured Telegram chat and authorized sender, and only from the exact active countdown message; stale callbacks cannot clear a newer lock.
+- Replace per-account countdown threads with one recoverable background worker, persisted message state, and a SQLite lease to avoid duplicate workers across application processes.
+- Automatically clear expired login locks and update the Telegram message when the countdown finishes; recover active countdown messages after an application restart.
+- Keep IP and Account card Edit/Delete footers pinned consistently regardless of optional field content.
+- Add regression coverage for countdown rendering, rejection and lock creation, sender/chat/message authorization, immediate unlock, and shared worker behavior.
+- Refresh the stylesheet cache key.
+
 ## Version 4.1.1 release notes
 
 - Keep the existing authenticator-code screen visible immediately after password validation while sending the Telegram approval request in parallel; no separate approval/waiting screen is shown.
@@ -316,4 +327,4 @@
 - Add regression coverage for viewport-locked layout and bump static asset cache keys to v3.0.0 so browsers fetch the fix.
 - Keep README.md focused on installation, upgrade, updating, access recovery, and server-operation instructions. Release notes are published on the GitHub release page instead.
 - Configure release automation to retain only the two latest published releases and delete older release entries and tags.
-319
+330

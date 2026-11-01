@@ -683,6 +683,18 @@ html[data-theme="dark"] .mobile-account-actions{background:var(--surface-2)}
 .account-inventory-panel .mobile-account-actions.mobile-ip-actions form{display:flex!important;flex:0 0 auto;margin:0}
 .account-inventory-panel .mobile-account-actions.mobile-ip-actions form button{min-height:40px}
 html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{background:linear-gradient(120deg,var(--surface-2),var(--surface))}
+/* Keep IP and account card footers aligned regardless of optional field count. */
+.mobile-ip-card,.mobile-account-card{display:flex!important;flex-direction:column!important;height:500px;min-height:500px;max-height:500px}
+.account-inventory-panel .mobile-account-card.mobile-ip-card{display:flex!important;flex-direction:column!important}
+.mobile-ip-fields,.mobile-account-fields{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.mobile-ip-actions,.mobile-account-actions{flex:0 0 auto;margin-top:auto!important;min-height:62px;align-items:center}
+.mobile-ip-card>.mobile-ip-actions,.account-inventory-panel .mobile-account-card>.mobile-account-actions.mobile-ip-actions{margin-top:auto!important}
+.mobile-ip-actions form,.mobile-account-actions form{align-self:stretch}
+.mobile-ip-actions .btn,.mobile-account-actions .btn{height:40px;align-self:center}
+@media(max-width:720px){
+  .mobile-ip-card,.mobile-account-card{height:500px!important;min-height:500px!important;max-height:500px!important}
+  .mobile-ip-fields,.mobile-account-fields{overflow-y:auto!important}
+}
 @media(max-width:720px){
  .mobile-account-heading.mobile-ip-record-heading{padding:12px 12px}
  .mobile-account-fields.mobile-ip-fields{padding:2px 12px 4px}
