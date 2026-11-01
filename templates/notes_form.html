@@ -17,7 +17,7 @@
   <div class="panel-heading form-heading"><div><h2>General details</h2><p>Use a title to identify the entry. It can also be left blank.</p></div></div>
   <div class="form-grid">
     <div class="field full-field"><label for="title">Title / Name (optional)</label><input id="title" name="title" maxlength="160" value="{{ title_value }}" placeholder="e.g. Main office router or Hosting details"></div>
-    <div class="field full-field"><label for="service_url">Website / URL</label><input id="service_url" name="service_url" maxlength="500" value="{{ url_value }}" dir="ltr" placeholder="https://example.com"></div>
+    <div class="field full-field"><label for="service_url">Site (optional)</label><input id="service_url" name="service_url" maxlength="500" value="{{ url_value }}" dir="ltr" placeholder="https://example.com"></div>
     <div class="field full-field"><label for="group_id">Notes group</label><select id="group_id" name="group_id">{% for group in groups %}<option value="{{ group.id }}" {% if (note and note.group_id|string == group.id|string) or (not note and default_group_id|string == group.id|string) %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></div>
   </div>
   <div class="note-form-section"><div class="note-form-section-heading"><span class="data-field-icon icon-ip" aria-hidden="true">⌘</span><div><h2>IP information</h2><p>All IP fields are optional.</p></div></div><div class="form-grid">

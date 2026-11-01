@@ -19,7 +19,7 @@
         <span class="group-tag note-group-tag" data-group-color="{{ card_group_color }}" style="--group-color: {{ card_group_color }} !important; color: {{ card_group_color }} !important; border-color: {{ card_group_color }} !important; background-color: {{ card_group_color }}22 !important">{{ note.group_name or 'Default' }}</span>
       </div>
       <div class="note-card-fields">
-        {% if note.service_url %}<div class="note-field"><span class="note-field-label">Website / URL</span><span class="note-field-value">{{ note.service_url }}</span></div>{% endif %}
+        {% if note.service_url %}<div class="note-field"><span class="note-field-label">Site</span><span class="note-field-value">{{ note.service_url }}</span></div>{% endif %}
         {% if note.ip_name %}<div class="note-field"><span class="note-field-label">IP name</span><span class="note-field-value">{{ note.ip_name }}</span></div>{% endif %}
         {% if note.ip_address %}<div class="note-field"><span class="note-field-label">IP address</span><span class="note-field-value">{{ note.ip_address }}</span></div>{% endif %}
         {% if note.ip_port %}<div class="note-field"><span class="note-field-label">IP port</span><span class="note-field-value">{{ note.ip_port }}</span></div>{% endif %}

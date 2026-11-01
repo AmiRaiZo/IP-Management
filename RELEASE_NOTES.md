@@ -1,3 +1,11 @@
+## Version 4.0.9 release notes
+
+- Label the existing optional Notes `service_url` field clearly as **Site** without creating a duplicate field or changing stored data.
+- Hide empty optional IP and Account card fields entirely; retain the required IP address, record headers, group badges, and authorized password reveal/copy behavior.
+- Give IP and Account cards the same fixed 500px dimensions, two-column field layout, scrollable content area, and pinned action footer on desktop and mobile.
+- Add regression coverage for conditional card fields, stable card geometry, and the optional Site label.
+- Refresh static asset cache keys.
+
 ## Version 4.0.8 release notes
 
 - Add a separate Notes Vault with its own independent groups, colors, ordering, and delete behavior, isolated from IP and account groups.
@@ -289,4 +297,4 @@
 - Add regression coverage for viewport-locked layout and bump static asset cache keys to v3.0.0 so browsers fetch the fix.
 - Keep README.md focused on installation, upgrade, updating, access recovery, and server-operation instructions. Release notes are published on the GitHub release page instead.
 - Configure release automation to retain only the two latest published releases and delete older release entries and tags.
-292
+

@@ -59,7 +59,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
 
     def test_mobile_ip_cards_include_inline_details_and_direct_edit_delete_actions(self):
-        self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
+        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
         self.assertNotIn("IP record #{{ ip.id }}", self.index)
         self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
@@ -90,7 +90,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_mobile_ip_directory_uses_inline_details_cards_like_account_vault(self):
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", self.index)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', self.index)
-        self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
+        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', self.index)
         self.assertIn('data-scroll-record="ip-{{ ip.id }}"', self.index)
         self.assertIn('class="mobile-ip-record-heading"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
@@ -103,7 +103,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn('class="mobile-account-list"', self.accounts)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', self.accounts)
-        self.assertIn('class="mobile-ip-card mobile-account-card"', self.accounts)
+        self.assertIn('class="mobile-ip-card mobile-account-card inventory-fixed-card"', self.accounts)
         self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
         self.assertIn('color: {{ card_group_color }} !important', self.accounts)
         self.assertIn('color: {{ card_group_color }} !important', self.index)
@@ -221,9 +221,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.8")
-        self.assertIn("style.css') }}?v=4.0.8", self.base)
-        self.assertIn("app.js') }}?v=4.0.8", self.base)
+        self.assertEqual(self.version, "4.0.9")
+        self.assertIn("style.css') }}?v=4.0.9", self.base)
+        self.assertIn("app.js') }}?v=4.0.9", self.base)
 
     def test_record_names_keep_normal_text_color_while_group_badges_use_selected_color(self):
         self.assertIn('<div class="mobile-ip-title"><strong>{{ ip.name or ip.ip_address or \'Unnamed IP\' }}</strong></div>', self.index)
@@ -250,6 +250,8 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
                       "account_name", "account_username", "account_email", "account_password", "note_text"):
             self.assertIn(f'name="{field}"', self.notes_form)
             self.assertNotIn(f'name="{field}" required', self.notes_form)
+        self.assertIn('for="service_url">Site (optional)</label>', self.notes_form)
+        self.assertIn('<span class="note-field-label">Site</span>', self.notes)
         self.assertIn("data-live-search", self.notes)
         self.assertIn("data-group-filter", self.notes)
         self.assertIn('data-scroll-record="note-{{ note.id }}"', self.notes)
@@ -263,6 +265,22 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("data-reveal-password", self.notes)
         self.assertIn("vault.encrypt(ip_password.encode", self.app_source)
         self.assertIn("vault.encrypt(account_password.encode", self.app_source)
+
+    def test_ip_and_account_cards_hide_empty_fields_and_keep_fixed_two_column_geometry(self):
+        ip_card = self.index.split('<article class="mobile-ip-card inventory-fixed-card"', 1)[1].split("</article>", 1)[0]
+        account_card = self.accounts.split('<article class="mobile-ip-card mobile-account-card inventory-fixed-card"', 1)[1].split("</article>", 1)[0]
+        for field in ("ip.port", "ip.username", "show_ip_passwords and ip.password_plain"):
+            self.assertIn("{% if " + field + " %}", ip_card)
+        for field in ("account.username", "account.email", "account.password_plain"):
+            self.assertIn("{% if " + field + " %}", account_card)
+        self.assertNotIn("<span class=\"muted\">—</span>", ip_card)
+        self.assertNotIn("<span class=\"muted\">—</span>", account_card)
+        self.assertIn("data-reveal-password", ip_card)
+        self.assertIn("data-reveal-password", account_card)
+        self.assertIn(".inventory-fixed-card{height:500px!important;min-height:500px!important", self.css)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", self.css)
+        self.assertIn("overflow-y:auto;overflow-x:hidden", self.css)
+        self.assertIn("height:54px!important;min-height:54px!important", self.css)
 
 
 if __name__ == "__main__":

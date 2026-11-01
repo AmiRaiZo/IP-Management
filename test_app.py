@@ -866,7 +866,7 @@ class ArchiveTests(unittest.TestCase):
             # Mobile cards retain name and group metadata on the outer card wrapper.
             # Parse whole article blocks instead of relying on attribute order inside
             # the nested detail button, which also carries modal-specific fields.
-            mobile_cards = re.findall(r'<article class="mobile-ip-card".*?</article>', page, re.S)
+            mobile_cards = re.findall(r'<article class="mobile-ip-card[^\"]*".*?</article>', page, re.S)
             mobile_records = []
             for card in mobile_cards:
                 name_match = re.search(r'class="mobile-ip-title"><strong[^>]*>(.*?)</strong>', card, re.S)
@@ -1062,6 +1062,52 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(b"Account name is required.", response.data)
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts WHERE username='optional-user'").fetchone()[0], 0)
+
+    def test_ip_and_account_cards_render_only_populated_optional_fields(self):
+        _, secret = self.create_user("conditional-card-root")
+        self.assertEqual(self.login("conditional-card-root", secret).status_code, 302)
+
+        response = self.client.post("/ips/new", data={
+            "csrf_token": self.csrf(), "name": "Minimal IP", "ip_address": "192.0.2.120",
+        })
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(), "name": "Minimal Account",
+        })
+        self.assertEqual(response.status_code, 302)
+
+        ip_page = self.client.get("/").get_data(as_text=True)
+        ip_card = ip_page.split('data-scroll-record="ip-', 1)[1].split("</article>", 1)[0]
+        self.assertIn("Minimal IP", ip_card)
+        self.assertIn("192.0.2.120", ip_card)
+        for label in ("Port", "Username", "Password"):
+            self.assertNotIn(f'mobile-data-label">{label}', ip_card)
+
+        account_page = self.client.get("/accounts").get_data(as_text=True)
+        account_card = account_page.split('data-scroll-record="account-', 1)[1].split("</article>", 1)[0]
+        self.assertIn("Minimal Account", account_card)
+        for label in ("Username", "Email", "Password"):
+            self.assertNotIn(f'mobile-data-label">{label}', account_card)
+
+        response = self.client.post("/ips/new", data={
+            "csrf_token": self.csrf(), "name": "Complete IP", "ip_address": "192.0.2.121",
+            "port": "8291", "username": "router-user", "password": "router-secret",
+        })
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post("/accounts/new", data={
+            "csrf_token": self.csrf(), "name": "Complete Account", "username": "portal-user",
+            "email": "portal@example.test", "password": "portal-secret",
+        })
+        self.assertEqual(response.status_code, 302)
+
+        ip_page = self.client.get("/").get_data(as_text=True)
+        ip_card = ip_page.split('data-search="complete ip', 1)[1].split("</article>", 1)[0]
+        for value in ("192.0.2.121", "8291", "router-user", 'data-copy-value="router-secret"', "data-reveal-password"):
+            self.assertIn(value, ip_card)
+        account_page = self.client.get("/accounts").get_data(as_text=True)
+        account_card = account_page.split('data-search="complete account', 1)[1].split("</article>", 1)[0]
+        for value in ("portal-user", "portal@example.test", 'data-copy-value="portal-secret"', "data-reveal-password"):
+            self.assertIn(value, account_card)
 
     def test_account_vault_is_superadmin_only_and_validates_email(self):
         _, secret = self.create_user("account-vault-limited", role="admin")
@@ -1457,7 +1503,7 @@ class ArchiveTests(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", page)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', page)
-        self.assertIn('class="mobile-ip-card" role="listitem"', page)
+        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', page)
         self.assertIn('data-scroll-record="ip-', page)
         self.assertIn('class="mobile-ip-fields"', page)
         self.assertIn('class="data-field-icon icon-ip"', page)
@@ -1556,7 +1602,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("color: #0f766e !important", account_page)
         self.assertIn("background-color: #0f766e22 !important", account_page)
         self.assertIn('class="group-tag" data-group-color="#0f766e" style="--group-color: #0f766e !important; color: #0f766e !important;', account_page)
-        self.assertIn('class="mobile-ip-card mobile-account-card"', account_page)
+        self.assertIn('class="mobile-ip-card mobile-account-card inventory-fixed-card"', account_page)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', account_page)
         self.assertIn('class="record-title"><strong>Colored mailbox</strong>', account_page)
         self.assertNotIn('<strong style="color: #0f766e !important">Colored mailbox</strong>', account_page)
