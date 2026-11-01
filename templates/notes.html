@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
-{% block title %}Notes & details | Notes Vault{% endblock %}
+{% block title %}Notes | Notes Vault{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">NOTES VAULT</p><h1>Notes & details</h1><p class="muted">Keep notes together with any related IP and account details. Every field is optional.</p></div>
+  <div><p class="eyebrow">NOTES VAULT</p><h1>Notes</h1><p class="muted">Keep notes together with any related IP and account details. Every field is optional.</p></div>
   <div class="directory-heading-actions"><a class="btn btn-secondary" href="{{ url_for('note_groups') }}">Manage notes groups</a><a class="btn btn-primary" href="{{ url_for('note_new', return_to=request.full_path.rstrip('?')) }}"><span class="btn-plus">+</span> Add note</a></div>
 </div>
 <section class="panel inventory-panel notes-inventory-panel">
@@ -12,7 +12,7 @@
   <div class="notes-card-grid" data-notes-card-list role="list" aria-label="Saved notes">
     {% for note in notes %}
     {% set card_group_color = note.group_color or '#65758b' %}
-    <article class="note-card" role="listitem" data-search-row data-mobile-search-row data-scroll-record="note-{{ note.id }}" data-group="{{ note.group_id if note.group_id else 'ungrouped' }}" data-search="{{ (note.title ~ ' ' ~ note.service_url ~ ' ' ~ note.ip_name ~ ' ' ~ note.ip_address ~ ' ' ~ note.ip_username ~ ' ' ~ note.account_name ~ ' ' ~ note.account_username ~ ' ' ~ note.account_email ~ ' ' ~ note.note_text ~ ' ' ~ (note.group_name or 'Default'))|lower }}">
+    <article class="note-card" role="listitem" data-search-row data-mobile-search-row data-scroll-record="note-{{ note.id }}" data-group="{{ note.group_id if note.group_id else 'ungrouped' }}" data-search="{{ (note.title ~ ' ' ~ note.service_url ~ ' ' ~ note.ip_name ~ ' ' ~ note.ip_address ~ ' ' ~ note.ip_username ~ ' ' ~ note.account_name ~ ' ' ~ note.account_username ~ ' ' ~ note.account_email ~ ' ' ~ note.note_text ~ ' ' ~ note.wifi_ssid ~ ' ' ~ note.admin_ip ~ ' ' ~ (note.group_name or 'Default'))|lower }}">
       <div class="note-card-heading">
         <span class="note-card-avatar" aria-hidden="true">N</span>
         <div class="note-card-title"><strong>{{ note.title or ('Saved note #' ~ note.id) }}</strong><small>Updated {{ note.updated_at[:10] if note.updated_at else '—' }}</small></div>
@@ -29,9 +29,14 @@
         {% if note.account_username %}<div class="note-field"><span class="note-field-label">Account username</span><span class="note-field-value">{{ note.account_username }}</span></div>{% endif %}
         {% if note.account_email %}<div class="note-field"><span class="note-field-label">Account email</span><span class="note-field-value">{{ note.account_email }}</span></div>{% endif %}
         {% if note.account_password_plain %}<div class="note-field"><span class="note-field-label">Account password</span><span class="note-field-value"><button type="button" class="copy-value password-reveal-copy" data-copy-value="{{ note.account_password_plain }}" data-reveal-password title="Click to reveal and copy account password" aria-label="Reveal and copy account password"><code>••••••••</code></button></span></div>{% endif %}
+        {% if note.wifi_ssid %}<div class="note-field"><span class="note-field-label">Wi-Fi SSID</span><span class="note-field-value">{{ note.wifi_ssid }}</span></div>{% endif %}
+        {% if note.wifi_password_plain %}<div class="note-field"><span class="note-field-label">Wi-Fi password</span><span class="note-field-value"><button type="button" class="copy-value password-reveal-copy" data-copy-value="{{ note.wifi_password_plain }}" data-reveal-password title="Click to reveal and copy Wi-Fi password" aria-label="Reveal and copy Wi-Fi password"><code>••••••••</code></button></span></div>{% endif %}
+        {% if note.admin_ip %}<div class="note-field"><span class="note-field-label">Admin panel IP</span><span class="note-field-value">{{ note.admin_ip }}</span></div>{% endif %}
+        {% if note.admin_username %}<div class="note-field"><span class="note-field-label">Admin username</span><span class="note-field-value">{{ note.admin_username }}</span></div>{% endif %}
+        {% if note.admin_password_plain %}<div class="note-field"><span class="note-field-label">Admin password</span><span class="note-field-value"><button type="button" class="copy-value password-reveal-copy" data-copy-value="{{ note.admin_password_plain }}" data-reveal-password title="Click to reveal and copy admin password" aria-label="Reveal and copy admin password"><code>••••••••</code></button></span></div>{% endif %}
         {% if note.note_text %}<div class="note-field note-field-long"><span class="note-field-label">Note</span><span class="note-field-value">{{ note.note_text }}</span></div>{% endif %}
       </div>
-      <div class="note-card-actions"><a class="btn btn-small btn-secondary" href="{{ url_for('note_edit', note_id=note.id, return_to=request.full_path.rstrip('?')) }}">Edit</a><form method="post" action="{{ url_for('note_delete', note_id=note.id) }}" data-confirm="Delete this saved note and its details?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}"><button class="btn btn-small btn-danger" type="submit">Delete</button></form></div>
+      <div class="note-card-actions"><a class="btn btn-small btn-secondary note-card-edit" href="{{ url_for('note_edit', note_id=note.id, return_to=request.full_path.rstrip('?')) }}">Edit</a><form method="post" action="{{ url_for('note_delete', note_id=note.id) }}" data-confirm="Delete this saved note and its details?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}"><button class="btn btn-small btn-danger" type="submit">Delete</button></form></div>
     </article>
     {% endfor %}
   </div>
