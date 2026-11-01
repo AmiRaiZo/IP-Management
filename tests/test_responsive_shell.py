@@ -26,6 +26,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
         cls.js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         cls.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        cls.release_workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(encoding="utf-8")
 
     def test_sidebar_toggle_is_outside_drawer_and_stays_fixed(self):
         toggle = self.base.index('id="sidebar-toggle"')
@@ -224,6 +225,12 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertEqual(self.version, "4.0.9")
         self.assertIn("style.css') }}?v=4.0.9", self.base)
         self.assertIn("app.js') }}?v=4.0.9", self.base)
+
+    def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
+        self.assertIn('"release", "list", "--limit", "100", "--json", "tagName,publishedAt"', self.release_workflow)
+        self.assertIn('"release", "delete", tag, "--yes", "--cleanup-tag"', self.release_workflow)
+        self.assertIn('if len(remaining) > 2:', self.release_workflow)
+        self.assertIn('Release retention verification failed', self.release_workflow)
 
     def test_record_names_keep_normal_text_color_while_group_badges_use_selected_color(self):
         self.assertIn('<div class="mobile-ip-title"><strong>{{ ip.name or ip.ip_address or \'Unnamed IP\' }}</strong></div>', self.index)

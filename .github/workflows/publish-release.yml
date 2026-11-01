@@ -115,51 +115,30 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPOSITORY: ${{ github.repository }}
         run: |
           python3 <<'PY'
-          import json, os, urllib.error, urllib.parse, urllib.request
-          repo = os.environ["GH_REPOSITORY"]
+          import json, os, subprocess
           token = os.environ["GH_TOKEN"]
-          base = f"https://api.github.com/repos/{repo}"
-          headers = {
-              "Accept": "application/vnd.github+json",
-              "Authorization": f"Bearer {token}",
-              "User-Agent": "IP-Management-Release-Retention",
-              "X-GitHub-Api-Version": "2022-11-28",
-          }
-          def request(path, method="GET"):
-              req = urllib.request.Request(base + path, headers=headers, method=method)
-              try:
-                  with urllib.request.urlopen(req, timeout=20) as response:
-                      body = response.read()
-                      return json.loads(body.decode()) if body else None
-              except urllib.error.HTTPError as exc:
-                  if method == "DELETE" and exc.code == 404:
-                      return None
-                  raise
-          releases = []
-          page = 1
-          while page <= 10:
-              batch = request(f"/releases?per_page=100&page={page}") or []
-              releases.extend(batch)
-              if len(batch) < 100:
-                  break
-              page += 1
-          releases.sort(key=lambda item: item.get("published_at") or item.get("created_at") or "", reverse=True)
+          env = {**os.environ, "GH_TOKEN": token}
+          def gh(*args):
+              return subprocess.run(
+                  ["gh", *args], check=True, text=True, capture_output=True, env=env
+              ).stdout.strip()
+          releases = json.loads(gh(
+              "release", "list", "--limit", "100", "--json", "tagName,publishedAt"
+          ) or "[]")
+          releases.sort(key=lambda item: item.get("publishedAt") or "", reverse=True)
           stale = releases[2:]
           print(f"Found {len(releases)} releases; keeping the newest two and deleting {len(stale)} older releases.")
           for release in stale:
-              rid = release["id"]
-              tag = release.get("tag_name", "")
-              request(f"/releases/{rid}", "DELETE")
-              print(f"Deleted release {tag} (id {rid}).")
-              if tag:
-                  try:
-                      request(f"/git/refs/tags/{urllib.parse.quote(tag, safe='')}", "DELETE")
-                      print(f"Deleted tag {tag}.")
-                  except urllib.error.HTTPError as exc:
-                      if exc.code not in (404, 422):
-                          raise
-                      print(f"Tag {tag} was already absent or could not be deleted ({exc.code}); continuing.")
+              tag = release["tagName"]
+              gh("release", "delete", tag, "--yes", "--cleanup-tag")
+              print(f"Deleted release and tag {tag}.")
+          remaining = json.loads(gh(
+              "release", "list", "--limit", "100", "--json", "tagName,publishedAt"
+          ) or "[]")
+          if len(remaining) > 2:
+              raise SystemExit(f"Release retention verification failed: {len(remaining)} releases remain.")
+          kept = sorted(remaining, key=lambda item: item.get("publishedAt") or "", reverse=True)
+          print("Verified retained releases: " + ", ".join(item["tagName"] for item in kept))
           PY
