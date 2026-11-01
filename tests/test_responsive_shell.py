@@ -14,6 +14,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.profile = (ROOT / "templates" / "profile.html").read_text(encoding="utf-8")
         cls.settings = (ROOT / "templates" / "settings.html").read_text(encoding="utf-8")
         cls.setup_2fa = (ROOT / "templates" / "setup_2fa.html").read_text(encoding="utf-8")
+        cls.login = (ROOT / "templates" / "login.html").read_text(encoding="utf-8")
         cls.accounts = (ROOT / "templates" / "accounts.html").read_text(encoding="utf-8")
         cls.account_form = (ROOT / "templates" / "account_form.html").read_text(encoding="utf-8")
         cls.account_groups = (ROOT / "templates" / "account_groups.html").read_text(encoding="utf-8")
@@ -60,7 +61,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
 
     def test_mobile_ip_cards_include_inline_details_and_direct_edit_delete_actions(self):
-        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', self.index)
+        self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
         self.assertNotIn("IP record #{{ ip.id }}", self.index)
         self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
@@ -91,7 +92,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_mobile_ip_directory_uses_inline_details_cards_like_account_vault(self):
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", self.index)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', self.index)
-        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', self.index)
+        self.assertIn('class="mobile-ip-card" role="listitem"', self.index)
         self.assertIn('data-scroll-record="ip-{{ ip.id }}"', self.index)
         self.assertIn('class="mobile-ip-record-heading"', self.index)
         self.assertIn('class="mobile-ip-fields"', self.index)
@@ -104,7 +105,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn('class="mobile-ip-actions"', self.index)
         self.assertIn('class="mobile-account-list"', self.accounts)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', self.accounts)
-        self.assertIn('class="mobile-ip-card mobile-account-card inventory-fixed-card"', self.accounts)
+        self.assertIn('class="mobile-ip-card mobile-account-card"', self.accounts)
         self.assertIn('class="mobile-ip-fields mobile-account-fields"', self.accounts)
         self.assertIn('color: {{ card_group_color }} !important', self.accounts)
         self.assertIn('color: {{ card_group_color }} !important', self.index)
@@ -222,9 +223,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "4.0.9")
-        self.assertIn("style.css') }}?v=4.0.9", self.base)
-        self.assertIn("app.js') }}?v=4.0.9", self.base)
+        self.assertEqual(self.version, "4.1.0")
+        self.assertIn("style.css') }}?v=4.1.0", self.base)
+        self.assertIn("app.js') }}?v=4.1.0", self.base)
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn('"release", "list", "--limit", "100", "--json", "tagName,publishedAt"', self.release_workflow)
@@ -273,9 +274,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("vault.encrypt(ip_password.encode", self.app_source)
         self.assertIn("vault.encrypt(account_password.encode", self.app_source)
 
-    def test_ip_and_account_cards_hide_empty_fields_and_keep_fixed_two_column_geometry(self):
-        ip_card = self.index.split('<article class="mobile-ip-card inventory-fixed-card"', 1)[1].split("</article>", 1)[0]
-        account_card = self.accounts.split('<article class="mobile-ip-card mobile-account-card inventory-fixed-card"', 1)[1].split("</article>", 1)[0]
+    def test_ip_and_account_cards_hide_empty_fields_and_keep_compact_previous_geometry(self):
+        ip_card = self.index.split('<article class="mobile-ip-card"', 1)[1].split("</article>", 1)[0]
+        account_card = self.accounts.split('<article class="mobile-ip-card mobile-account-card"', 1)[1].split("</article>", 1)[0]
         for field in ("ip.port", "ip.username", "show_ip_passwords and ip.password_plain"):
             self.assertIn("{% if " + field + " %}", ip_card)
         for field in ("account.username", "account.email", "account.password_plain"):
@@ -284,10 +285,22 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertNotIn("<span class=\"muted\">—</span>", account_card)
         self.assertIn("data-reveal-password", ip_card)
         self.assertIn("data-reveal-password", account_card)
-        self.assertIn(".inventory-fixed-card{height:500px!important;min-height:500px!important", self.css)
-        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", self.css)
-        self.assertIn("overflow-y:auto;overflow-x:hidden", self.css)
-        self.assertIn("height:54px!important;min-height:54px!important", self.css)
+        self.assertNotIn("inventory-fixed-card", self.index)
+        self.assertNotIn("inventory-fixed-card", self.accounts)
+        self.assertNotIn("inventory-fixed-card", self.css)
+        self.assertIn(".mobile-ip-card{display:block", self.css)
+        self.assertIn(".mobile-account-fields{display:grid", self.css)
+        self.assertIn(".mobile-ip-actions{display:flex", self.css)
+
+    def test_telegram_login_approval_screen_refreshes_and_has_no_bot_menu_action(self):
+        self.assertIn("stage == 'approval'", self.login)
+        self.assertIn("Waiting for approval", self.login)
+        self.assertIn("This page checks for the decision automatically", self.login)
+        self.assertIn("http-equiv=\"refresh\" content=\"3;url=", self.base)
+        self.assertIn("url_for('login')", self.login)
+        self.assertIn("elif action == \"ack_telegram_login\":", self.app_source)
+        self.assertIn("Legacy audit callbacks are intentionally inert", self.app_source)
+        self.assertNotIn('"text": "⌂ Menu", "callback_data": "menu"', self.app_source[self.app_source.index("def send_login_success_alert"):self.app_source.index("def send_login_failure_alert")])
 
 
 if __name__ == "__main__":

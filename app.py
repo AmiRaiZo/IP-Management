@@ -49,6 +49,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "1") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+    LOGIN_APPROVAL_REQUIRED=True,
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
 if os.environ.get("APP_DOMAIN", "").strip():
@@ -223,6 +224,15 @@ def init_db():
           attempted_username TEXT NOT NULL DEFAULT '', result TEXT NOT NULL,
           detail TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS login_approval_requests (
+          id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          username TEXT NOT NULL, remote_ip TEXT NOT NULL, user_agent TEXT NOT NULL DEFAULT '',
+          token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL, expires_at TEXT NOT NULL, decided_at TEXT NOT NULL DEFAULT '',
+          telegram_chat_id TEXT NOT NULL DEFAULT '', telegram_message_id INTEGER,
+          login_method TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_login_approval_user_status ON login_approval_requests(user_id,status,created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(remote_ip, created_at DESC);
         CREATE TABLE IF NOT EXISTS ip_access_rules (
@@ -870,15 +880,11 @@ def handle_telegram_update(update):
     if callback:
         telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
         action = callback.get("data", "")
-        if action == "ack_telegram_login":
-            alert_text = str(message.get("text", ""))
-            if "Login method: Telegram one-time code." not in alert_text or "Login acknowledged" in alert_text:
-                return
-            acknowledged = alert_text + "\n\n✅ Login acknowledged. The one-time code has already been consumed."
-            telegram_edit_persistent_message(
-                chat_id, message.get("message_id"), acknowledged,
-                {"inline_keyboard": [[{"text": "⌂ Menu", "callback_data": "menu"}]]},
-            )
+        if action.startswith("login_approval:"):
+            handle_login_approval_callback(callback, configured_chat)
+        elif action == "ack_telegram_login":
+            # Legacy audit callbacks are intentionally inert; audit messages never open the bot menu.
+            return
         elif action == "menu":
             telegram_set_state({})
             telegram_menu(chat_id, message.get("message_id"))
@@ -1402,30 +1408,28 @@ def send_login_success_alert(username, remote_ip, telegram_code_used=False, tele
         f"🧭 Browser / device: {client_details}\n"
         f"⏰ Time (Iran): {jalali_datetime(now())}"
     )
-    reply_markup = None
     if telegram_code_used:
         safe_code = re.sub(r"[^0-9]", "", str(telegram_code_value or ""))[:6]
         message += "\n🔐 Login method: Telegram one-time code."
         if safe_code:
             message += f"\n🔢 Code used: {safe_code}"
         message += "\n✅ The code was consumed by this sign-in and cannot be reused."
-        reply_markup = {"inline_keyboard": [[
-            {"text": "✅ Confirm login", "callback_data": "ack_telegram_login"}
-        ]]}
         if telegram_code_message:
             source_chat = telegram_code_message.get("chat_id")
             source_message_id = telegram_code_message.get("message_id")
             if source_chat and source_message_id:
                 updated = telegram_edit_persistent_message(
-                    source_chat, source_message_id, message, reply_markup=reply_markup
+                    source_chat, source_message_id, message,
+                    reply_markup={"inline_keyboard": []},
                 )
                 if updated:
                     return True
                 # Never leave a consumed login credential visible if Telegram rejects the edit.
                 telegram_delete_message(source_chat, source_message_id)
         # Keep the audit notice even if Telegram no longer allows editing the original code message.
-        return send_telegram_security_alert(message, reply_markup=reply_markup, delete_after=0)
-    return send_telegram_security_alert(message, reply_markup=reply_markup)
+        return send_telegram_security_alert(message, delete_after=0)
+    # Successful sign-ins are permanent audit records, never temporary bot notifications.
+    return send_telegram_security_alert(message, delete_after=0)
 
 
 def send_login_failure_alert(username, remote_ip, reason, password=""):
@@ -1469,6 +1473,210 @@ def jalali_datetime(value):
         return f"{jy:04d}/{jm:02d}/{jd:02d} {dt:%H:%M:%S}"
     except (ValueError, TypeError, OverflowError):
         return str(value or "—")
+
+
+def login_approval_token_hash(request_id, token):
+    payload = f"login-approval:{int(request_id)}:{token}".encode("utf-8")
+    return hmac.new(app.secret_key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def login_approval_message(row, status="pending", login_method="", code_value=""):
+    user_agent = re.sub(r"[\r\n\t]+", " ", str(row["user_agent"] or "")).strip()[:350] or "Unknown"
+    message = (
+        "🔐 IP Management — Login audit\n"
+        f"💻 Host: {telegram_hostname()}\n"
+        f"👤 Username: {safe_telegram_username(row['username'])}\n"
+        f"🌐 IP address: {row['remote_ip']}\n"
+        f"🧭 Browser / device: {user_agent}\n"
+        f"⏰ Time (Iran): {jalali_datetime(row['created_at'])}"
+    )
+    if status == "pending":
+        message += "\n\n⚠️ Correct username and password received. Allow this login?"
+    elif status == "approved":
+        message += "\n\n✅ Administrator approved this sign-in. Waiting for the user to complete any required second factor."
+    elif status == "denied":
+        message += "\n\n❌ Administrator rejected this sign-in. No session was created."
+    elif status == "expired":
+        message += "\n\n⌛ Approval request expired. No session was created."
+    elif status == "canceled":
+        message += "\n\n⚪ Sign-in request was canceled before authentication completed."
+    elif status == "delivery_failed":
+        message += "\n\n⚠️ Telegram approval could not be delivered. Sign-in was blocked."
+    elif status == "success":
+        message += f"\n\n✅ Login successful.\n🔑 Login method: {login_method or 'Administrator approval'}"
+        safe_code = re.sub(r"[^0-9A-Za-z-]", "", str(code_value or ""))[:40]
+        if safe_code:
+            message += f"\n🔢 Code used: {safe_code}"
+        message += "\n🧾 Permanent login audit record."
+    return message[:3900]
+
+
+def finish_login_approval_log(request_id, status, login_method="", code_value=""):
+    with connect_db() as db:
+        row = db.execute("SELECT * FROM login_approval_requests WHERE id=?", (request_id,)).fetchone()
+        if not row:
+            return False
+        db.execute(
+            "UPDATE login_approval_requests SET status=?,decided_at=?,login_method=? WHERE id=?",
+            (status, now(), str(login_method or "")[:120], request_id),
+        )
+        saved = dict(row)
+    if saved.get("telegram_chat_id") and saved.get("telegram_message_id"):
+        result = telegram_edit_persistent_message(
+            saved["telegram_chat_id"], saved["telegram_message_id"],
+            login_approval_message(saved, status, login_method, code_value),
+            reply_markup={"inline_keyboard": []},
+        )
+        if not result:
+            telegram_api("editMessageReplyMarkup", {
+                "chat_id": saved["telegram_chat_id"],
+                "message_id": saved["telegram_message_id"],
+                "reply_markup": {"inline_keyboard": []},
+            })
+        return bool(result)
+    return False
+
+
+def create_login_approval_request(user, remote_ip, user_agent=""):
+    chat_id = secure_setting("telegram_chat_id_enc")
+    if not secure_setting("telegram_bot_token_enc") or not chat_id:
+        return None
+    created_at = now()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(timespec="seconds")
+    token = secrets.token_urlsafe(12)
+    clean_agent = re.sub(r"[\r\n\t]+", " ", str(user_agent or "")).strip()[:350]
+    with connect_db() as db:
+        cur = db.execute(
+            "INSERT INTO login_approval_requests(user_id,username,remote_ip,user_agent,token_hash,status,created_at,expires_at,telegram_chat_id) "
+            "VALUES(?,?,?,?,?,'pending',?,?,?)",
+            (user["id"], user["username"], str(remote_ip or "unknown")[:64], clean_agent,
+             "", created_at, expires_at, str(chat_id)[:80]),
+        )
+        request_id = cur.lastrowid
+        db.execute("UPDATE login_approval_requests SET token_hash=? WHERE id=?",
+                   (login_approval_token_hash(request_id, token), request_id))
+        row = db.execute("SELECT * FROM login_approval_requests WHERE id=?", (request_id,)).fetchone()
+    keyboard = {"inline_keyboard": [[
+        {"text": "✅ تأیید ورود", "callback_data": f"login_approval:approve:{request_id}:{token}"},
+        {"text": "❌ رد ورود", "callback_data": f"login_approval:deny:{request_id}:{token}"},
+    ]]}
+    sent = telegram_send(chat_id, login_approval_message(row), keyboard, delete_after=0)
+    message_id = (sent.get("result") or {}).get("message_id") if isinstance(sent, dict) else None
+    if not message_id:
+        with connect_db() as db:
+            db.execute("UPDATE login_approval_requests SET status='delivery_failed',decided_at=? WHERE id=?",
+                       (now(), request_id))
+        return None
+    with connect_db() as db:
+        db.execute("UPDATE login_approval_requests SET telegram_message_id=? WHERE id=?",
+                   (int(message_id), request_id))
+    return request_id
+
+
+def handle_login_approval_callback(callback, configured_chat_id):
+    match = re.fullmatch(
+        r"login_approval:(approve|deny):(\d+):([A-Za-z0-9_-]{12,24})",
+        str(callback.get("data") or ""),
+    )
+    if not match:
+        return False
+    decision, request_id, token = match.group(1), int(match.group(2)), match.group(3)
+    message = callback.get("message") or {}
+    message_chat = str((message.get("chat") or {}).get("id", ""))
+    if message_chat != str(configured_chat_id):
+        return False
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT * FROM login_approval_requests WHERE id=? AND telegram_chat_id=?",
+            (request_id, message_chat),
+        ).fetchone()
+        if (not row or row["status"] != "pending"
+                or int(row["telegram_message_id"] or 0) != int(message.get("message_id") or 0)
+                or not hmac.compare_digest(row["token_hash"], login_approval_token_hash(request_id, token))):
+            return False
+        status = "expired" if row["expires_at"] <= now() else ("approved" if decision == "approve" else "denied")
+        updated = db.execute(
+            "UPDATE login_approval_requests SET status=?,decided_at=? WHERE id=? AND status='pending'",
+            (status, now(), request_id),
+        )
+        if updated.rowcount != 1:
+            return False
+        saved = dict(row)
+    edited = telegram_edit_persistent_message(
+        message_chat, message.get("message_id"), login_approval_message(saved, status),
+        reply_markup={"inline_keyboard": []},
+    )
+    if not edited:
+        telegram_api("editMessageReplyMarkup", {
+            "chat_id": message_chat, "message_id": message.get("message_id"),
+            "reply_markup": {"inline_keyboard": []},
+        })
+    return True
+
+
+def finalize_login_audit(approval_request_id, username, remote_ip, login_method,
+                         code_value="", user_agent="", telegram_code_message=None):
+    if approval_request_id:
+        if "administrator approval" not in str(login_method or "").lower():
+            login_method = f"{login_method} + Telegram administrator approval"
+        result = finish_login_approval_log(approval_request_id, "success", login_method, code_value)
+        if telegram_code_message:
+            source_chat = telegram_code_message.get("chat_id")
+            source_message_id = telegram_code_message.get("message_id")
+            if source_chat and source_message_id:
+                telegram_delete_message(source_chat, source_message_id)
+        return result
+    return send_login_success_alert(
+        username, remote_ip, telegram_code_used=(login_method == "Telegram one-time code"),
+        telegram_code_value=code_value, telegram_code_message=telegram_code_message,
+        user_agent=user_agent,
+    )
+
+
+def continue_login_after_approval(user, approval_request_id):
+    if user_requires_two_factor(user):
+        mode = two_factor_mode()
+        if mode == "per_user" and not decrypt_authenticator_secret(user["totp_secret"]):
+            session.clear()
+            session["pending_2fa_user_id"] = user["id"]
+            session["pending_2fa_secret"] = pyotp.random_base32()
+            session["login_approval_id"] = approval_request_id
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            security_event("login", user["username"], "password_ok_2fa_pending",
+                           "Administrator approved password; authenticator enrollment is required")
+            return redirect(url_for("setup_2fa"))
+        if remembered_two_factor(user["id"]):
+            establish_login(user)
+            session["two_factor_verified"] = True
+            finalize_login_audit(
+                approval_request_id, user["username"], client_ip(),
+                "Administrator approval + trusted 2FA device",
+                user_agent=request.headers.get("User-Agent", ""),
+            )
+            flash(f"Welcome back, {user['username']}!", "welcome")
+            return redirect(safe_login_target())
+        secret = shared_two_factor_secret() if mode == "shared" else decrypt_authenticator_secret(user["totp_secret"])
+        if not secret:
+            finish_login_approval_log(approval_request_id, "canceled")
+            flash("Two-factor authentication is not configured. Contact the super administrator.", "error")
+            return redirect(url_for("login"))
+        session.clear()
+        session["pending_2fa_user_id"] = user["id"]
+        session["login_approval_id"] = approval_request_id
+        session["csrf_token"] = secrets.token_urlsafe(32)
+        security_event("login", user["username"], "password_ok_2fa_pending",
+                       "Administrator approved password; waiting for second factor")
+        return render_template("login.html", stage="verify", login_user={
+            "id": user["id"], "username": user["username"], "role": user["role"],
+            "profile_image": user["profile_image"],
+        })
+    establish_login(user)
+    finalize_login_audit(
+        approval_request_id, user["username"], client_ip(), "Administrator approval",
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+    flash(f"Welcome back, {user['username']}!", "welcome")
+    return redirect(safe_login_target())
 
 
 def audit(action, detail=""):
@@ -1685,9 +1893,48 @@ def login():
         if limited:
             return limited
     if request.method == "GET" and request.args.get("reset") == "1":
+        pending_approval_id = session.pop("pending_login_approval_id", None) or session.pop("login_approval_id", None)
+        if pending_approval_id:
+            finish_login_approval_log(pending_approval_id, "canceled")
         session.pop("pending_2fa_user_id", None)
         session.pop("pending_2fa_secret", None)
+        session.pop("login_approval_id", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
+    if request.method == "GET" and session.get("pending_login_approval_id"):
+        approval_id = session["pending_login_approval_id"]
+        with connect_db() as db:
+            approval = db.execute(
+                "SELECT * FROM login_approval_requests WHERE id=?", (approval_id,)
+            ).fetchone()
+            approved_user = db.execute(
+                "SELECT * FROM users WHERE id=? AND enabled=1",
+                (approval["user_id"],),
+            ).fetchone() if approval else None
+        if not approval:
+            session.pop("pending_login_approval_id", None)
+            flash("The login request is no longer available. Please sign in again.", "error")
+        elif approval["status"] == "pending" and approval["expires_at"] > now():
+            return render_template("login.html", stage="approval", login_user={
+                "username": approval["username"], "role": "admin",
+            })
+        elif approval["status"] == "approved":
+            session.pop("pending_login_approval_id", None)
+            if not approved_user:
+                finish_login_approval_log(approval_id, "canceled")
+                session.clear()
+                flash("This account is no longer enabled.", "error")
+                return redirect(url_for("login"))
+            return continue_login_after_approval(approved_user, approval_id)
+        else:
+            if approval["status"] == "pending":
+                finish_login_approval_log(approval_id, "expired")
+                message = "The administrator approval request expired. Please try again."
+            elif approval["status"] == "denied":
+                message = "The administrator rejected this login request."
+            else:
+                message = "Telegram approval could not be completed. Login was blocked."
+            session.pop("pending_login_approval_id", None)
+            flash(message, "error")
     if (request.method == "GET" and two_factor_mode() == "per_user"
             and session.get("pending_2fa_user_id") and session.get("pending_2fa_secret")):
         return redirect(url_for("setup_2fa"))
@@ -1706,6 +1953,7 @@ def login():
                 telegram_code_message = consume_telegram_login_code(user["id"], code)
             telegram_code_ok = telegram_code_message is not None
             if user and user_requires_two_factor(user) and (totp_ok or recovery_ok or telegram_code_ok):
+                approval_id = session.get("login_approval_id")
                 establish_login(user)
                 session["two_factor_verified"] = True
                 if recovery_ok:
@@ -1714,14 +1962,13 @@ def login():
                 if telegram_code_ok:
                     security_event("two_factor_recovery", user["username"], "success", "Two-minute Telegram fallback code consumed")
                     audit("telegram_login_recovery_code_used")
-                if telegram_code_ok:
-                    send_login_success_alert(
-                        user["username"], client_ip(), telegram_code_used=True, telegram_code_value=code,
-                        telegram_code_message=telegram_code_message,
-                        user_agent=request.headers.get("User-Agent", ""),
-                    )
-                else:
-                    send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
+                method = ("Telegram one-time code" if telegram_code_ok else
+                          ("One-time recovery code" if recovery_ok else "Authenticator app (TOTP)"))
+                finalize_login_audit(
+                    approval_id, user["username"], client_ip(), method,
+                    code_value=code, user_agent=request.headers.get("User-Agent", ""),
+                    telegram_code_message=telegram_code_message,
+                )
                 flash(f"Welcome back, {user['username']}!", "welcome")
                 response = redirect(safe_login_target())
                 if totp_ok:
@@ -1746,6 +1993,23 @@ def login():
         with connect_db() as db:
             user = db.execute("SELECT * FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
         if user and len(password) <= 1024 and password_matches(password, user["password_hash"]):
+            if app.config.get("LOGIN_APPROVAL_REQUIRED", True):
+                approval_id = create_login_approval_request(
+                    user, client_ip(), request.headers.get("User-Agent", ""),
+                )
+                if not approval_id:
+                    security_event("login_approval", username, "blocked",
+                                   "Telegram administrator approval request could not be delivered")
+                    flash("Telegram administrator approval is unavailable. Login has been blocked.", "error")
+                    return render_template("login.html", stage="password")
+                session.clear()
+                session["pending_login_approval_id"] = approval_id
+                session["csrf_token"] = secrets.token_urlsafe(32)
+                security_event("login", username, "password_ok_approval_pending",
+                               "Password accepted; waiting for Telegram administrator approval")
+                return render_template("login.html", stage="approval", login_user={
+                    "username": user["username"], "role": user["role"],
+                })
             if user_requires_two_factor(user) and remembered_two_factor(user["id"]):
                 establish_login(user)
                 session["two_factor_verified"] = True
@@ -1834,6 +2098,7 @@ def setup_2fa():
         if pyotp.TOTP(secret).verify(code, valid_window=1):
             with connect_db() as db:
                 db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (encrypt_authenticator_secret(secret), user_id))
+            approval_id = session.get("login_approval_id")
             session.clear()
             # Authentication must remain a browser-session cookie. Only the
             # separate signed 2FA-remember cookie is persistent (24 hours).
@@ -1846,6 +2111,11 @@ def setup_2fa():
             session["two_factor_verified"] = True
             audit("two_factor_enabled")
             security_event("two_factor_enrollment", user["username"], "success", "Authenticator enrollment completed")
+            finalize_login_audit(
+                approval_id, user["username"], client_ip(),
+                "Administrator approval + Authenticator enrollment",
+                code_value=code, user_agent=request.headers.get("User-Agent", ""),
+            )
             flash(f"Welcome back, {user['username']}! Two-factor authentication is enabled.", "welcome")
             response = redirect(url_for("index"))
             remember_two_factor_response(response, user_id)
@@ -1865,6 +2135,7 @@ def setup_2fa():
 def cancel_2fa_setup():
     """Log out of the pending mandatory enrollment flow without disabling 2FA."""
     pending_user_id = session.get("pending_2fa_user_id")
+    approval_id = session.get("login_approval_id")
     if not pending_user_id:
         if session.get("user_id"):
             abort(403)
@@ -1879,6 +2150,8 @@ def cancel_2fa_setup():
         "info",
         "User logged out from the pending authenticator setup page",
     )
+    if approval_id:
+        finish_login_approval_log(approval_id, "canceled")
     session.clear()
     response = redirect(url_for("login"))
     response.delete_cookie(REMEMBER_2FA_COOKIE)

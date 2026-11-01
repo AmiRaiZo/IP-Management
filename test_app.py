@@ -24,6 +24,7 @@ import app as archive
 class ArchiveTests(unittest.TestCase):
     def setUp(self):
         archive.app.config["TESTING"] = True
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = False
         self.client = archive.app.test_client()
         with archive.connect_db() as db:
             db.execute("DELETE FROM user_ip_access")
@@ -38,6 +39,7 @@ class ArchiveTests(unittest.TestCase):
             db.execute("INSERT INTO account_groups(name,description,created_at,sort_order) VALUES('Default','Default group for saved accounts',?,0)", (archive.now(),))
             db.execute("INSERT INTO note_groups(name,description,color,created_at,sort_order) VALUES('Default','Default group for saved notes','#65758b',?,0)", (archive.now(),))
             db.execute("DELETE FROM users")
+            db.execute("DELETE FROM login_approval_requests")
             db.execute("DELETE FROM user_recovery_codes")
             db.execute("DELETE FROM telegram_login_codes")
             db.execute("DELETE FROM security_events")
@@ -378,18 +380,18 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(detail["message_id"], 101)
             self.assertEqual(archive.telegram_get_state()["mode"], "browse_detail")
 
-    def test_telegram_one_time_code_alert_contains_user_code_and_ack_button(self):
+    def test_telegram_one_time_code_alert_contains_user_code_and_has_no_ack_or_menu_button(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         with patch.object(archive, "send_telegram_security_alert", return_value=True) as alert:
             self.assertTrue(archive.send_login_success_alert(
                 "one-time-admin", "203.0.113.81", telegram_code_used=True, telegram_code_value="246810"
             ))
         text = alert.call_args.args[0]
-        markup = alert.call_args.kwargs["reply_markup"]
         self.assertIn("one-time-admin", text)
         self.assertIn("Code used: 246810", text)
         self.assertIn("cannot be reused", text)
-        self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"], "ack_telegram_login")
+        self.assertEqual(alert.call_args.kwargs.get("delete_after"), 0)
+        self.assertNotIn("reply_markup", alert.call_args.kwargs)
 
         with (
             patch.object(archive, "telegram_api", return_value={"ok": True}),
@@ -399,10 +401,7 @@ class ArchiveTests(unittest.TestCase):
                 "id": "confirm-one-time", "data": "ack_telegram_login",
                 "message": {"message_id": 222, "text": text, "chat": {"id": 12345, "type": "private"}},
             }})
-        replace.assert_called_once()
-        acknowledged = replace.call_args.args[2]
-        self.assertIn("Login acknowledged", acknowledged)
-        self.assertIn("one-time code has already been consumed", acknowledged)
+        replace.assert_not_called()
 
 
     def test_telegram_account_vault_supports_add_search_browse_edit_and_confirmed_delete(self):
@@ -1503,7 +1502,7 @@ class ArchiveTests(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertNotIn("Keep connection details organized, searchable, and available to the right people.", page)
         self.assertIn('class="mobile-ip-list" data-mobile-ip-list', page)
-        self.assertIn('class="mobile-ip-card inventory-fixed-card" role="listitem"', page)
+        self.assertIn('class="mobile-ip-card" role="listitem"', page)
         self.assertIn('data-scroll-record="ip-', page)
         self.assertIn('class="mobile-ip-fields"', page)
         self.assertIn('class="data-field-icon icon-ip"', page)
@@ -1602,7 +1601,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("color: #0f766e !important", account_page)
         self.assertIn("background-color: #0f766e22 !important", account_page)
         self.assertIn('class="group-tag" data-group-color="#0f766e" style="--group-color: #0f766e !important; color: #0f766e !important;', account_page)
-        self.assertIn('class="mobile-ip-card mobile-account-card inventory-fixed-card"', account_page)
+        self.assertIn('class="mobile-ip-card mobile-account-card"', account_page)
         self.assertNotIn('class="mobile-data-row mobile-account-group-row"', account_page)
         self.assertIn('class="record-title"><strong>Colored mailbox</strong>', account_page)
         self.assertNotIn('<strong style="color: #0f766e !important">Colored mailbox</strong>', account_page)
@@ -2233,14 +2232,15 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("cannot be reused", edited[0]["text"])
         self.assertNotIn(("12345", 77), archive._TELEGRAM_DELETE_TIMERS)
         self.assertFalse(any(method == "deleteMessage" for method, _ in calls))
+        self.assertEqual(edited[0].get("reply_markup"), {"inline_keyboard": []})
 
         acknowledge = {"callback_query": {"id": "cb-ack", "data": "ack_telegram_login", "message": {
             "message_id": 77, "chat": {"id": 12345, "type": "private"}, "text": edited[0]["text"]}}}
         with patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
             archive.handle_telegram_update(acknowledge)
         follow_up_edits = [payload for method, payload in calls if method == "editMessageText"]
-        self.assertEqual(len(follow_up_edits), 2)
-        self.assertIn("Login acknowledged", follow_up_edits[-1]["text"])
+        self.assertEqual(len(follow_up_edits), 1)
+        self.assertNotIn("Login acknowledged", follow_up_edits[-1]["text"])
         self.assertNotIn(("12345", 77), archive._TELEGRAM_DELETE_TIMERS)
         self.assertFalse(any(method == "deleteMessage" for method, _ in calls))
         with archive.connect_db() as db:
@@ -2264,6 +2264,216 @@ class ArchiveTests(unittest.TestCase):
         alert.assert_called_once()
         self.assertEqual(alert.call_args.kwargs.get("delete_after"), 0)
         self.assertIn("Code used: 654321", alert.call_args.args[0])
+
+    def test_password_login_waits_for_telegram_approval_then_updates_same_permanent_audit(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        _, secret = self.create_user("approval-admin")
+        calls = []
+
+        def telegram_api_stub(method, payload):
+            calls.append((method, payload))
+            return {"ok": True, "result": {"message_id": 77}}
+
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 77}}) as send, \
+             patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-admin", "password": "test-pass",
+            }, headers={"User-Agent": "Test Browser/42 (Windows 11)"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Waiting for approval", response.data)
+            self.assertEqual(send.call_args.kwargs.get("delete_after"), 0)
+            self.assertIn("approval-admin", send.call_args.args[1])
+            self.assertIn("127.0.0.1", send.call_args.args[1])
+            self.assertIn("Test Browser/42 (Windows 11)", send.call_args.args[1])
+            self.assertNotIn("test-pass", send.call_args.args[1])
+            keyboard = send.call_args.args[2]["inline_keyboard"][0]
+            self.assertEqual(len(keyboard), 2)
+            self.assertIn("approve", keyboard[0]["callback_data"])
+            self.assertIn("deny", keyboard[1]["callback_data"])
+            with self.client.session_transaction() as sess:
+                approval_id = sess["pending_login_approval_id"]
+                self.assertNotIn("user_id", sess)
+            with archive.connect_db() as db:
+                pending = db.execute("SELECT * FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()
+            self.assertEqual(pending["status"], "pending")
+            self.assertEqual(pending["telegram_message_id"], 77)
+
+            callback = {"callback_query": {"id": "approval-yes", "data": keyboard[0]["callback_data"],
+                "message": {"message_id": 77, "chat": {"id": 12345, "type": "private"}}}}
+            archive.handle_telegram_update(callback)
+            with archive.connect_db() as db:
+                self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "approved")
+            response = self.client.get("/login")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Authenticator code", response.data)
+            with self.client.session_transaction() as sess:
+                self.assertEqual(sess["login_approval_id"], approval_id)
+                self.assertEqual(sess["pending_2fa_user_id"], pending["user_id"])
+            code = pyotp.TOTP(secret).now()
+            response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+
+        self.assertEqual(response.status_code, 302)
+        edited = [payload for method, payload in calls if method == "editMessageText"]
+        self.assertEqual(len(edited), 2)
+        self.assertEqual((edited[-1]["chat_id"], edited[-1]["message_id"]), ("12345", 77))
+        self.assertIn("Login successful", edited[-1]["text"])
+        self.assertIn("Login method: Authenticator app (TOTP) + Telegram administrator approval", edited[-1]["text"])
+        self.assertIn(f"Code used: {code}", edited[-1]["text"])
+        self.assertEqual(edited[-1]["reply_markup"], {"inline_keyboard": []})
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "success")
+
+    def test_telegram_login_approval_rejects_request_and_never_creates_session(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("approval-denied")
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 88}}) as send, \
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 88}}):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-denied", "password": "test-pass",
+            })
+            self.assertEqual(response.status_code, 200)
+            callback_data = send.call_args.args[2]["inline_keyboard"][0][1]["callback_data"]
+            with self.client.session_transaction() as sess:
+                approval_id = sess["pending_login_approval_id"]
+            archive.handle_telegram_update({"callback_query": {"id": "approval-no", "data": callback_data,
+                "message": {"message_id": 88, "chat": {"id": 12345, "type": "private"}}}})
+            response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"administrator rejected", response.data.lower())
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("user_id", sess)
+            self.assertNotIn("pending_login_approval_id", sess)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "denied")
+
+    def test_telegram_login_approval_callback_rejects_wrong_chat_or_token(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("approval-token-check")
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 99}}) as send:
+            self.client.get("/login")
+            self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-token-check", "password": "test-pass",
+            })
+        callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
+        invalid = callback_data.rsplit(":", 1)[0] + ":invalid-token-123"
+        with patch.object(archive, "telegram_api", return_value={"ok": True}):
+            archive.handle_telegram_update({"callback_query": {"id": "wrong-chat", "data": callback_data,
+                "message": {"message_id": 99, "chat": {"id": 54321, "type": "private"}}}})
+            archive.handle_telegram_update({"callback_query": {"id": "wrong-token", "data": invalid,
+                "message": {"message_id": 99, "chat": {"id": 12345, "type": "private"}}}})
+        with archive.connect_db() as db:
+            row = db.execute("SELECT status FROM login_approval_requests ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["status"], "pending")
+
+    def test_telegram_approval_then_first_authenticator_enrollment_updates_original_audit(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("approval-first-enrollment", secret="")
+        calls = []
+
+        def telegram_api_stub(method, payload):
+            calls.append((method, payload))
+            return {"ok": True, "result": {"message_id": 101}}
+
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 101}}) as send, \
+             patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-first-enrollment", "password": "test-pass",
+            })
+            self.assertIn(b"Waiting for approval", response.data)
+            callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
+            with self.client.session_transaction() as sess:
+                approval_id = sess["pending_login_approval_id"]
+            archive.handle_telegram_update({"callback_query": {"id": "enroll-approve", "data": callback_data,
+                "message": {"message_id": 101, "chat": {"id": 12345, "type": "private"}}}})
+            response = self.client.get("/login")
+            self.assertEqual(response.status_code, 302)
+            self.assertIn("setup-2fa", response.location)
+            response = self.client.get("/setup-2fa")
+            self.assertEqual(response.status_code, 200)
+            with self.client.session_transaction() as sess:
+                secret = sess["pending_2fa_secret"]
+                self.assertEqual(sess["login_approval_id"], approval_id)
+            response = self.client.post("/setup-2fa", data={
+                "csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now(),
+            })
+
+        self.assertEqual(response.status_code, 302)
+        edits = [payload for method, payload in calls if method == "editMessageText"]
+        self.assertEqual(len(edits), 2)
+        self.assertIn("Administrator approval + Authenticator enrollment", edits[-1]["text"])
+        self.assertIn("Code used:", edits[-1]["text"])
+        self.assertEqual(edits[-1]["reply_markup"], {"inline_keyboard": []})
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "success")
+
+    def test_telegram_approval_delivery_failure_blocks_login(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("approval-delivery-failure")
+        with patch.object(archive, "telegram_send", return_value={}):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-delivery-failure", "password": "test-pass",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Telegram administrator approval is unavailable", response.data)
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("user_id", sess)
+            self.assertNotIn("pending_login_approval_id", sess)
+        with archive.connect_db() as db:
+            row = db.execute("SELECT status FROM login_approval_requests ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["status"], "delivery_failed")
+
+    def test_telegram_approval_without_second_factor_logs_admin_approval_method(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.create_user("approval-password-only")
+        with archive.connect_db() as db:
+            db.execute("UPDATE app_settings SET value='off' WHERE key='two_factor_mode'")
+        calls = []
+
+        def telegram_api_stub(method, payload):
+            calls.append((method, payload))
+            return {"ok": True, "result": {"message_id": 121}}
+
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 121}}) as send, \
+             patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-password-only", "password": "test-pass",
+            })
+            self.assertIn(b"Waiting for approval", response.data)
+            callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
+            with self.client.session_transaction() as sess:
+                approval_id = sess["pending_login_approval_id"]
+            archive.handle_telegram_update({"callback_query": {"id": "password-only-approve", "data": callback_data,
+                "message": {"message_id": 121, "chat": {"id": 12345, "type": "private"}}}})
+            response = self.client.get("/login")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/")
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess.get("user_id"))
+        edits = [payload for method, payload in calls if method == "editMessageText"]
+        self.assertEqual(len(edits), 2)
+        self.assertIn("Login method: Administrator approval", edits[-1]["text"])
+        self.assertNotIn("Code used:", edits[-1]["text"])
+        self.assertEqual(edits[-1]["reply_markup"], {"inline_keyboard": []})
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "success")
 
     def test_telegram_search_results_include_saved_connection_password_for_configured_chat(self):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
@@ -2334,8 +2544,9 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
             with self.subTest(script=name):
                 script = root / name
                 self.assertTrue(script.is_file(), f"missing deployment script: {name}")
-                result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
-                self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+                source = script.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+                result = subprocess.run([bash, "-n"], input=source.encode("utf-8"), capture_output=True)
+                self.assertEqual(result.returncode, 0, f"{name}: {result.stderr.decode('utf-8', errors='replace')}")
 
     def test_in_place_upgrade_embedded_updater_has_valid_bash_syntax(self):
         bash = shutil.which("bash")
@@ -2354,8 +2565,9 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "station-archive-update.generated"
             script.write_text(generated_updater, encoding="utf-8")
-            result = subprocess.run([bash, "-n", str(script)], text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, f"generated updater: {result.stderr}")
+            source = script.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            result = subprocess.run([bash, "-n"], input=source.encode("utf-8"), capture_output=True)
+            self.assertEqual(result.returncode, 0, f"generated updater: {result.stderr.decode('utf-8', errors='replace')}")
 
     def test_updater_bootstraps_before_deploy_and_never_overwrites_its_running_file(self):
         updater = Path(__file__).with_name("station-archive-update").read_text(encoding="utf-8")

@@ -1,10 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Verify your identity' if stage == 'verify' else 'Sign in' }}{% endblock %}
+{% block title %}{{ 'Waiting for approval' if stage == 'approval' else ('Verify your identity' if stage == 'verify' else 'Sign in') }}{% endblock %}
 {% block main_class %}login-wrap{% endblock %}
 {% block content %}
-<section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
+<section class="login-card {% if stage == 'verify' %}verify-stage{% elif stage == 'approval' %}approval-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
-  {% if stage == 'verify' %}
+  {% if stage == 'approval' %}
+  <div class="login-approval-icon" aria-hidden="true">&#8987;</div>
+  <h1>Waiting for approval</h1>
+  <p class="login-description">Your password was accepted. A sign-in request has been sent to the administrator on Telegram. This page checks for the decision automatically.</p>
+  {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{{ login_user.username[:1]|upper }}</div><div class="login-user-copy"><p class="login-eyebrow">SIGN-IN REQUEST</p><h2>{{ login_user.username }}</h2></div></div>{% endif %}
+  <p class="login-approval-hint">This page will continue after approval. If the request is rejected or expires, you will be returned to sign in.</p>
+  <form class="back-to-password" method="get" action="{{ url_for('login') }}"><input type="hidden" name="reset" value="1"><button type="submit">&#8592; Use a different account</button></form>
+  {% elif stage == 'verify' %}
   {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{% if login_user.profile_image %}<img class="login-user-avatar-image" src="{{ url_for('media_file', filename=login_user.profile_image) }}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="login-user-avatar-fallback" hidden>{{ login_user.username[:1]|upper }}</span>{% else %}{{ login_user.username[:1]|upper }}{% endif %}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
   <h1>Verification code</h1>
   <p class="login-description verify-description">Enter the code from your authenticator or your temporary Telegram sign-in code.</p>

@@ -1,3 +1,13 @@
+## Version 4.1.0 release notes
+
+- Require Telegram administrator approval after a correct username/password pair and before creating an authenticated session; requests expire after five minutes and are protected by a one-use signed callback token.
+- Add inline **Approve** and **Reject** actions, automatically refresh the browser while approval is pending, and block sign-in if Telegram approval delivery is unavailable.
+- Keep the original approval message as a permanent audit record and update that same message with the final login method and accepted code; remove all buttons after a decision and never add bot-menu navigation to audit messages.
+- Preserve the existing Authenticator, recovery-code, Telegram one-time-code, trusted-device, and first-enrollment flows after administrator approval.
+- Restore the previous compact, content-sized IP and Account cards while continuing to omit empty optional fields; retain password reveal/copy and the independent fixed-size Notes cards.
+- Add regression coverage for approval, rejection, callback validation, permanent audit messages, and compact responsive inventory cards.
+- Refresh static asset cache keys.
+
 ## Version 4.0.9 release notes
 
 - Label the existing optional Notes `service_url` field clearly as **Site** without creating a duplicate field or changing stored data.

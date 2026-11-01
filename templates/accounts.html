@@ -7,7 +7,7 @@
   <div class="mobile-account-list" data-mobile-account-list role="list" aria-label="Saved accounts">
   {% for account in accounts %}
     {% set card_group_color = account.group_color or ['#5575e8','#169b78','#b7791f','#8b5bd6','#d14d72','#168ca0','#3b82c4','#65758b'][(account.group_id or 0) % 8] %}
-    <article class="mobile-ip-card mobile-account-card inventory-fixed-card" role="listitem" data-mobile-search-row data-scroll-record="account-{{ account.id }}" data-group="{{ account.group_id if account.group_id else 'ungrouped' }}" data-search="{{ (account.name ~ ' ' ~ account.username ~ ' ' ~ account.email ~ ' ' ~ (account.group_name or 'Default'))|lower }}">
+    <article class="mobile-ip-card mobile-account-card" role="listitem" data-mobile-search-row data-scroll-record="account-{{ account.id }}" data-group="{{ account.group_id if account.group_id else 'ungrouped' }}" data-search="{{ (account.name ~ ' ' ~ account.username ~ ' ' ~ account.email ~ ' ' ~ (account.group_name or 'Default'))|lower }}">
       <div class="mobile-ip-record-heading mobile-account-heading">
         <span class="mobile-ip-avatar mobile-account-avatar" aria-hidden="true">{{ (account.name or account.username or account.email or 'A')[:1]|upper }}</span>
         <div class="mobile-ip-title mobile-account-title"><strong>{{ account.name or account.username or account.email or 'Unnamed account' }}</strong></div>

@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  {% if stage|default('') == 'approval' %}<meta http-equiv="refresh" content="3;url={{ url_for('login', next=request.args.get('next', '')) }}">{% endif %}
   <title>{% block title %}IP Archive{% endblock %}</title>
-  <!-- v4.0.9 fixed inventory cards and optional Site label -->
+  <!-- v4.1.0 Telegram login approval and compact inventory cards -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.0.9">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.1.0">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -44,5 +45,5 @@
     </main>
   </div>
 </div>
-<script src="{{ url_for('static', filename='app.js') }}?v=4.0.9" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=4.1.0" defer></script>
 </body></html>
