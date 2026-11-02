@@ -57,6 +57,7 @@ body:has(.login-wrap)::before{content:"";position:fixed;inset:0;z-index:-1;point
 .login-card .full.login-submit{background:linear-gradient(105deg,#39cabb,#398fbd 58%,#7565e8);color:#06131a;box-shadow:0 12px 32px #27c9c126;font-weight:800}.login-card .full.login-submit:hover{box-shadow:0 15px 35px #27c9c13d;filter:brightness(1.07)}
 .login-bottom{border-top:1px solid #ffffff12;color:#71879a}.login-bottom i{background:#476070}.login-lock{color:#61e1d5}.back-to-password button{color:#70dfd4}
 .login-card .notice.error{background:#3a1c27;color:#ffb5c5;border-color:#6a2c40}.login-card .notice.success{background:#13372f;color:#91efd0;border-color:#245e50}
+.login-feedback{margin:0 0 16px;padding:11px 13px;border:1px solid #8c394d;border-radius:9px;background:#351b29;color:#ffc1cf;font-size:12px;line-height:1.7}.login-feedback[hidden]{display:none}
 .field select,.stack-form select,.select-wrap select,.ip-rule-row select{appearance:auto;-webkit-appearance:menulist;color:var(--text);background-color:var(--input);border:1px solid var(--border);color-scheme:light dark}
 html[data-theme="dark"] .field select,html[data-theme="dark"] .stack-form select,html[data-theme="dark"] .select-wrap select,html[data-theme="dark"] .ip-rule-row select{background-color:#171e2d;color:#e8edf8;border-color:#354158}
 html[data-theme="light"] .field select,html[data-theme="light"] .stack-form select,html[data-theme="light"] .select-wrap select,html[data-theme="light"] .ip-rule-row select{background-color:#fff;color:#202b3d;border-color:#d9dfeb}
@@ -750,11 +751,9 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 .note-field-value .copy-value{display:inline-flex;justify-content:flex-start;max-width:100%;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--text)}
 .note-field-long{grid-column:1/-1;min-height:76px}
 .note-field-long .note-field-value{white-space:pre-wrap}
-.note-card-actions{height:54px;min-height:54px;display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:auto;padding:9px 13px;border-top:1px solid var(--border);background:var(--surface-2)}
-.note-card-actions form{display:flex;margin:0}
-.note-card-actions .btn{min-height:34px}
-.note-card-actions .note-card-edit{display:inline-flex;flex:1 1 auto;min-width:0;min-height:36px;align-items:center;justify-content:center;text-align:center}
-.note-card-actions form{flex:0 0 auto}
+.note-card-actions{height:54px;min-height:54px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:8px;margin-top:auto;padding:9px 13px;border-top:1px solid var(--border);background:var(--surface-2)}
+.note-card-actions form{display:flex;min-width:0;width:100%;margin:0}
+.note-card-actions .btn{display:inline-flex;width:100%;min-width:0;min-height:36px;align-items:center;justify-content:center;text-align:center}
 .note-form-section{margin-top:18px;padding-top:5px;border-top:1px solid var(--border)}
 .note-form-section-heading{display:flex;align-items:center;gap:11px;padding:15px 24px 8px}
 .note-form-section-heading>.data-field-icon{flex:0 0 32px;width:32px;height:32px;font-size:17px}
@@ -798,3 +797,7 @@ html[data-theme="dark"] .note-card-avatar{background:#1b2b4a;border-color:#30446
 .brand{flex:0 0 auto}
 .login-approval-transport{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .login-approval-feedback{margin:14px 0 0;color:#c44b58;font-size:12px;text-align:center}
+
+/* Keep the Note card Edit link and Delete form as equal-width grid items. */
+.note-card-actions>.note-card-edit,.note-card-actions>form{display:flex;width:100%;min-width:0;flex:1 1 0}
+.note-card-actions>.note-card-edit,.note-card-actions>form>.note-card-delete{box-sizing:border-box;width:100%;min-width:0;flex:1 1 0}

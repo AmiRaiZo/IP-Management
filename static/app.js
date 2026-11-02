@@ -112,6 +112,58 @@
     }
     window.setTimeout(checkLoginApproval, 1200);
   }
+  // Keep the login form in place after bad credentials: clear only the secret field.
+  document.querySelectorAll('form[data-login-form]').forEach(form => {
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const feedback = document.querySelector('[data-login-feedback]');
+      const originalText = button?.textContent || '';
+      if (button) { button.disabled = true; button.textContent = 'Checking…'; }
+      if (feedback) { feedback.hidden = true; feedback.textContent = ''; }
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST', body: new FormData(form), credentials: 'same-origin', cache: 'no-store',
+          headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/html'}
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const result = await response.json();
+          if (result.ok && result.redirect) {
+            window.location.assign(result.redirect);
+            return;
+          }
+          const field = result.clear_field ? form.querySelector(`[name="${result.clear_field}"]`) : null;
+          if (field) { field.value = ''; field.focus(); }
+          if (feedback) {
+            feedback.textContent = result.message || 'Sign-in failed. Please try again.';
+            feedback.hidden = false;
+            feedback.classList.toggle('login-feedback-blocked', Boolean(result.blocked));
+          }
+          return;
+        }
+        if (response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
+        if (response.ok) {
+          // A valid password advances to the second-factor/approval stage.
+          const nextLogin = new URL(form.action, window.location.href);
+          nextLogin.pathname = '/login';
+          window.location.assign(nextLogin.toString());
+          return;
+        }
+        throw new Error('The sign-in request could not be completed. Please try again.');
+      } catch (error) {
+        if (feedback) {
+          feedback.textContent = error.message || 'Network error. Please try again.';
+          feedback.hidden = false;
+        }
+      } finally {
+        if (button) { button.disabled = false; button.textContent = originalText; }
+      }
+    });
+  });
   document.querySelectorAll('[data-auto-dismiss]').forEach(toast => {
     let dismissed = false;
     const dismissOnClick = () => dismiss();

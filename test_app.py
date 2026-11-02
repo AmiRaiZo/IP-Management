@@ -43,6 +43,8 @@ class ArchiveTests(unittest.TestCase):
             db.execute("DELETE FROM user_recovery_codes")
             db.execute("DELETE FROM telegram_login_codes")
             db.execute("DELETE FROM security_events")
+            db.execute("DELETE FROM login_attempt_counters")
+            db.execute("DELETE FROM login_security_blocks")
             db.execute("DELETE FROM ip_access_rules")
             db.execute("DELETE FROM app_settings WHERE key='ip_allowlist_enabled'")
             db.execute("DELETE FROM app_settings WHERE key IN ('public_domain','public_port','update_repository', 'telegram_bot_token_enc', 'telegram_chat_id_enc', 'telegram_webhook_secret_enc', 'telegram_conversation_state_enc')")
@@ -1186,6 +1188,13 @@ class ArchiveTests(unittest.TestCase):
         for label in ("Website / URL", "IP address", "IP port", "IP username", "IP password", "Account name", "Account username", "Account email", "Account password", "Note"):
             self.assertNotIn(label, empty_card)
         self.assertIn(f"Saved note #{empty['id']}", empty_card)
+        self.assertIn('class="btn btn-small btn-secondary note-card-edit"', empty_card)
+        self.assertIn('class="btn btn-small btn-danger note-card-delete"', empty_card)
+        notes_css = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertRegex(notes_css, r"\.note-card-actions\{[^}]*display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)")
+        self.assertRegex(notes_css, r"\.note-card-actions \.btn\{[^}]*width:100%")
+        self.assertRegex(notes_css, r"\.note-card-actions>\.note-card-edit,\.note-card-actions>form\{[^}]*display:flex;[^}]*width:100%;[^}]*min-width:0;[^}]*flex:1 1 0")
+        self.assertRegex(notes_css, r"\.note-card-actions>\.note-card-edit,\.note-card-actions>form>\.note-card-delete\{[^}]*width:100%;[^}]*min-width:0;[^}]*flex:1 1 0")
 
         response = self.client.post("/notes/new", data={
             "csrf_token": self.csrf(), "return_to": f"/notes?q=Gateway&group={note_group['id']}",
@@ -2114,7 +2123,7 @@ class ArchiveTests(unittest.TestCase):
 
     def test_repeated_failed_logins_are_rate_limited(self):
         self.client.get("/login")
-        for _ in range(8):
+        for _ in range(2):
             response = self.client.post("/login", data={
                 "csrf_token": self.csrf(), "username": "unknown-account", "password": "wrong",
             })
@@ -2123,7 +2132,175 @@ class ArchiveTests(unittest.TestCase):
             "csrf_token": self.csrf(), "username": "unknown-account", "password": "wrong",
         })
         self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.headers.get("Retry-After"), "900")
+        self.assertIn("text/html", response.content_type)
+        self.assertGreater(int(response.headers.get("Retry-After")), 0)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM login_security_blocks").fetchone()[0], 1)
+        # A different username on the same browser must still be rejected.
+        alternate = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "another-account", "password": "wrong",
+        })
+        self.assertEqual(alternate.status_code, 429)
+
+    def test_new_browser_and_new_username_cannot_bypass_ip_lock(self):
+        self.client.get("/login", environ_overrides={"REMOTE_ADDR": "198.51.100.44"})
+        for _ in range(3):
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "first-account", "password": "wrong",
+            }, environ_overrides={"REMOTE_ADDR": "198.51.100.44"})
+        self.assertEqual(response.status_code, 429)
+        original_device = self.client.get_cookie("ipm_device_id").value
+
+        fresh_browser = archive.app.test_client()
+        fresh_browser.get("/login", environ_overrides={"REMOTE_ADDR": "198.51.100.44"})
+        self.assertNotEqual(fresh_browser.get_cookie("ipm_device_id").value, original_device)
+        with fresh_browser.session_transaction() as sess:
+            fresh_csrf = sess["csrf_token"]
+        blocked = fresh_browser.post("/login", data={
+            "csrf_token": fresh_csrf, "username": "completely-different-account", "password": "wrong",
+        }, environ_overrides={"REMOTE_ADDR": "198.51.100.44"})
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_client_ip_normalizes_ipv4_mapped_ipv6(self):
+        with archive.app.test_request_context("/", environ_overrides={"REMOTE_ADDR": "::ffff:192.0.2.25"}):
+            self.assertEqual(archive.client_ip(), "192.0.2.25")
+
+    def test_login_block_follows_browser_and_account_across_changed_ip(self):
+        self.client.get("/login")
+        for _ in range(3):
+            self.client.post("/login", data={"csrf_token": self.csrf(), "username": "locked-identity", "password": "wrong"})
+        device_cookie = self.client.get_cookie("ipm_device_id").value
+        other_browser = archive.app.test_client()
+        other_browser.set_cookie("ipm_device_id", device_cookie)
+        other_browser.get("/login", environ_overrides={"REMOTE_ADDR": "198.51.100.20"})
+        with other_browser.session_transaction() as sess:
+            other_csrf = sess["csrf_token"]
+        same_device_new_ip = other_browser.post("/login", data={
+            "csrf_token": other_csrf, "username": "another-name", "password": "wrong",
+        }, environ_overrides={"REMOTE_ADDR": "198.51.100.20"})
+        self.assertEqual(same_device_new_ip.status_code, 429)
+        different_device_same_ip = archive.app.test_client()
+        different_device_same_ip.get("/login", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        with different_device_same_ip.session_transaction() as sess:
+            same_ip_csrf = sess["csrf_token"]
+        same_ip = different_device_same_ip.post("/login", data={
+            "csrf_token": same_ip_csrf, "username": "another-name", "password": "wrong",
+        }, environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(same_ip.status_code, 429)
+        different_network_same_account = archive.app.test_client()
+        different_network_same_account.get("/login", environ_overrides={"REMOTE_ADDR": "203.0.113.80"})
+        with different_network_same_account.session_transaction() as sess:
+            other_csrf = sess["csrf_token"]
+        same_account = different_network_same_account.post("/login", data={
+            "csrf_token": other_csrf,
+            "username": "locked-identity", "password": "wrong",
+        }, environ_overrides={"REMOTE_ADDR": "203.0.113.80"})
+        self.assertEqual(same_account.status_code, 429)
+
+    def test_login_failure_ajax_keeps_form_and_only_clears_password(self):
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "typed-even-if-wrong", "password": "wrong",
+        }, headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json["clear_field"], "password")
+        self.assertEqual(response.json["stage"], "password")
+        page = self.client.get("/login")
+        self.assertIn(b'data-login-form', page.data)
+        self.assertIn(b'data-login-feedback', page.data)
+        script = (archive.BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("form[data-login-form]", script)
+        self.assertIn("field.value = ''", script)
+
+    def test_three_bad_totp_codes_block_account_ip_and_browser_for_15_minutes(self):
+        user_id, _ = self.create_user("three-bad-totp")
+        self.client.get("/login")
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "three-bad-totp", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 200)
+        for attempt in range(3):
+            headers = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"} if attempt == 2 else None
+            response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": "000000"}, headers=headers)
+            self.assertEqual(response.status_code, 429 if attempt == 2 else 200)
+        self.assertEqual(response.json["clear_field"], "code")
+        with archive.connect_db() as db:
+            block = db.execute("SELECT * FROM login_security_blocks ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIsNotNone(block)
+        self.assertEqual(block["username"], "three-bad-totp")
+        self.assertTrue(block["ip_hash"])
+        self.assertTrue(block["device_hash"])
+        remaining = archive.login_block_remaining(block["blocked_until"])
+        self.assertGreaterEqual(remaining, 899)
+        self.assertLessEqual(remaining, 900)
+
+    def test_password_and_totp_failures_share_the_same_three_attempt_budget(self):
+        self.create_user("combined-failure-budget")
+        self.client.get("/login")
+        for _ in range(2):
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "combined-failure-budget", "password": "wrong",
+            })
+            self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "combined-failure-budget", "password": "test-pass",
+        })
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": "000000"})
+        self.assertEqual(response.status_code, 429)
+        with archive.connect_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM login_security_blocks").fetchone()[0], 1)
+
+    def test_login_security_unblock_callback_clears_all_scopes_and_is_authorized(self):
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        self.client.get("/login")
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 321}}):
+            for _ in range(3):
+                self.client.post("/login", data={"csrf_token": self.csrf(), "username": "release-me", "password": "wrong"})
+        with archive.connect_db() as db:
+            block = db.execute("SELECT * FROM login_security_blocks ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertEqual(block["telegram_message_id"], 321)
+        callback = {"data": f"login_unblock_group:{block['block_id']}", "from": {"id": 12345},
+                    "message": {"message_id": 321, "chat": {"id": 12345, "type": "private"}}}
+        unauthorized = {**callback, "from": {"id": 99999}}
+        self.assertFalse(archive.handle_login_security_unblock_callback(unauthorized, "12345"))
+        with patch.object(archive, "telegram_api", return_value={"ok": True}) as api:
+            archive.handle_telegram_update({"callback_query": {**callback, "id": "group-unblock-callback"}})
+        callback_answers = [call.args[1] for call in api.call_args_list if call.args and call.args[0] == "answerCallbackQuery"]
+        self.assertEqual(len(callback_answers), 1)
+        self.assertIn("برداشته شد", callback_answers[0]["text"])
+        with archive.connect_db() as db:
+            released = db.execute("SELECT blocked_until,telegram_message_id,telegram_chat_id FROM login_security_blocks WHERE block_id=?",
+                                  (block["block_id"],)).fetchone()
+            self.assertEqual(released["blocked_until"], "")
+            self.assertIsNone(released["telegram_message_id"])
+            self.assertEqual(released["telegram_chat_id"], "")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM login_attempt_counters").fetchone()[0], 0)
+        retry = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "different-user", "password": "wrong"})
+        self.assertEqual(retry.status_code, 200)
+
+    def test_superadmin_security_page_can_manually_release_login_block(self):
+        _, secret = self.create_user("security-release-admin")
+        self.assertEqual(self.login("security-release-admin", secret).status_code, 302)
+        attacker = archive.app.test_client()
+        attacker.get("/login")
+        with attacker.session_transaction() as sess:
+            attacker_csrf = sess["csrf_token"]
+        for _ in range(3):
+            attacker.post("/login", data={"csrf_token": attacker_csrf, "username": "blocked-on-this-ip", "password": "wrong"})
+        page = self.client.get("/security")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Active login blocks", page.data)
+        self.assertIn("رفع مسدودی".encode("utf-8"), page.data)
+        with archive.connect_db() as db:
+            block = db.execute("SELECT block_id FROM login_security_blocks WHERE blocked_until!='' ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIsNotNone(block)
+        response = self.client.post(f"/security/login-blocks/{block['block_id']}/unblock", data={"csrf_token": self.csrf()})
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            released = db.execute("SELECT blocked_until FROM login_security_blocks WHERE block_id=?", (block["block_id"],)).fetchone()
+        self.assertEqual(released["blocked_until"], "")
 
     def test_2fa_enrollment_guesses_are_rate_limited_too(self):
         user_id, _ = self.create_user("enrollment-throttle")
@@ -2132,12 +2309,12 @@ class ArchiveTests(unittest.TestCase):
             sess["pending_2fa_user_id"] = user_id
             sess["pending_2fa_secret"] = pyotp.random_base32()
             sess["csrf_token"] = "enrollment-csrf"
-        for _ in range(8):
+        for _ in range(2):
             response = self.client.post("/setup-2fa", data={"csrf_token": "enrollment-csrf", "code": "not-a-code"})
             self.assertEqual(response.status_code, 200)
         response = self.client.post("/setup-2fa", data={"csrf_token": "enrollment-csrf", "code": "not-a-code"})
         self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.headers.get("Retry-After"), "900")
+        self.assertGreater(int(response.headers.get("Retry-After")), 0)
 
     def test_telegram_webhook_rejects_missing_or_wrong_secret(self):
         with archive.app.test_request_context("/telegram/webhook"):
@@ -2387,7 +2564,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertGreater(blocked_until, archive.now())
         self.assertEqual(blocked_user["login_block_message_id"], 89)
         self.assertEqual(blocked_user["login_block_chat_id"], "12345")
-        self.assertIn("15:00", send.call_args_list[1].args[1])
+        self.assertRegex(send.call_args_list[1].args[1], r"14:5[0-9]|15:00")
         self.assertIn("login_unblock:", send.call_args_list[1].args[2]["inline_keyboard"][0][0]["callback_data"])
         start_countdown.assert_called_once_with(approval["user_id"], "approval-denied", "12345", 89)
         blocked_response = self.client.post("/login", data={

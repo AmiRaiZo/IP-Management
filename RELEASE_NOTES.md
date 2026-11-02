@@ -335,3 +335,14 @@
 - Encrypt Wi-Fi administrator passwords at rest, reveal/copy them only on demand, and preserve saved credentials when the edit password field is left blank.
 - Migrate existing Notes databases in place and add regression coverage for optional fields, encrypted storage, display, and password preservation.
 
+## Version 5.0 release notes
+
+- Make both **Edit** and **Delete** actions in every Notes card equal-width, full-width grid buttons, with the same established button treatments on desktop and mobile.
+- Harden failed-login lock creation against concurrent requests by serializing counter updates in SQLite and reusing an already-active lock group instead of creating duplicate groups.
+- Enforce active lock scopes independently: a matching account, source IP, or random browser token is sufficient to reject another login attempt, including attempts made with a new username or a fresh browser cookie.
+- Canonicalize IPv4-mapped IPv6 client addresses so the same source address cannot evade an IP lock through an alternate textual representation.
+- Keep the existing policy of three failed password/2FA attempts within 15 minutes followed by a 15-minute lock; preserve administrator unlock through the security page and authorized Telegram callback.
+- Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
+- A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
+- Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
+

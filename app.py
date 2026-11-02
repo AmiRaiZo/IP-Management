@@ -234,7 +234,19 @@ def init_db():
           telegram_chat_id TEXT NOT NULL DEFAULT '', telegram_message_id INTEGER,
           login_method TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS login_attempt_counters (
+          scope TEXT NOT NULL, key_hash TEXT NOT NULL, failed_attempts INTEGER NOT NULL DEFAULT 0,
+          window_started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          PRIMARY KEY(scope,key_hash)
+        );
+        CREATE TABLE IF NOT EXISTS login_security_blocks (
+          block_id TEXT PRIMARY KEY, username_hash TEXT NOT NULL DEFAULT '', ip_hash TEXT NOT NULL DEFAULT '',
+          device_hash TEXT NOT NULL DEFAULT '', agent_hash TEXT NOT NULL DEFAULT '',
+          username TEXT NOT NULL DEFAULT '', blocked_until TEXT NOT NULL,
+          telegram_message_id INTEGER, telegram_chat_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_login_approval_user_status ON login_approval_requests(user_id,status,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_login_security_blocks_expiry ON login_security_blocks(blocked_until);
         CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(remote_ip, created_at DESC);
         CREATE TABLE IF NOT EXISTS ip_access_rules (
@@ -327,7 +339,12 @@ init_db()
 
 def client_ip():
     # The app is deployed behind Nginx on loopback; ProxyFix trusts one proxy hop.
-    return (request.remote_addr or "unknown")[:64]
+    raw_ip = (request.remote_addr or "unknown").strip()
+    try:
+        address = ip_address(raw_ip)
+        return str(getattr(address, "ipv4_mapped", None) or address)
+    except ValueError:
+        return raw_ip[:64]
 
 
 def security_event(event_type, username="", result="info", detail=""):
@@ -716,6 +733,26 @@ def _login_block_countdown_worker():
                     }]]},
                     "disable_web_page_preview": True,
                 })
+            with connect_db() as db:
+                security_blocks = db.execute(
+                    "SELECT block_id,username,blocked_until,telegram_message_id,telegram_chat_id "
+                    "FROM login_security_blocks WHERE telegram_message_id IS NOT NULL AND telegram_chat_id!=''"
+                ).fetchall()
+            for block in security_blocks:
+                if login_block_remaining(block["blocked_until"]) > 0:
+                    continue
+                with connect_db() as db:
+                    expired = db.execute(
+                        "UPDATE login_security_blocks SET blocked_until='',telegram_message_id=NULL,telegram_chat_id='' "
+                        "WHERE block_id=? AND telegram_message_id=? AND telegram_chat_id=? AND blocked_until=?",
+                        (block["block_id"], block["telegram_message_id"], block["telegram_chat_id"], block["blocked_until"]),
+                    )
+                if expired.rowcount == 1:
+                    telegram_edit_persistent_message(
+                        block["telegram_chat_id"], block["telegram_message_id"],
+                        f"✅ مدت مسدودی {block['username'] or 'این مرورگر'} به پایان رسید.\nامکان ورود مجدد فعال است.",
+                        reply_markup={"inline_keyboard": []},
+                    )
         except Exception:
             app.logger.exception("Telegram login-block countdown worker failed")
         _LOGIN_BLOCK_WORKER_WAKE.wait(2)
@@ -1095,16 +1132,31 @@ def handle_telegram_update(update):
     if chat_id != str(configured_chat):
         return
     if callback:
-        telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
         action = callback.get("data", "")
         if action.startswith("login_approval:"):
+            telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
             handle_login_approval_callback(callback, configured_chat)
+        elif action.startswith("login_unblock_group:"):
+            released = handle_login_security_unblock_callback(callback, configured_chat)
+            telegram_api("answerCallbackQuery", {
+                "callback_query_id": callback.get("id", ""),
+                "text": "مسدودی حساب، IP و مرورگر برداشته شد." if released else "این دکمه نامعتبر است یا مسدودی قبلاً پایان یافته است.",
+                "show_alert": not released,
+            })
         elif action.startswith("login_unblock:"):
-            handle_login_unblock_callback(callback, configured_chat)
+            released = handle_login_unblock_callback(callback, configured_chat)
+            telegram_api("answerCallbackQuery", {
+                "callback_query_id": callback.get("id", ""),
+                "text": "مسدودی حساب برداشته شد." if released else "این دکمه نامعتبر است یا مسدودی قبلاً پایان یافته است.",
+                "show_alert": not released,
+            })
         elif action == "ack_telegram_login":
+            telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
             # Legacy audit callbacks are intentionally inert; audit messages never open the bot menu.
             return
-        elif action == "menu":
+        else:
+            telegram_api("answerCallbackQuery", {"callback_query_id": callback.get("id", "")})
+        if action == "menu":
             telegram_set_state({})
             telegram_menu(chat_id, message.get("message_id"))
         elif action == "ip_groups":
@@ -1871,6 +1923,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
                            "Administrator approved password; authenticator enrollment is required")
             return redirect(url_for("setup_2fa"))
         if bypass_two_factor:
+            clear_login_attempt_counters(user["username"])
             establish_login(user)
             session["two_factor_verified"] = True
             finalize_login_audit(
@@ -1881,6 +1934,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
             flash(f"Welcome back, {user['username']}!", "welcome")
             return redirect(safe_login_target())
         if remembered_two_factor(user["id"]):
+            clear_login_attempt_counters(user["username"])
             establish_login(user)
             session["two_factor_verified"] = True
             finalize_login_audit(
@@ -1905,6 +1959,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
             "id": user["id"], "username": user["username"], "role": user["role"],
             "profile_image": user["profile_image"],
         })
+    clear_login_attempt_counters(user["username"])
     establish_login(user)
     finalize_login_audit(
         approval_request_id, user["username"], client_ip(), "Administrator approval",
@@ -2130,6 +2185,18 @@ def enforce_global_two_factor():
 
 
 @app.before_request
+def identify_login_device():
+    """Assign a random, persistent browser identifier; browsers cannot expose hardware IDs."""
+    if request.path != "/login":
+        return
+    token = str(request.cookies.get("ipm_device_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", token):
+        token = secrets.token_urlsafe(32)
+        request.environ["ipm.new_device_id"] = token
+    request.environ["ipm.login_device_id"] = token
+
+
+@app.before_request
 def csrf_guard():
     if request.endpoint == "telegram_webhook":
         return
@@ -2175,25 +2242,214 @@ def security_headers(response):
     response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    new_device_id = request.environ.get("ipm.new_device_id")
+    if new_device_id:
+        response.set_cookie(
+            "ipm_device_id", new_device_id, max_age=365 * 24 * 60 * 60,
+            httponly=True, secure=app.config.get("SESSION_COOKIE_SECURE", True), samesite="Lax", path="/",
+        )
     return response
 
 
-def auth_throttle_response(attempted_username=""):
-    """Apply one shared IP-based throttle to password, TOTP, and enrollment checks."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(timespec="seconds")
-    with connect_db() as db:
-        failures = db.execute(
-            "SELECT COUNT(*) AS n FROM security_events WHERE remote_ip=? AND result='failed' "
-            "AND event_type IN ('login','two_factor_login','two_factor_enrollment') AND created_at>=?",
-            (client_ip(), cutoff),
-        ).fetchone()["n"]
-    if failures < 8:
+LOGIN_FAILURE_LIMIT = 3
+LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
+LOGIN_SECURITY_BLOCK_DURATION = timedelta(minutes=15)
+
+
+def login_device_id():
+    token = str(request.environ.get("ipm.login_device_id") or request.cookies.get("ipm_device_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", token):
+        token = secrets.token_urlsafe(32)
+        request.environ["ipm.login_device_id"] = token
+        request.environ["ipm.new_device_id"] = token
+    return token
+
+
+def login_security_keys(username=""):
+    """Return keyed hashes only; raw device IDs and usernames are never stored in lock tables."""
+    values = {
+        "ip": client_ip(),
+        "device": login_device_id(),
+    }
+    if username:
+        values["username"] = str(username).strip().casefold()[:80]
+    return {
+        scope: hmac.new(app.secret_key.encode(), f"login-lock:{scope}:{value}".encode("utf-8"), hashlib.sha256).hexdigest()
+        for scope, value in values.items() if value
+    }
+
+
+def active_login_security_block(username=""):
+    keys = login_security_keys(username)
+    clauses, params = [], [now()]
+    for scope, key_hash in keys.items():
+        column = {"ip": "ip_hash", "device": "device_hash", "username": "username_hash"}[scope]
+        clauses.append(f"{column}=?")
+        params.append(key_hash)
+    if not clauses:
         return None
-    security_event("login_rate_limit", str(attempted_username or "")[:80], "throttled",
-                   "Eight failed authentication checks from this IP in the last 15 minutes")
-    response = app.make_response(("Too many failed authentication attempts. Wait 15 minutes and try again.", 429))
-    response.headers["Retry-After"] = "900"
+    with connect_db() as db:
+        row = db.execute(
+            "SELECT block_id,username,blocked_until FROM login_security_blocks "
+            "WHERE blocked_until>? AND (" + " OR ".join(clauses) + ") ORDER BY blocked_until DESC LIMIT 1",
+            params,
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def clear_login_attempt_counters(username=""):
+    keys = login_security_keys(username)
+    with connect_db() as db:
+        for scope, key_hash in keys.items():
+            db.execute("DELETE FROM login_attempt_counters WHERE scope=? AND key_hash=?", (scope, key_hash))
+
+
+def send_login_security_block_alert(block_id, username, blocked_until):
+    chat_id = secure_setting("telegram_chat_id_enc")
+    if not chat_id:
+        return False
+    seconds = login_block_remaining(blocked_until)
+    markup = {"inline_keyboard": [[{
+        "text": "🔓 رفع مسدودی", "callback_data": f"login_unblock_group:{block_id}",
+    }]]}
+    label = username or "نام کاربری نامعتبر"
+    sent = telegram_send(
+        chat_id,
+        f"🔒 مسدودسازی امنیتی ورود\n\n👤 حساب/نام واردشده: {label}\n"
+        f"🌐 IP و شناسه مرورگر نیز مسدود شدند.\n⏳ مدت مسدودی: {max(1, (seconds + 59) // 60)} دقیقه\n"
+        "پس از سه تلاش ناموفق رمز یا کد دومرحله‌ای، همه شناسه‌های مرتبط تا ۱۵ دقیقه قفل می‌شوند.",
+        markup, delete_after=0,
+    )
+    message_id = (sent.get("result") or {}).get("message_id") if isinstance(sent, dict) else None
+    if not message_id:
+        return False
+    with connect_db() as db:
+        db.execute("UPDATE login_security_blocks SET telegram_message_id=?,telegram_chat_id=? WHERE block_id=?",
+                   (int(message_id), str(chat_id), str(block_id)))
+    return True
+
+
+def register_login_failure(username="", detail="Invalid credentials"):
+    """Atomically count failures and lock the account, source IP and browser token."""
+    keys = login_security_keys(username)
+    timestamp = datetime.now(timezone.utc)
+    timestamp_text = timestamp.isoformat(timespec="seconds")
+    cutoff = (timestamp - LOGIN_FAILURE_WINDOW).isoformat(timespec="seconds")
+    counts = {}
+    with connect_db() as db:
+        # Serialize concurrent failures so parallel requests cannot race past the threshold
+        # or create several independent lock groups for the same identifiers.
+        db.execute("BEGIN IMMEDIATE")
+        block_columns = {"ip": "ip_hash", "device": "device_hash", "username": "username_hash"}
+        block_clauses = []
+        block_params = [timestamp_text]
+        for scope, key_hash in keys.items():
+            column = block_columns[scope]
+            block_clauses.append(f"{column}=?")
+            block_params.append(key_hash)
+        active = db.execute(
+            "SELECT block_id,blocked_until FROM login_security_blocks WHERE blocked_until>? AND ("
+            + " OR ".join(block_clauses) + ") ORDER BY blocked_until DESC LIMIT 1",
+            block_params,
+        ).fetchone()
+        if active:
+            return dict(active)
+        for scope, key_hash in keys.items():
+            row = db.execute("SELECT failed_attempts,window_started_at FROM login_attempt_counters WHERE scope=? AND key_hash=?",
+                             (scope, key_hash)).fetchone()
+            if not row or str(row["window_started_at"] or "") < cutoff:
+                count = 1
+                db.execute(
+                    "INSERT INTO login_attempt_counters(scope,key_hash,failed_attempts,window_started_at,updated_at) "
+                    "VALUES(?,?,1,?,?) ON CONFLICT(scope,key_hash) DO UPDATE SET failed_attempts=1,window_started_at=excluded.window_started_at,updated_at=excluded.updated_at",
+                    (scope, key_hash, timestamp_text, timestamp_text),
+                )
+            else:
+                count = int(row["failed_attempts"] or 0) + 1
+                db.execute("UPDATE login_attempt_counters SET failed_attempts=?,updated_at=? WHERE scope=? AND key_hash=?",
+                           (count, timestamp_text, scope, key_hash))
+            counts[scope] = count
+        if max(counts.values() or [0]) < LOGIN_FAILURE_LIMIT:
+            return None
+        blocked_until = (timestamp + LOGIN_SECURITY_BLOCK_DURATION).isoformat(timespec="seconds")
+        block_id = secrets.token_urlsafe(12)
+        db.execute(
+            "INSERT INTO login_security_blocks(block_id,username_hash,ip_hash,device_hash,agent_hash,username,blocked_until,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (block_id, keys.get("username", ""), keys.get("ip", ""), keys.get("device", ""),
+             keys.get("agent", ""), str(username or "")[:80], blocked_until, timestamp_text),
+        )
+    security_event("login_security_block", username, "blocked", f"Three failed authentication attempts; {detail}; account/IP/browser identifiers locked for 15 minutes")
+    send_login_security_block_alert(block_id, username, blocked_until)
+    return {"block_id": block_id, "blocked_until": blocked_until}
+
+
+def login_failure_json(message, stage="password", clear_field="password", block=None):
+    seconds = login_block_remaining(block["blocked_until"]) if block else 0
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        response = jsonify({
+            "ok": False, "message": message, "stage": stage, "clear_field": clear_field,
+            "blocked": bool(block), "retry_after": seconds,
+        })
+    else:
+        flash(message, "error")
+        pending_user = None
+        if stage == "verify" and session.get("pending_2fa_user_id"):
+            with connect_db() as db:
+                row = db.execute("SELECT id,username,role,profile_image FROM users WHERE id=? AND enabled=1",
+                                 (session["pending_2fa_user_id"],)).fetchone()
+            pending_user = dict(row) if row else None
+        response = app.make_response(render_template(
+            "login.html", stage=stage, login_user=pending_user,
+            two_factor_required=(stage == "verify"),
+            approval_pending=bool(session.get("pending_login_approval_id") or session.get("login_approval_id")),
+        ))
+    response.status_code = 429 if block else 401
+    if block:
+        try:
+            retry_after = int((datetime.fromisoformat(str(block["blocked_until"])) - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError):
+            retry_after = seconds
+        response.headers["Retry-After"] = str(max(1, retry_after))
     return response
+
+
+def handle_login_security_unblock_callback(callback, configured_chat_id):
+    match = re.fullmatch(r"login_unblock_group:([A-Za-z0-9_-]{12,24})", str(callback.get("data") or ""))
+    if not match:
+        return False
+    block_id = match.group(1)
+    message = callback.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = str(chat.get("id", ""))
+    sender_id = str((callback.get("from") or {}).get("id", ""))
+    if chat_id != str(configured_chat_id):
+        return False
+    if chat.get("type") == "private":
+        if not sender_id or sender_id != chat_id:
+            return False
+    else:
+        configured_admin = secure_setting("telegram_admin_user_id_enc")
+        if not configured_admin or sender_id != str(configured_admin):
+            return False
+    with connect_db() as db:
+        row = db.execute("SELECT * FROM login_security_blocks WHERE block_id=? AND telegram_chat_id=? AND telegram_message_id=?",
+                         (block_id, chat_id, int(message.get("message_id") or 0))).fetchone()
+        if not row or login_block_remaining(row["blocked_until"]) <= 0:
+            return False
+        updated = db.execute("UPDATE login_security_blocks SET blocked_until='',telegram_message_id=NULL,telegram_chat_id='' "
+                             "WHERE block_id=? AND telegram_chat_id=? AND telegram_message_id=? AND blocked_until=?",
+                             (block_id, chat_id, int(message.get("message_id") or 0), row["blocked_until"]))
+        if updated.rowcount != 1:
+            return False
+        for scope, column in (("username", "username_hash"), ("ip", "ip_hash"), ("device", "device_hash")):
+            if row[column]:
+                db.execute("DELETE FROM login_attempt_counters WHERE scope=? AND key_hash=?", (scope, row[column]))
+        username = str(row["username"] or "")
+    telegram_edit_persistent_message(chat_id, message.get("message_id"),
+        f"✅ مسدودی ورود {username or 'این دستگاه'} به‌صورت کامل برداشته شد.\nحساب، IP و شناسه مرورگر دوباره مجاز هستند.",
+        reply_markup={"inline_keyboard": []})
+    return True
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -2203,10 +2459,17 @@ def login():
     if session.get("user_id"):
         return redirect(url_for("index"))
     if request.method == "POST":
-        limited = auth_throttle_response(request.form.get("username", ""))
-        if limited:
-            return limited
-        attempted_username = str(request.form.get("username", "")).strip()
+        attempted_username = str(request.form.get("username", "")).strip()[:80]
+        if not attempted_username and session.get("pending_2fa_user_id"):
+            with connect_db() as db:
+                pending_name = db.execute("SELECT username FROM users WHERE id=?", (session["pending_2fa_user_id"],)).fetchone()
+            attempted_username = str(pending_name["username"] or "") if pending_name else ""
+        active_block = active_login_security_block(attempted_username)
+        if active_block:
+            security_event("login_security_block", attempted_username, "throttled", "Active 15-minute account/IP/browser lock")
+            return login_failure_json("This account or browser/device is temporarily blocked. Please wait for the 15-minute lock to expire or ask an administrator to release it.",
+                                      "verify" if session.get("pending_2fa_user_id") else "password",
+                                      "code" if session.get("pending_2fa_user_id") else "password", active_block)
         if attempted_username:
             with connect_db() as db:
                 blocked_user = db.execute(
@@ -2217,9 +2480,8 @@ def login():
             if blocked_until and blocked_until > now():
                 security_event("login_rejection_lock", attempted_username[:80], "throttled",
                                "Login approval was rejected; account is blocked for 15 minutes")
-                response = app.make_response(("This account is temporarily blocked after a rejected login request. Wait 15 minutes and try again.", 429))
-                response.headers["Retry-After"] = str(max(1, int((datetime.fromisoformat(blocked_until) - datetime.now(timezone.utc)).total_seconds())))
-                return response
+                return login_failure_json("This account is temporarily blocked after a rejected login request. Wait 15 minutes and try again.",
+                                          "password", "password", {"blocked_until": blocked_until})
             if blocked_until:
                 with connect_db() as db:
                     db.execute("UPDATE users SET login_blocked_until='' WHERE username=? COLLATE NOCASE "
@@ -2295,6 +2557,7 @@ def login():
                     telegram_code_message = consume_telegram_login_code(user["id"], code)
             telegram_code_ok = telegram_code_message is not None
             if user and user_requires_two_factor(user) and (totp_ok or recovery_ok or telegram_code_ok):
+                clear_login_attempt_counters(user["username"])
                 if approval_id:
                     approval = login_approval_row_for_session()
                     if not approval or approval["status"] not in ("approved",):
@@ -2353,6 +2616,14 @@ def login():
                 f"⏰ Time (Iran): {jalali_datetime(now())}\n"
                 "The raw 2FA code was not stored or sent."
             )
+            failure_block = register_login_failure(attempted_username, "invalid second-factor code")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return login_failure_json("The verification code is invalid. Try again." if not failure_block else
+                                          "Three failed attempts. This account, IP and browser/device are blocked for 15 minutes.",
+                                          "verify", "code", failure_block)
+            if failure_block:
+                return login_failure_json("Three failed attempts. This account, IP and browser/device are blocked for 15 minutes.",
+                                          "verify", "code", failure_block)
             flash("The verification code is invalid. Try again.", "error")
             return render_template("login.html", stage="verify", login_user=dict(user) if user else None,
                                    two_factor_required=True,
@@ -2385,6 +2656,7 @@ def login():
                     "profile_image": user["profile_image"],
                 }, two_factor_required=user_requires_two_factor(user), approval_pending=True)
             if user_requires_two_factor(user) and remembered_two_factor(user["id"]):
+                clear_login_attempt_counters(username)
                 establish_login(user)
                 session["two_factor_verified"] = True
                 send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
@@ -2409,6 +2681,7 @@ def login():
                 session["csrf_token"] = secrets.token_urlsafe(32)
                 security_event("login", username, "password_ok_2fa_pending", "Password accepted; waiting for second factor")
                 return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
+            clear_login_attempt_counters(username)
             establish_login(user)
             send_login_success_alert(user["username"], client_ip(), user_agent=request.headers.get("User-Agent", ""))
             flash(f"Welcome back, {user['username']}!", "welcome")
@@ -2417,7 +2690,14 @@ def login():
         guess_id = failed_password_fingerprint(password)
         security_event("login", username, "failed", f"Invalid username/password or disabled account; password not stored; guess fingerprint={guess_id}")
         send_login_failure_alert(username, client_ip(), "Invalid username or password", password)
-        flash("Invalid username or password.", "error")
+        failure_block = register_login_failure(username, "invalid username or password")
+        failure_message = ("Invalid username or password." if not failure_block else
+                           "Three failed attempts. This account, IP and browser/device are blocked for 15 minutes.")
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return login_failure_json(failure_message, "password", "password", failure_block)
+        if failure_block:
+            return login_failure_json(failure_message, "password", "password", failure_block)
+        flash(failure_message, "error")
     pending_user = None
     if session.get("pending_2fa_user_id"):
         with connect_db() as db:
@@ -2465,11 +2745,14 @@ def setup_2fa():
         return redirect(url_for("login"))
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["username"], issuer_name="IP Management")
     if request.method == "POST":
-        limited = auth_throttle_response(user["username"])
-        if limited:
-            return limited
+        active_block = active_login_security_block(user["username"])
+        if active_block:
+            response = app.make_response(("This account or browser/device is temporarily blocked. Wait for the 15-minute lock to expire or ask an administrator to release it.", 429))
+            response.headers["Retry-After"] = str(max(1, login_block_remaining(active_block["blocked_until"])))
+            return response
         code = re.sub(r"\s", "", request.form.get("code", ""))
         if pyotp.TOTP(secret).verify(code, valid_window=1):
+            clear_login_attempt_counters(user["username"])
             with connect_db() as db:
                 db.execute("UPDATE users SET totp_secret=?,two_factor_enrolled=1 WHERE id=?", (encrypt_authenticator_secret(secret), user_id))
             approval_id = session.get("login_approval_id")
@@ -2496,6 +2779,11 @@ def setup_2fa():
             return response
         time.sleep(0.35)
         security_event("two_factor_enrollment", user["username"], "failed", "Invalid authenticator enrollment code")
+        failure_block = register_login_failure(user["username"], "invalid authenticator enrollment code")
+        if failure_block:
+            response = app.make_response(("Three failed authenticator codes. This account, IP and browser/device are blocked for 15 minutes.", 429))
+            response.headers["Retry-After"] = str(login_block_remaining(failure_block["blocked_until"]))
+            return response
         flash("The authenticator code is invalid. Try again.", "error")
     import qrcode
     qr = qrcode.make(uri)
@@ -3839,9 +4127,34 @@ def security_center():
         events = db.execute("SELECT * FROM security_events ORDER BY id DESC LIMIT 250").fetchall()
         rules = db.execute("SELECT * FROM ip_access_rules ORDER BY rule_type,network").fetchall()
         setting = db.execute("SELECT value FROM app_settings WHERE key='ip_allowlist_enabled'").fetchone()
+        login_blocks = db.execute("SELECT block_id,username,blocked_until,created_at FROM login_security_blocks WHERE blocked_until>? ORDER BY created_at DESC",
+                                  (now(),)).fetchall()
     return render_template("security.html", events=[{**dict(row), "jalali_time": jalali_datetime(row["created_at"])} for row in events],
                            rules=[dict(row) for row in rules], allowlist_enabled=bool(setting and setting["value"] == "1"),
-                           current_ip=client_ip())
+                           current_ip=client_ip(), login_blocks=[{**dict(row), "remaining_seconds": login_block_remaining(row["blocked_until"])} for row in login_blocks])
+
+
+@app.post("/security/login-blocks/<block_id>/unblock")
+@superadmin_required
+def unblock_login_security_block(block_id):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{12,24}", str(block_id or "")):
+        abort(404)
+    with connect_db() as db:
+        row = db.execute("SELECT * FROM login_security_blocks WHERE block_id=?", (block_id,)).fetchone()
+        if not row:
+            abort(404)
+        db.execute("UPDATE login_security_blocks SET blocked_until='',telegram_message_id=NULL,telegram_chat_id='' WHERE block_id=?",
+                   (block_id,))
+        for scope, column in (("username", "username_hash"), ("ip", "ip_hash"), ("device", "device_hash")):
+            if row[column]:
+                db.execute("DELETE FROM login_attempt_counters WHERE scope=? AND key_hash=?", (scope, row[column]))
+    if row["telegram_message_id"] and row["telegram_chat_id"]:
+        telegram_edit_persistent_message(row["telegram_chat_id"], row["telegram_message_id"],
+            f"✅ مسدودی ورود {row['username'] or 'این مرورگر'} توسط مدیر سیستم برداشته شد.\nحساب، IP و شناسه مرورگر دوباره مجاز هستند.",
+            reply_markup={"inline_keyboard": []})
+    audit("login_security_block_released", f"block_id={block_id}; username={row['username']}")
+    flash("Login block, IP and browser/device restrictions were released.", "success")
+    return redirect(url_for("security_center"))
 
 
 @app.post("/security/rules")
