@@ -2928,6 +2928,27 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(git_run.call_args.args[0][1], "ls-remote")
         self.assertEqual(git_run.call_args.kwargs["timeout"], 12)
 
+    def test_latest_release_accepts_two_component_semver_tag_v5_0(self):
+        import json
+
+        commit_sha = "b" * 40
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps({
+            "tag_name": "v5.0", "target_commitish": commit_sha,
+        }).encode("utf-8")
+        with patch.object(archive, "urlopen", return_value=response):
+            release = archive.latest_release()
+
+        self.assertEqual(release, {"version": "5.0", "sha": commit_sha, "tag": "v5.0"})
+
+    def test_installed_version_accepts_two_component_semver(self):
+        with tempfile.TemporaryDirectory() as directory:
+            version_file = Path(directory) / "version"
+            version_file.write_text("5.0\n", encoding="utf-8")
+            with patch.object(archive, "VERSION_FILE", version_file):
+                self.assertEqual(archive.installed_version(), "5.0")
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.1 — 2026-11-02
+- Fix the in-app updater rejecting the two-component `v5.0` release tag; accept both `X.Y` and `X.Y.Z` semantic versions.
+- Keep installed-version detection, GitHub API checks, rate-limit fallback, and the privileged updater consistent with the supported version formats.
+- Add regression tests for the `v5.0` latest-release tag and two-component installed version detection.
+
 ## 5.0 — 2026-11-02
 - Equalize the full-width Edit and Delete actions on Notes cards for desktop and mobile.
 - Make failed-login counters and lock creation atomic under concurrent requests, and prevent duplicate active lock groups.

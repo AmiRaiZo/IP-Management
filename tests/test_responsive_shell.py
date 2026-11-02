@@ -223,9 +223,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0")
-        self.assertIn("style.css') }}?v=5.0.0", self.base)
-        self.assertIn("app.js') }}?v=5.0.0", self.base)
+        self.assertEqual(self.version, "5.0.1")
+        self.assertIn("style.css') }}?v=5.0.0-notes-login-lock", self.base)
+        self.assertIn("app.js') }}?v=5.0.0-notes-login-lock", self.base)
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)

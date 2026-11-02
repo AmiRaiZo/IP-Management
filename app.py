@@ -4649,7 +4649,7 @@ def installed_version(release=None):
     # Runtime version is written only after an update has completed successfully.
     try:
         value = VERSION_FILE.read_text(encoding="utf-8").strip().lstrip("v")
-        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
+        if re.fullmatch(r"\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
         # Older updater versions stored the commit SHA instead of a version.
         if release and re.fullmatch(r"[0-9a-f]{40}", value) and value == release["sha"]:
@@ -4658,7 +4658,7 @@ def installed_version(release=None):
         pass
     try:
         value = (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip().lstrip("v")
-        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", value):
+        if re.fullmatch(r"\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?", value):
             return value
     except OSError:
         pass
@@ -4697,7 +4697,7 @@ def latest_release():
         if not release_match:
             raise ValueError("GitHub API rate limit was reached and the latest release page did not identify a release tag.") from exc
         fallback_tag = release_match.group(1)
-        if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", fallback_tag):
+        if not re.fullmatch(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?", fallback_tag):
             raise ValueError("GitHub API rate limit was reached and the latest release tag is invalid.") from exc
         version = fallback_tag.lstrip("v")
         refs = subprocess.run(
@@ -4718,7 +4718,7 @@ def latest_release():
         return {"version": version, "sha": sha, "tag": fallback_tag}
     tag = str(payload.get("tag_name", "")).strip()
     version = tag.lstrip("v")
-    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+    if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?", version):
         raise ValueError("Latest GitHub release has no valid semantic version tag.")
     sha = str(payload.get("target_commitish", "")).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):

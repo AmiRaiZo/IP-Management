@@ -211,7 +211,7 @@ fi
 	# Never overwrite the executable currently being interpreted by this shell.
 	echo "PROGRESS:97:Recording the installed version"
 	TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
-[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
+[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
 printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
 printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
 chown www-data:www-data "$VERSION_FILE"

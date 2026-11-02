@@ -134,7 +134,7 @@ try:
         release = json.loads(response.read(256_000).decode("utf-8"))
     if release.get("target_commitish") == source_sha:
         candidate = str(release.get("tag_name", "")).strip().lstrip("v")
-        if re.fullmatch(r"\d+\.\d+\.\d+", candidate):
+        if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", candidate):
             version = candidate
 except Exception:
     pass

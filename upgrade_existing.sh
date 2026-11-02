@@ -368,7 +368,7 @@ if ! [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
 fi
 	echo "PROGRESS:97:Recording the installed version"
 	TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
-[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
+[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
 printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
 printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
 chown www-data:www-data "$VERSION_FILE"
@@ -482,7 +482,7 @@ try:
         release = json.loads(response.read(256_000).decode("utf-8"))
     if release.get("target_commitish") == source_sha:
         candidate = str(release.get("tag_name", "")).strip().lstrip("v")
-        if re.fullmatch(r"\d+\.\d+\.\d+", candidate):
+    if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", candidate):
             version = candidate
 except Exception:
     pass

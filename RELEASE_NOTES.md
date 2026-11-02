@@ -1,3 +1,9 @@
+## Version 5.0.1 release notes
+
+- Fix the in-app update checker rejecting the valid `v5.0` release tag because it only accepted three-component versions.
+- Accept both `X.Y` and `X.Y.Z` version tags consistently in release lookup, installed-version detection, and the privileged update runner.
+- Add regression tests for the two-component `v5.0` release and installed version parsing.
+
 ## Version 4.5.0 release notes
 
 - Block an account for 15 minutes after an administrator rejects its Telegram login approval request.
