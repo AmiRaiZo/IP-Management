@@ -6,7 +6,7 @@
   <title>{% block title %}IP Archive{% endblock %}</title>
   <!-- v5.0 login security and Notes card actions -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.0-notes-login-lock">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.2-card-scroll">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -44,5 +44,5 @@
     </main>
   </div>
 </div>
-  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.0-notes-login-lock" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.2-card-scroll" defer></script>
 </body></html>

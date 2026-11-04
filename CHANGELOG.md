@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.2 — 2026-11-04
+- Allow page scrolling to continue when the IP, account, or Notes card content area has nothing more to scroll or reaches its scroll boundary.
+- Keep the card content internally scrollable while restoring normal browser scroll chaining to the main page.
+- Add responsive regression coverage and refresh static asset cache keys.
+
 ## 5.0.1 — 2026-11-02
 - Fix the in-app updater rejecting the two-component `v5.0` release tag; accept both `X.Y` and `X.Y.Z` semantic versions.
 - Keep installed-version detection, GitHub API checks, rate-limit fallback, and the privileged updater consistent with the supported version formats.

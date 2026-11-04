@@ -687,7 +687,7 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 /* Keep IP and account card footers aligned regardless of optional field count. */
 .mobile-ip-card,.mobile-account-card{display:flex!important;flex-direction:column!important;height:500px;min-height:500px;max-height:500px}
 .account-inventory-panel .mobile-account-card.mobile-ip-card{display:flex!important;flex-direction:column!important}
-.mobile-ip-fields,.mobile-account-fields{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.mobile-ip-fields,.mobile-account-fields{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:auto}
 .mobile-ip-actions,.mobile-account-actions{flex:0 0 auto;margin-top:auto!important;min-height:62px;align-items:center}
 .mobile-ip-card>.mobile-ip-actions,.account-inventory-panel .mobile-account-card>.mobile-account-actions.mobile-ip-actions{margin-top:auto!important}
 .mobile-ip-actions form,.mobile-account-actions form{align-self:stretch}
@@ -743,7 +743,7 @@ html[data-theme="dark"] .mobile-account-heading.mobile-ip-record-heading{backgro
 .note-card-title strong{font-size:12px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 .note-card-title small{font-size:9px;color:var(--muted)}
 .note-group-tag{flex:0 0 auto;max-width:36%;font-size:9px;padding:4px 7px;text-align:center}
-.note-card-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(48px,auto);align-content:start;gap:0 13px;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 14px 10px;scrollbar-width:thin}
+.note-card-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(48px,auto);align-content:start;gap:0 13px;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:auto;padding:8px 14px 10px;scrollbar-width:thin}
 .note-field{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:4px;min-width:0;min-height:48px;padding:7px 0;border-bottom:1px solid var(--border)}
 .note-field-label{min-width:0;color:var(--muted);font-size:9px;font-weight:750;line-height:1.3;letter-spacing:.15px}
 .note-field-value{min-width:0;max-width:100%;overflow:visible;color:var(--text);font-size:10px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word;white-space:normal}

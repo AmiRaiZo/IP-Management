@@ -2629,7 +2629,7 @@ class ArchiveTests(unittest.TestCase):
         stylesheet = (archive.BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
         compact = "".join(stylesheet.split())
         self.assertIn(".mobile-ip-card,.mobile-account-card{display:flex!important;flex-direction:column!important;height:500px;min-height:500px;max-height:500px}", compact)
-        self.assertIn(".mobile-ip-fields,.mobile-account-fields{flex:11auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}", compact)
+        self.assertIn(".mobile-ip-fields,.mobile-account-fields{flex:11auto;min-height:0;overflow-y:auto;overscroll-behavior:auto}", compact)
         self.assertIn(".mobile-ip-actions,.mobile-account-actions{flex:00auto;margin-top:auto!important;min-height:62px;align-items:center}", compact)
         self.assertIn(".account-inventory-panel.mobile-account-card.mobile-ip-card{display:flex!important;flex-direction:column!important}", compact)
 

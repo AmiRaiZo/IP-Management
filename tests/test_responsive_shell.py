@@ -75,6 +75,17 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".mobile-ip-actions{display:flex!important", self.css)
 
 
+    def test_card_scroll_chains_to_page_when_content_is_empty_or_at_a_boundary(self):
+        self.assertIn(
+            ".mobile-ip-fields,.mobile-account-fields{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:auto}",
+            self.css,
+        )
+        self.assertIn(".note-card-fields{", self.css)
+        note_fields = self.css.split(".note-card-fields{", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-y:auto", note_fields)
+        self.assertIn("overscroll-behavior:auto", note_fields)
+
+
     def test_table_headers_are_simple_and_field_icons_are_aligned_with_values(self):
         self.assertNotIn('class="column-icon', self.index)
         self.assertNotIn('class="column-icon', self.accounts)
@@ -223,9 +234,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0.1")
-        self.assertIn("style.css') }}?v=5.0.0-notes-login-lock", self.base)
-        self.assertIn("app.js') }}?v=5.0.0-notes-login-lock", self.base)
+        self.assertEqual(self.version, "5.0.2")
+        self.assertIn("style.css') }}?v=5.0.2-card-scroll", self.base)
+        self.assertIn("app.js') }}?v=5.0.2-card-scroll", self.base)
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)

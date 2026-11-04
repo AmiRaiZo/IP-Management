@@ -1,3 +1,9 @@
+## Version 5.0.2 release notes
+
+- Fix scroll trapping inside IP and Account cards: when their content area has no overflow or reaches its top or bottom boundary, wheel and touch scrolling can continue on the main page.
+- Apply the same scroll-chaining behavior to the Notes card content area while retaining its internal scrollbar.
+- Add regression coverage for card-to-page scroll chaining and refresh static asset cache keys.
+
 ## Version 5.0.1 release notes
 
 - Fix the in-app update checker rejecting the valid `v5.0` release tag because it only accepted three-component versions.
