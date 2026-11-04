@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.3 — 2026-11-04
+- Show a compact, theme-aware Copied notification with a small green checkmark after successful clipboard actions.
+- Cover IP, account, password, Notes, setup URI, and update-log copy flows; failed copy attempts do not show success feedback.
+- Add accessible live-region markup and regression coverage, stabilize the time-sensitive Retry-After test, and refresh static asset cache keys.
+
 ## 5.0.2 — 2026-11-04
 - Allow page scrolling to continue when the IP, account, or Notes card content area has nothing more to scroll or reaches its scroll boundary.
 - Keep the card content internally scrollable while restoring normal browser scroll chaining to the main page.

@@ -2571,7 +2571,9 @@ class ArchiveTests(unittest.TestCase):
             "csrf_token": self.csrf(), "username": "approval-denied", "password": "test-pass",
         })
         self.assertEqual(blocked_response.status_code, 429)
-        self.assertEqual(blocked_response.headers.get("Retry-After"), "899")
+        retry_after = int(blocked_response.headers.get("Retry-After"))
+        self.assertGreaterEqual(retry_after, 898)
+        self.assertLessEqual(retry_after, 900)
         with patch.object(archive, "telegram_api", return_value={"ok": True}) as telegram_api_mock:
             archive.handle_telegram_update({"callback_query": {
                 "id": "manual-unblock", "data": f"login_unblock:{approval['user_id']}",

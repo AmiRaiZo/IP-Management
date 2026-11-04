@@ -234,9 +234,24 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0.2")
-        self.assertIn("style.css') }}?v=5.0.2-card-scroll", self.base)
-        self.assertIn("app.js') }}?v=5.0.2-card-scroll", self.base)
+        self.assertEqual(self.version, "5.0.3")
+        self.assertIn("style.css') }}?v=5.0.3-copy-toast", self.base)
+        self.assertIn("app.js') }}?v=5.0.3-copy-toast", self.base)
+
+    def test_successful_copy_shows_small_theme_aware_confirmation(self):
+        self.assertIn('<div id="copy-toast" class="copy-toast" role="status"', self.base)
+        self.assertIn('aria-live="polite"', self.base)
+        self.assertIn("<span>Copied</span>", self.base)
+        self.assertIn(".copy-toast{position:fixed;top:16px;left:50%", self.css)
+        self.assertIn("background:var(--surface);color:var(--text)", self.css)
+        self.assertIn(".copy-toast-check", self.css)
+        self.assertIn("html[data-theme=\"dark\"] .copy-toast-check", self.css)
+        self.assertIn("function showCopyToast()", self.js)
+        self.assertIn("if (await copyText(value))", self.js)
+        self.assertIn("showCopyToast();", self.js)
+        self.assertIn("if (copied) showCopyToast();", self.js)
+        self.assertIn("await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; showCopyToast();", self.js)
+
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)

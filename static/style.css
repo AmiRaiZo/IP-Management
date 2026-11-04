@@ -107,6 +107,15 @@ html[data-theme="dark"] .update-modal-panel{background:var(--surface);color:var(
 html[data-theme="dark"] .update-modal-log{background:var(--input);color:var(--text);border-color:var(--border)}
 .updater-modal-open,body:has(.update-modal-backdrop:not([hidden])){overflow:hidden!important}
 
+/* Compact clipboard confirmation, using the active site theme tokens. */
+.copy-toast{position:fixed;top:16px;left:50%;z-index:12000;display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-size:11px;font-weight:700;line-height:1;opacity:0;transform:translate(-50%,-8px);pointer-events:none;transition:opacity .16s ease,transform .16s ease}
+.copy-toast[hidden]{display:none!important}
+.copy-toast.is-visible{opacity:1;transform:translate(-50%,0)}
+.copy-toast-check{display:grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#e8f8ef;color:#1d9a61}
+.copy-toast-check svg{display:block;width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+html[data-theme="dark"] .copy-toast-check{background:#18382f;color:#69d9ae}
+@media(prefers-reduced-motion:reduce){.copy-toast{transition:none}}
+
 /* Settings use a single active section instead of a long stacked page. */
 .settings-content{min-width:0}.settings-content .settings-section{display:none}.settings-content .settings-section.is-active{display:block}.settings-content .settings-section[hidden]{display:none!important}.settings-nav{align-self:start;position:sticky;top:24px;display:grid;gap:7px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:13px}.settings-nav a{display:flex;align-items:center;min-height:42px;padding:10px 12px;border-radius:8px;color:var(--muted);font-size:12px;font-weight:650;transition:background .15s,color .15s}.settings-nav a:hover{background:var(--surface-2);color:var(--text)}.settings-nav a.active{background:var(--primary);color:#fff;box-shadow:0 5px 14px #4569e82b}.settings-content .settings-section .panel-heading:first-child{margin-top:0}@media(max-width:720px){.settings-nav{position:static;display:flex;gap:5px;overflow-x:auto;padding:6px}.settings-nav a{flex:0 0 auto;min-height:38px;padding:8px 11px}}
 

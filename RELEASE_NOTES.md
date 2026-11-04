@@ -1,3 +1,9 @@
+## Version 5.0.3 release notes
+
+- Show a compact `Copied` notification at the top of the page, with a subtle green checkmark and colors that follow the active light or dark theme.
+- Display the notification only after a successful copy from IP, Account, Notes, setup URI, or update-log controls; failed copy attempts do not show success feedback.
+- Add accessible live-region markup and regression coverage, stabilize the time-sensitive Retry-After test, and refresh static asset cache keys.
+
 ## Version 5.0.2 release notes
 
 - Fix scroll trapping inside IP and Account cards: when their content area has no overflow or reaches its top or bottom boundary, wheel and touch scrolling can continue on the main page.

@@ -6,7 +6,7 @@
   <title>{% block title %}IP Archive{% endblock %}</title>
   <!-- v5.0 login security and Notes card actions -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.2-card-scroll">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.3-copy-toast">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}">
 <div class="app-shell">
@@ -44,5 +44,6 @@
     </main>
   </div>
 </div>
-  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.2-card-scroll" defer></script>
+  <div id="copy-toast" class="copy-toast" role="status" aria-live="polite" aria-atomic="true" hidden><span class="copy-toast-check" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m3.5 8.2 3 3 6-6.4"/></svg></span><span>Copied</span></div>
+  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.3-copy-toast" defer></script>
 </body></html>

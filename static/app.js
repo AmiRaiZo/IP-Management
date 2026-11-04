@@ -1,4 +1,22 @@
 (() => {
+  const copyToast = document.getElementById('copy-toast');
+  let copyToastTimeout = null;
+  let copyToastHideTimeout = null;
+  function showCopyToast() {
+    if (!copyToast) return;
+    window.clearTimeout(copyToastTimeout);
+    window.clearTimeout(copyToastHideTimeout);
+    copyToast.hidden = false;
+    copyToast.classList.remove('is-visible');
+    void copyToast.offsetWidth;
+    copyToast.classList.add('is-visible');
+    copyToastTimeout = window.setTimeout(() => {
+      copyToast.classList.remove('is-visible');
+      copyToastHideTimeout = window.setTimeout(() => {
+        if (!copyToast.classList.contains('is-visible')) copyToast.hidden = true;
+      }, 180);
+    }, 1450);
+  }
   const sidebar = document.querySelector('.sidebar');
   const sidebarToggle = document.getElementById('sidebar-toggle');
   const sidebarPreferenceKey = 'ip-management-sidebar-collapsed';
@@ -393,10 +411,12 @@
     const content = updateLog.value || '(empty output)';
     try {
       await navigator.clipboard.writeText(content);
+      showCopyToast();
       document.getElementById('update-copy-status').textContent = 'Output copied to clipboard.';
     } catch (_) {
       updateLog.focus(); updateLog.select();
       const copied = document.execCommand('copy');
+      if (copied) showCopyToast();
       document.getElementById('update-copy-status').textContent = copied ? 'Output copied to clipboard.' : 'Select and copy the output manually.';
     }
   });
@@ -578,6 +598,7 @@
     const originalTitle = button.dataset.originalTitle || button.title || 'Click to copy value';
     button.dataset.originalTitle = originalTitle;
     if (await copyText(value)) {
+      showCopyToast();
       button.classList.add('is-copied');
       button.title = 'Copied!';
       button.setAttribute('aria-label', 'Copied');
@@ -594,7 +615,7 @@
   document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copyTarget);
     if (!target) return;
-    try { await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; }
+    try { await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; showCopyToast(); }
     catch (_) { target.focus(); target.select?.(); }
   }));
 })();
