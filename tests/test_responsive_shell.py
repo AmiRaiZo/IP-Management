@@ -258,8 +258,14 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("app_settings.group_label", self.base)
         self.assertIn("app_settings.user_label", self.base)
         self.assertIn("app_settings.footer_text", self.base)
-        self.assertIn("app_settings.login_title", (ROOT / "templates" / "login.html").read_text(encoding="utf-8"))
+        self.assertIn('<h1>Sign in</h1>', (ROOT / "templates" / "login.html").read_text(encoding="utf-8"))
+        self.assertNotIn('name="login_subtitle"', self.settings)
+        self.assertNotIn('name="inventory_description"', self.settings)
+        self.assertNotIn('name="app_description"', self.settings)
         self.assertIn("app_settings.inventory_title", self.index)
+        self.assertIn("You can still sign in with your authenticator code.", self.js)
+        self.assertIn("delivery_failed", self.js)
+        self.assertIn("Telegram permits only one webhook per bot", self.app_source)
 
     def test_successful_copy_shows_small_theme_aware_confirmation(self):
         self.assertIn('<div id="copy-toast" class="copy-toast" role="status"', self.base)
@@ -349,6 +355,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertNotIn('http-equiv="refresh"', self.base)
         self.assertIn("fetch(statusUrl", self.js)
         self.assertIn("window.location.assign(outcome.redirect)", self.js)
+        self.assertIn("result.status === 'completing'", self.js)
         self.assertIn('overflow-y:auto', self.css)
         self.assertIn('scrollbar-width:thin', self.css)
         self.assertIn('@app.get("/login/approval-status")', self.app_source)

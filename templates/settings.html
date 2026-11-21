@@ -30,18 +30,15 @@
     <form class="panel form-panel settings-section" id="text" data-settings-section="text" method="post" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="panel-heading"><div><h2>Text & labels</h2><p>Personalize the login screen and visible directory labels.</p></div></div>
-      <div class="panel-heading"><div><h2>Login screen</h2><p>Personalize the welcome message shown before sign-in.</p></div></div>
+      <div class="panel-heading"><div><h2>Login screen</h2></div></div>
       <div class="form-grid">
         <div class="field full-field"><label for="login_title">Login heading</label><input id="login_title" name="login_title" maxlength="180" value="{{ app_values.login_title }}"></div>
-        <div class="field full-field"><label for="login_subtitle">Login description</label><textarea id="login_subtitle" name="login_subtitle" rows="2" maxlength="400">{{ app_values.login_subtitle }}</textarea></div>
       </div>
       <div class="panel-heading"><div><h2>Directory text</h2><p>Control the most visible page labels.</p></div></div>
       <div class="form-grid">
         <div class="field"><label for="inventory_title">Inventory page title</label><input id="inventory_title" name="inventory_title" value="{{ app_values.inventory_title }}" maxlength="100"></div>
         <div class="field"><label for="group_label">Groups menu label</label><input id="group_label" name="group_label" value="{{ app_values.group_label }}" maxlength="80"></div>
         <div class="field"><label for="user_label">Users menu label</label><input id="user_label" name="user_label" value="{{ app_values.user_label }}" maxlength="80"></div>
-        <div class="field full-field"><label for="inventory_description">Inventory description</label><textarea id="inventory_description" name="inventory_description" rows="2" maxlength="400">{{ app_values.inventory_description }}</textarea></div>
-        <div class="field full-field"><label for="app_description">Application description</label><textarea id="app_description" name="app_description" rows="2" maxlength="400">{{ app_values.app_description }}</textarea></div>
       </div>
       <div class="form-footer"><span class="muted">Updates are saved to the application database.</span><button class="btn btn-primary" type="submit">Save settings</button></div>
     </form>
@@ -93,7 +90,7 @@
 
     <section class="panel form-panel settings-section" id="notifications" data-settings-section="notifications">
       <div class="panel-heading"><div><h2>Telegram security notifications and bot</h2><p>Login alerts plus interactive IP add/search commands.</p></div></div>
-      <p class="helper-note">Login alerts include username, source IP, Jalali time, hostname, failure reason and a keyed password fingerprint. For safety, the raw attempted password and 2FA code are never stored or sent. Send <strong>ربات</strong> to your bot to open the inline menu with <strong>اد آیپی</strong> and <strong>سرچ</strong>. Search results never include saved connection passwords. Bot Token and Chat ID are encrypted at rest; the webhook is protected by a secret token. HTTPS and a publicly reachable APP_PUBLIC_URL are required for Telegram menu callbacks.</p>
+      <p class="helper-note">Login alerts include username, source IP, Jalali time, hostname, failure reason and a keyed password fingerprint. For safety, the raw attempted password and 2FA code are never stored or sent. Send <strong>ربات</strong> to your bot to open the inline menu with <strong>اد آیپی</strong> and <strong>سرچ</strong>. Search results never include saved connection passwords. Bot Token and Chat ID are encrypted at rest; the webhook is protected by a secret token. HTTPS and a publicly reachable APP_PUBLIC_URL are required for Telegram menu callbacks. <strong>Important:</strong> Telegram allows only one webhook per bot token. If you connect this token to another IP Management panel, only one panel can receive its buttons and commands. Use a different bot token for each panel.</p>
       <p class="muted">Configuration status: <strong>{{ 'Configured' if telegram_configured else 'Not configured' }}</strong>. Existing credentials are never shown again. Leave both fields blank to keep the saved configuration.</p>
       <form method="post" action="{{ url_for('update_telegram_settings') }}" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -137,4 +134,3 @@
   </div>
 </div>
 {% endblock %}
-

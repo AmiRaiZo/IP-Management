@@ -1,3 +1,19 @@
+## Version 5.0.9 release notes
+
+- Make Authenticator/recovery-code sign-in and Telegram administrator approval compete through atomic state transitions, so only one method can complete a login attempt.
+- Prevent an Authenticator code submitted while Telegram approval is being finalized from creating a competing login session; retain direct sign-in when the valid code wins first.
+- Keep the two-panel webhook limitation explicit: one Telegram bot token can deliver inline callbacks to only one panel, while password plus Authenticator login remains available on the other panel.
+- Add regression coverage for the approval-completion race and refresh the release's static asset cache keys.
+
+## Version 5.0.8 release notes
+
+- Allow a valid Authenticator TOTP or one-time recovery/Telegram code to complete sign-in immediately without also waiting for Telegram administrator approval; Telegram approval remains an independent alternative that can complete sign-in without entering the code.
+- Keep authenticator sign-in available when Telegram approval delivery fails or its request expires, while a deliberate administrator rejection still blocks that sign-in attempt.
+- Detect when a Telegram bot token already has a webhook registered to a different panel and refuse to overwrite it; explain that each panel needs its own bot token because Telegram supports one webhook per bot.
+- Keep an existing webhook registered to this panel without needlessly re-registering it, and clarify the one-token/one-webhook rule in Telegram settings.
+- Add regression coverage for either/or authentication, delivery fallback, and protection against one panel stealing another panel's webhook.
+- Remove the obsolete login and inventory marketing descriptions from the interface and settings, including legacy saved values; refresh static asset cache keys.
+
 ## Version 5.0.7 release notes
 
 - Recover an existing installation when its saved domain no longer has a usable HTTPS Nginx virtual host; interactively request and validate a replacement hostname instead of stopping at domain detection.
@@ -393,4 +409,4 @@
 - Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
 - A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
 - Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
-
+412

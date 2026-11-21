@@ -282,7 +282,7 @@ class ArchiveTests(unittest.TestCase):
                 }})
         self.assertEqual(menu.call_count, len(commands))
 
-    def test_telegram_settings_re_registers_webhook_using_saved_credentials(self):
+    def test_telegram_settings_keeps_existing_webhook_for_this_panel(self):
         _, secret = self.create_user("telegram-webhook-repair-admin", role="superadmin")
         self.assertEqual(self.login("telegram-webhook-repair-admin", secret).status_code, 302)
         archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
@@ -296,12 +296,48 @@ class ArchiveTests(unittest.TestCase):
                 "csrf_token": self.csrf(), "action": "test",
             })
         self.assertEqual(response.status_code, 302)
+        api.assert_any_call("getWebhookInfo", {})
+        self.assertFalse(any(call.args[0] == "setWebhook" for call in api.call_args_list))
+
+    def test_telegram_settings_registers_webhook_when_bot_has_none(self):
+        _, secret = self.create_user("telegram-webhook-new-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-webhook-new-admin", secret).status_code, 302)
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
+        webhook_url = "https://new-panel.example.com/telegram/webhook"
+        responses = [
+            {"ok": True, "result": {"url": ""}},
+            {"ok": True, "result": True},
+            {"ok": True, "result": {"url": webhook_url}},
+        ]
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://new-panel.example.com"}), \
+             patch.object(archive, "telegram_api", side_effect=responses) as api, \
+             patch.object(archive, "send_telegram_security_alert", return_value=True):
+            response = self.client.post("/settings/telegram", data={"csrf_token": self.csrf(), "action": "save"})
+        self.assertEqual(response.status_code, 302)
         api.assert_any_call("setWebhook", {
-            "url": webhook_url,
-            "secret_token": "saved-webhook-secret",
+            "url": webhook_url, "secret_token": "saved-webhook-secret",
             "allowed_updates": ["message", "callback_query"],
         })
-        api.assert_any_call("getWebhookInfo", {})
+
+    def test_telegram_settings_does_not_steal_webhook_from_another_panel(self):
+        _, secret = self.create_user("telegram-webhook-conflict-admin", role="superadmin")
+        self.assertEqual(self.login("telegram-webhook-conflict-admin", secret).status_code, 302)
+        archive.save_secure_setting("telegram_bot_token_enc", "123456:abcdefghijklmnopqrstuvwxyzABCDE_12345")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
+        with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://second-panel.example.com"}), \
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {
+                 "url": "https://first-panel.example.com/telegram/webhook"
+             }}) as api, \
+             patch.object(archive, "send_telegram_security_alert", return_value=True):
+            response = self.client.post("/settings/telegram", data={"csrf_token": self.csrf(), "action": "test"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual([call.args[0] for call in api.call_args_list], ["getWebhookInfo"])
+        with self.client.session_transaction() as sess:
+            messages = [message for _, message in sess.get("_flashes", [])]
+        self.assertTrue(any("separate Telegram bot token for each panel" in message for message in messages))
 
     def test_telegram_settings_surfaces_webhook_registration_failure(self):
         _, secret = self.create_user("telegram-webhook-failure-admin", role="superadmin")
@@ -327,13 +363,10 @@ class ArchiveTests(unittest.TestCase):
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
         archive.save_secure_setting("telegram_webhook_secret_enc", "saved-webhook-secret")
         webhook_url = "https://archive.example.com/telegram/webhook"
-        responses = [
-            {"ok": True, "result": True},
-            {"ok": True, "result": {
-                "url": webhook_url,
-                "last_error_message": "Wrong response from the webhook: 403 Forbidden",
-            }},
-        ]
+        responses = [{"ok": True, "result": {
+            "url": webhook_url,
+            "last_error_message": "Wrong response from the webhook: 403 Forbidden",
+        }}]
         with patch.dict(os.environ, {"APP_PUBLIC_URL": "https://archive.example.com"}), \
              patch.object(archive, "telegram_api", side_effect=responses), \
              patch.object(archive, "send_telegram_security_alert", return_value=True):
@@ -1757,7 +1790,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         inventory_page = self.client.get("/").get_data(as_text=True)
         self.assertIn("Address book", inventory_page)
-        self.assertIn("Current network endpoints", inventory_page)
+        self.assertNotIn("Current network endpoints", inventory_page)
         self.assertIn("Network groups", inventory_page)
         self.assertIn("Team access", inventory_page)
         self.assertIn("MY NETWORK", inventory_page)
@@ -1765,8 +1798,9 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("--primary: #1267ab", inventory_page)
         self.client.post("/logout", data={"csrf_token": self.csrf()})
         login_page = self.client.get("/login").get_data(as_text=True)
-        self.assertIn("Secure sign in", login_page)
-        self.assertIn("Authorized operators only", login_page)
+        self.assertIn("<h1>Sign in</h1>", login_page)
+        self.assertNotIn("Secure sign in", login_page)
+        self.assertNotIn("Authorized operators only", login_page)
         self.assertIn("MY NETWORK", login_page)
         self.assertIn("Private network console", login_page)
 
@@ -1998,7 +2032,7 @@ class ArchiveTests(unittest.TestCase):
         response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
-        self.assertIn("<h1>Welcome back</h1>", page)
+        self.assertIn("<h1>Sign in</h1>", page)
         self.assertIn('data-toggle-password="password"', page)
         for removed in ("Encrypted access", "Sign in to securely manage your IP inventory.",
                         "Your network.", "Your command.", "Continue securely",
@@ -2017,7 +2051,7 @@ class ArchiveTests(unittest.TestCase):
     def test_login_and_two_factor_pages_have_only_minimal_copy(self):
         response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"<h1>Welcome back</h1>", response.data)
+        self.assertIn(b"<h1>Sign in</h1>", response.data)
         self.assertNotIn(b"IP Archive", response.data)
         _, secret = self.create_user("minimalverify")
         response = self.client.post("/login", data={
@@ -2823,7 +2857,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(alert.call_args.kwargs.get("delete_after"), 0)
         self.assertIn("Code used: 654321", alert.call_args.args[0])
 
-    def test_password_login_shows_code_screen_and_waits_for_approval_before_session(self):
+    def test_password_login_offers_authenticator_or_telegram_approval(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
@@ -2835,7 +2869,8 @@ class ArchiveTests(unittest.TestCase):
             return {"ok": True, "result": {"message_id": 77}}
 
         with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 77}}) as send, \
-             patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+             patch.object(archive, "telegram_api", side_effect=telegram_api_stub), \
+             patch.object(archive, "send_login_success_alert", return_value=True):
             self.client.get("/login")
             response = self.client.post("/login", data={
                 "csrf_token": self.csrf(), "username": "approval-admin", "password": "test-pass",
@@ -2876,12 +2911,10 @@ class ArchiveTests(unittest.TestCase):
         edited = [payload for method, payload in calls if method == "editMessageText"]
         self.assertEqual(len(edited), 2)
         self.assertEqual((edited[-1]["chat_id"], edited[-1]["message_id"]), ("12345", 77))
-        self.assertIn("Login successful", edited[-1]["text"])
-        self.assertIn("Login method: Authenticator app (TOTP) + Telegram administrator approval", edited[-1]["text"])
-        self.assertIn(f"Code used: {code}", edited[-1]["text"])
+        self.assertIn("authenticator code was accepted", edited[-1]["text"].lower())
         self.assertEqual(edited[-1]["reply_markup"], {"inline_keyboard": []})
         with archive.connect_db() as db:
-            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "success")
+            self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "superseded")
 
     def test_telegram_login_approval_rejects_request_and_never_creates_session(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
@@ -2907,7 +2940,7 @@ class ArchiveTests(unittest.TestCase):
                 "message": {"message_id": 88, "chat": {"id": 12345, "type": "private"}}}})
             response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"unable to sign in", response.data.lower())
+        self.assertIn(b"rejected by the telegram administrator", response.data.lower())
         with self.client.session_transaction() as sess:
             self.assertNotIn("user_id", sess)
             self.assertNotIn("pending_login_approval_id", sess)
@@ -3017,7 +3050,7 @@ class ArchiveTests(unittest.TestCase):
             status = db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()["status"]
         self.assertEqual(status, "success")
 
-    def test_entered_authenticator_code_waits_for_admin_and_is_audited_after_approval(self):
+    def test_entered_authenticator_code_completes_login_without_admin_approval(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
@@ -3027,7 +3060,8 @@ class ArchiveTests(unittest.TestCase):
             calls.append((method, payload))
             return {"ok": True, "result": {"message_id": 90}}
         with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 90}}) as send, \
-             patch.object(archive, "telegram_api", side_effect=telegram_api_stub):
+             patch.object(archive, "telegram_api", side_effect=telegram_api_stub), \
+             patch.object(archive, "send_login_success_alert", return_value=True):
             self.client.get("/login")
             self.client.post("/login", data={"csrf_token": self.csrf(), "username": "approval-code-first", "password": "test-pass"})
             with self.client.session_transaction() as sess:
@@ -3035,27 +3069,51 @@ class ArchiveTests(unittest.TestCase):
                 self.assertNotIn("user_id", sess)
             code = pyotp.TOTP(secret).now()
             response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
-            self.assertEqual(response.status_code, 200)
-            self.assertIn(b"data-login-approval-status", response.data)
+            self.assertEqual(response.status_code, 302)
             with self.client.session_transaction() as sess:
-                self.assertNotIn("user_id", sess)
-                self.assertTrue(sess.get("pending_2fa_verified"))
+                self.assertTrue(sess.get("user_id"))
                 self.assertNotIn(code, str(dict(sess)))
-            callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
-            archive.handle_telegram_update({"callback_query": {"id": "approve-after-code", "data": callback_data,
-                "message": {"message_id": 90, "chat": {"id": 12345, "type": "private"}}}})
-            response = self.client.post("/login/approval-complete", data={"csrf_token": self.csrf()})
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json["ok"])
-        with self.client.session_transaction() as sess:
-            self.assertTrue(sess.get("user_id"))
+            self.assertEqual(send.call_count, 1)
         edited = [payload for method, payload in calls if method == "editMessageText"]
-        self.assertTrue(any(f"Code used: {code}" in payload.get("text", "") for payload in edited))
+        self.assertTrue(any("authenticator code was accepted" in payload.get("text", "").lower() for payload in edited))
         with archive.connect_db() as db:
             status = db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()["status"]
-        self.assertEqual(status, "success")
+        self.assertEqual(status, "superseded")
 
-    def test_recovery_code_is_consumed_only_after_admin_approval(self):
+    def test_authenticator_code_cannot_race_a_telegram_approval_already_being_completed(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        user_id, secret = self.create_user("approval-race-code")
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 93}}):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-race-code", "password": "test-pass",
+            })
+        self.assertEqual(response.status_code, 200)
+        with self.client.session_transaction() as sess:
+            approval_id = sess["pending_login_approval_id"]
+            self.assertEqual(sess["pending_2fa_user_id"], user_id)
+        # Simulate the background approval poll winning the atomic claim immediately
+        # before the user submits a valid Authenticator code.
+        with archive.connect_db() as db:
+            db.execute("UPDATE login_approval_requests SET status='completing' WHERE id=?", (approval_id,))
+        response = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now(),
+        }, headers={"X-Requested-With": "XMLHttpRequest"})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json["ok"])
+        self.assertIn("already being completed", response.json["message"])
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("user_id", sess)
+            self.assertEqual(sess.get("pending_2fa_user_id"), user_id)
+        with archive.connect_db() as db:
+            self.assertEqual(
+                db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0],
+                "completing",
+            )
+
+    def test_recovery_code_completes_login_without_admin_approval(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
@@ -3065,24 +3123,18 @@ class ArchiveTests(unittest.TestCase):
             db.execute("INSERT INTO user_recovery_codes(user_id,code_hash,created_at) VALUES(?,?,?)",
                        (user_id, archive.recovery_code_hash(user_id, recovery_code), archive.now()))
         with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 91}}) as send, \
-             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 91}}):
+             patch.object(archive, "telegram_api", return_value={"ok": True, "result": {"message_id": 91}}), \
+             patch.object(archive, "send_login_success_alert", return_value=True):
             self.client.get("/login")
             self.client.post("/login", data={"csrf_token": self.csrf(), "username": "approval-recovery-code", "password": "test-pass"})
             response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": recovery_code})
-            self.assertEqual(response.status_code, 200)
-            with archive.connect_db() as db:
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchone()[0], 1)
+            self.assertEqual(response.status_code, 302)
             with self.client.session_transaction() as sess:
-                self.assertNotIn("user_id", sess)
-            callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
-            archive.handle_telegram_update({"callback_query": {"id": "approve-recovery", "data": callback_data,
-                "message": {"message_id": 91, "chat": {"id": 12345, "type": "private"}}}})
-            response = self.client.post("/login/approval-complete", data={"csrf_token": self.csrf()})
-        self.assertEqual(response.status_code, 200)
+                self.assertTrue(sess.get("user_id"))
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?", (user_id,)).fetchone()[0], 0)
 
-    def test_telegram_fallback_code_is_consumed_only_after_admin_approval(self):
+    def test_telegram_fallback_code_completes_login_without_admin_approval(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
@@ -3096,15 +3148,11 @@ class ArchiveTests(unittest.TestCase):
             self.client.get("/login")
             self.client.post("/login", data={"csrf_token": self.csrf(), "username": "approval-telegram-code", "password": "test-pass"})
             response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": telegram_code})
-            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.status_code, 302)
             with archive.connect_db() as db:
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 1)
-                db.execute("UPDATE telegram_login_codes SET expires_at=? WHERE user_id=?", ("2000-01-01T00:00:00+00:00", user_id))
-            callback_data = send.call_args.args[2]["inline_keyboard"][0][0]["callback_data"]
-            archive.handle_telegram_update({"callback_query": {"id": "approve-telegram-code", "data": callback_data,
-                "message": {"message_id": 92, "chat": {"id": 12345, "type": "private"}}}})
-            response = self.client.post("/login/approval-complete", data={"csrf_token": self.csrf()})
-        self.assertEqual(response.status_code, 200)
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 0)
+            with self.client.session_transaction() as sess:
+                self.assertTrue(sess.get("user_id"))
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM telegram_login_codes WHERE user_id=?", (user_id,)).fetchone()[0], 0)
 
@@ -3173,24 +3221,58 @@ class ArchiveTests(unittest.TestCase):
         with archive.connect_db() as db:
             self.assertEqual(db.execute("SELECT status FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()[0], "success")
 
-    def test_telegram_approval_delivery_failure_blocks_login(self):
+    def test_telegram_approval_delivery_failure_falls_back_to_authenticator(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
         archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
         archive.save_secure_setting("telegram_chat_id_enc", "12345")
-        self.create_user("approval-delivery-failure")
-        with patch.object(archive, "telegram_send", return_value={}):
+        user_id, secret = self.create_user("approval-delivery-failure")
+        with patch.object(archive, "telegram_send", return_value={}), \
+             patch.object(archive, "send_telegram_security_alert", return_value=True), \
+             patch.object(archive, "send_login_success_alert", return_value=True):
             self.client.get("/login")
             response = self.client.post("/login", data={
                 "csrf_token": self.csrf(), "username": "approval-delivery-failure", "password": "test-pass",
             })
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Unable to sign in right now", response.data)
+        self.assertIn(b"Verification code", response.data)
         with self.client.session_transaction() as sess:
             self.assertNotIn("user_id", sess)
             self.assertNotIn("pending_login_approval_id", sess)
+            self.assertEqual(sess.get("pending_2fa_user_id"), user_id)
+        code = pyotp.TOTP(secret).now()
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": code})
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess.get("user_id"))
         with archive.connect_db() as db:
             row = db.execute("SELECT status FROM login_approval_requests ORDER BY id DESC LIMIT 1").fetchone()
         self.assertEqual(row["status"], "delivery_failed")
+
+    def test_expired_telegram_approval_keeps_authenticator_fallback_after_refresh(self):
+        archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True
+        archive.save_secure_setting("telegram_bot_token_enc", "test-bot-token")
+        archive.save_secure_setting("telegram_chat_id_enc", "12345")
+        user_id, secret = self.create_user("approval-expired-fallback")
+        with patch.object(archive, "telegram_send", return_value={"ok": True, "result": {"message_id": 95}}), \
+             patch.object(archive, "send_login_success_alert", return_value=True):
+            self.client.get("/login")
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "username": "approval-expired-fallback", "password": "test-pass",
+            })
+            self.assertEqual(response.status_code, 200)
+            with archive.connect_db() as db:
+                db.execute("UPDATE login_approval_requests SET expires_at=? WHERE user_id=?",
+                           ("2000-01-01T00:00:00+00:00", user_id))
+            refreshed = self.client.get("/login")
+            self.assertEqual(refreshed.status_code, 200)
+            self.assertIn(b"Verification code", refreshed.data)
+            self.assertNotIn(b"data-login-approval-status", refreshed.data)
+            response = self.client.post("/login", data={
+                "csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now(),
+            })
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess.get("user_id"), user_id)
 
     def test_telegram_approval_without_second_factor_logs_admin_approval_method(self):
         archive.app.config["LOGIN_APPROVAL_REQUIRED"] = True

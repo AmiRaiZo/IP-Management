@@ -110,15 +110,33 @@
           }
           throw new Error('The sign-in could not be completed. Please sign in again.');
         }
-        if (['denied', 'expired', 'delivery_failed', 'canceled', 'missing'].includes(result.status)) {
+        if (result.status === 'denied') {
           finished = true;
           if (feedback) {
-            feedback.textContent = 'Unable to sign in. Please try again.';
+            feedback.textContent = 'This sign-in was rejected by the Telegram administrator.';
             feedback.hidden = false;
           }
           document.querySelectorAll('.verify-stage form').forEach(form => {
             if (!form.classList.contains('back-to-password')) form.hidden = true;
           });
+          return;
+        }
+        if (result.status === 'completing') {
+          finished = true;
+          approvalTransport.remove();
+          if (feedback) {
+            feedback.textContent = 'Telegram approval was accepted. Sign-in is being completed. Refresh this page if it does not continue.';
+            feedback.hidden = false;
+          }
+          return;
+        }
+        if (['expired', 'delivery_failed', 'canceled', 'missing', 'superseded'].includes(result.status)) {
+          finished = true;
+          approvalTransport.remove();
+          if (feedback && result.status !== 'superseded') {
+            feedback.textContent = 'Telegram approval is unavailable. You can still sign in with your authenticator code.';
+            feedback.hidden = false;
+          }
           return;
         }
       } catch (_) {
@@ -660,4 +678,3 @@
     window.setInterval(refreshPublicIpStatus, 30000);
   }
 })();
-
