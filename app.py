@@ -279,6 +279,8 @@ def recover_interrupted_restore():
             elif not staged_uploads.exists() and UPLOAD_DIR.exists():
                 shutil.rmtree(UPLOAD_DIR)
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 
         RESTORE_JOURNAL_FILE.unlink(missing_ok=True)
         if staging.exists():
@@ -5108,6 +5110,7 @@ def restore_full_backup():
                 old_uploads_moved = True
             _write_restore_journal(staging.name, "uploads_moved", had_uploads)
             os.replace(staged_uploads, UPLOAD_DIR)
+            AVATAR_DIR.mkdir(parents=True, exist_ok=True)
             _write_restore_journal(staging.name, "uploads_installed", had_uploads)
             _restore_sqlite_snapshot(staged_database, DB_PATH)
             _write_restore_journal(staging.name, "database_installed", had_uploads)
@@ -5126,6 +5129,7 @@ def restore_full_backup():
                     if not previous_uploads.exists():
                         raise OSError("The previous uploads directory is missing.")
                     shutil.copytree(previous_uploads, UPLOAD_DIR, symlinks=True)
+                    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
                 except Exception as rollback_error:
                     rollback_errors.append(f"uploads rollback failed: {rollback_error}")
             try:
@@ -5584,3 +5588,4 @@ def forbidden(error):
 def not_found(error):
     security_event("http_404", session.get("username", ""), "blocked", f"Unknown path probe: {request.method} {request.path}")
     return render_template("error.html", code=404, message="The requested page or record was not found."), 404
+
