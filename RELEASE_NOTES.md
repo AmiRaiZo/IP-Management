@@ -4,6 +4,10 @@
 - Temporarily suppress only Nginx automatic service starts during dependency installation, preserve and restore any pre-existing `policy-rc.d`, and let the normal upgrade validation start Nginx after its units and helper are refreshed.
 - Add regression checks for the guarded package-install path in both fresh installation and in-place upgrade scripts.
 
+## Version 5.0.6 release notes
+
+- Refresh CSS and JavaScript cache keys to v5.0.6 so existing browsers fetch the release assets.
+
 ## Version 5.0.5 release notes
 
 - Refresh CSS and JavaScript cache keys to v5.0.5 so existing browsers fetch the release assets.
