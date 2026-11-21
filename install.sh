@@ -126,7 +126,7 @@ cleanup() { rm -rf -- "$WORK_DIR"; [[ -z "${ADMIN_CREDENTIALS:-}" ]] || rm -f --
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
 SOURCE_DIR="$WORK_DIR/source"
-for required in app.py setup_admin.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station-archive-update station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
+for required in app.py setup_admin.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station-archive-update station_archive_refresh_ip.py station_archive_upgrade_limits.py station_archive_domain_recovery.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
   [[ -e "$SOURCE_DIR/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
