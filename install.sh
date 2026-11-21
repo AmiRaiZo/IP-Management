@@ -15,8 +15,20 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 export DEBIAN_FRONTEND=noninteractive
 echo "Checking and installing IP Management server requirements..."
-apt-get update
-apt-get install -y ca-certificates curl git rsync python3 python3-venv python3-pip nginx certbot openssl systemd sudo iproute2 util-linux procps
+SYSTEM_PACKAGES=(ca-certificates curl git rsync python3 python3-venv python3-pip nginx certbot openssl systemd sudo iproute2 util-linux procps)
+MISSING_PACKAGES=()
+for package in "${SYSTEM_PACKAGES[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+    MISSING_PACKAGES+=("$package")
+  fi
+done
+if (( ${#MISSING_PACKAGES[@]} > 0 )); then
+  echo "Installing missing system packages: ${MISSING_PACKAGES[*]}"
+  apt-get update
+  apt-get install -y "${MISSING_PACKAGES[@]}"
+else
+  echo "All required system packages are already installed; skipping APT installation."
+fi
 for required_command in python3 systemctl nginx curl git rsync sudo visudo runuser ip ss certbot openssl; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Dependency installation finished, but required command '$required_command' is still unavailable. Check apt repositories and retry." >&2
@@ -325,5 +337,4 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
-
 

@@ -3316,8 +3316,14 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         root = Path(__file__).resolve().parent
         installer = (root / "install.sh").read_text(encoding="utf-8")
         upgrader = (root / "upgrade_existing.sh").read_text(encoding="utf-8")
-        self.assertLess(installer.index("apt-get install -y ca-certificates curl"), installer.index("if [[ -e /opt/station-archive ]]"))
-        self.assertLess(upgrader.index("apt-get install -y ca-certificates curl"), upgrader.index("for required_command in python3"))
+        self.assertLess(installer.index("SYSTEM_PACKAGES=(ca-certificates curl"), installer.index("if [[ -e /opt/station-archive ]]"))
+        self.assertLess(upgrader.index("SYSTEM_PACKAGES=(ca-certificates curl"), upgrader.index("for required_command in python3"))
+        for source in (installer, upgrader):
+            self.assertIn("dpkg-query -W -f='${Status}'", source)
+            self.assertIn("MISSING_PACKAGES+=(\"$package\")", source)
+            self.assertIn("if (( ${#MISSING_PACKAGES[@]} > 0 )); then", source)
+            self.assertIn("apt-get install -y \"${MISSING_PACKAGES[@]}\"", source)
+            self.assertIn("skipping APT installation", source)
         self.assertIn("export IPM_SYSTEM_DEPS_READY=1", installer)
         self.assertIn('if [[ "${IPM_SYSTEM_DEPS_READY:-0}" != 1 ]]', upgrader)
         self.assertIn("systemctl show-environment", installer)
