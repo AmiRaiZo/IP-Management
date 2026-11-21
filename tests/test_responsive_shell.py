@@ -233,9 +233,10 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0.6")
-        self.assertIn("style.css') }}?v=5.0.6-final-ui", self.base)
-        self.assertIn("app.js') }}?v=5.0.6-final-ui", self.base)
+        self.assertRegex(self.version, r"^\d+\.\d+\.\d+$")
+        cache_key = f"?v={self.version}-final-ui"
+        self.assertIn("style.css') }}" + cache_key, self.base)
+        self.assertIn("app.js') }}" + cache_key, self.base)
 
     def test_backup_restore_and_live_public_ip_controls_are_present(self):
         self.assertIn("url_for('export_full_backup')", self.settings)
@@ -360,4 +361,3 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
