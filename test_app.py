@@ -3312,6 +3312,20 @@ if __name__ == "__main__":
 
 
 class ReleaseScriptSyntaxTests(unittest.TestCase):
+    def test_installers_bootstrap_system_dependencies_before_using_them(self):
+        root = Path(__file__).resolve().parent
+        installer = (root / "install.sh").read_text(encoding="utf-8")
+        upgrader = (root / "upgrade_existing.sh").read_text(encoding="utf-8")
+        self.assertLess(installer.index("apt-get install -y ca-certificates curl"), installer.index("if [[ -e /opt/station-archive ]]"))
+        self.assertLess(upgrader.index("apt-get install -y ca-certificates curl"), upgrader.index("for required_command in python3"))
+        self.assertIn("export IPM_SYSTEM_DEPS_READY=1", installer)
+        self.assertIn('if [[ "${IPM_SYSTEM_DEPS_READY:-0}" != 1 ]]', upgrader)
+        self.assertIn("systemctl show-environment", installer)
+        self.assertIn("systemctl show-environment", upgrader)
+        for package in ("python3-venv", "python3-pip", "nginx", "certbot", "systemd", "sudo", "iproute2"):
+            with self.subTest(package=package):
+                self.assertIn(package, upgrader)
+
     def test_nginx_proxy_body_limit_allows_full_backup_restore_uploads(self):
         root = Path(__file__).resolve().parent
         for name in ("install.sh", "reconfigure_server.sh"):

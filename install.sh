@@ -7,6 +7,26 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
+# Bootstrap the complete host toolchain before either fresh installation or
+# in-place upgrade. This also covers minimal VPS images missing curl or ip.
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "Automatic dependency installation currently supports Debian and Ubuntu (apt-get)." >&2
+  exit 1
+fi
+export DEBIAN_FRONTEND=noninteractive
+echo "Checking and installing IP Management server requirements..."
+apt-get update
+apt-get install -y ca-certificates curl git rsync python3 python3-venv python3-pip nginx certbot openssl systemd sudo iproute2 util-linux procps
+for required_command in python3 systemctl nginx curl git rsync sudo visudo runuser ip ss certbot openssl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Dependency installation finished, but required command '$required_command' is still unavailable. Check apt repositories and retry." >&2
+    exit 1
+  fi
+done
+python3 -m venv --help >/dev/null 2>&1 || { echo "Python venv support is unavailable after installing python3-venv." >&2; exit 1; }
+systemctl show-environment >/dev/null 2>&1 || { echo "systemd is installed but is not running as the system service manager (PID 1). Use a Debian/Ubuntu VPS booted with systemd." >&2; exit 1; }
+export IPM_SYSTEM_DEPS_READY=1
+
 prompt() { local name="$1" label="$2" default="${3:-}" value=""; if [[ -n "$default" ]]; then read -r -p "$label [$default]: " value < /dev/tty; value="${value:-$default}"; else read -r -p "$label: " value < /dev/tty; fi; printf -v "$name" '%s' "$value"; }
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 
@@ -54,10 +74,6 @@ echo "Install target: https://$DOMAIN:$HTTPS_PORT (single port $HTTPS_PORT; publ
 echo "Make sure DNS points to this server and inbound TCP ports 80 and $HTTPS_PORT are allowed by both the VPS provider and the server firewall."
 read -r -p "Type YES to continue: " CONFIRM < /dev/tty
 [[ "$CONFIRM" == YES ]] || { echo "Cancelled."; exit 1; }
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y git rsync ca-certificates python3 python3-venv python3-pip nginx certbot openssl
 
 WORK_DIR="$(mktemp -d /tmp/station-archive-install.XXXXXX)"
 cleanup() { rm -rf -- "$WORK_DIR"; [[ -z "${ADMIN_CREDENTIALS:-}" ]] || rm -f -- "$ADMIN_CREDENTIALS"; unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM; }

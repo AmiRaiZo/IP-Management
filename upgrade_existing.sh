@@ -11,9 +11,26 @@ APP_DIR=/opt/station-archive
 DATA_DIR=/var/lib/station-archive
 ENV_FILE=/etc/station-archive/env
 SERVICE_FILE=/etc/systemd/system/station-archive.service
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "Automatic dependency installation currently supports Debian and Ubuntu (apt-get)." >&2
+  exit 1
+fi
+if [[ "${IPM_SYSTEM_DEPS_READY:-0}" != 1 ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  echo "Checking and installing IP Management server requirements..."
+  apt-get update
+  apt-get install -y ca-certificates curl git rsync python3 python3-venv python3-pip nginx certbot openssl systemd sudo iproute2 util-linux procps
+fi
+for required_command in python3 systemctl nginx curl git rsync sudo visudo runuser ip ss certbot openssl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Dependency installation finished, but required command '$required_command' is still unavailable. Check apt repositories and retry." >&2
+    exit 1
+  fi
+done
+python3 -m venv --help >/dev/null 2>&1 || { echo "Python venv support is unavailable after installing python3-venv." >&2; exit 1; }
+systemctl show-environment >/dev/null 2>&1 || { echo "systemd is installed but is not running as the system service manager (PID 1). Use a Debian/Ubuntu VPS booted with systemd." >&2; exit 1; }
 [[ -d "$APP_DIR" && -f "$APP_DIR/app.py" ]] || { echo "Existing application not found at $APP_DIR." >&2; exit 1; }
 [[ -f "$ENV_FILE" && -f "$SERVICE_FILE" ]] || { echo "Expected existing environment file or systemd service is missing." >&2; exit 1; }
-command -v python3 >/dev/null && command -v systemctl >/dev/null && command -v nginx >/dev/null || { echo "Required tools (Python 3, systemctl, Nginx) are missing." >&2; exit 1; }
 
 prompt() { local name="$1" label="$2" value=""; read -r -p "$label: " value < /dev/tty; printf -v "$name" '%s' "$value"; }
 # Keep the upgrader aligned with the repository used by the installer.
@@ -72,9 +89,6 @@ echo "SSL certificates will be kept; the application upload and request timeouts
 read -r -p "Type UPGRADE to continue: " CONFIRM < /dev/tty
 [[ "$CONFIRM" == UPGRADE ]] || { echo "Cancelled."; exit 1; }
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y git rsync python3-venv python3-pip
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/station-archive-upgrade-$STAMP"
 install -d -o root -g root -m 0700 "$BACKUP_DIR"
