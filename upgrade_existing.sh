@@ -82,56 +82,85 @@ prompt() { local name="$1" label="$2" value=""; read -r -p "$label: " value < /d
 # Keep the upgrader aligned with the repository used by the installer.
 REPO_URL="https://github.com/AmiRaiZo/IP-Management"
 
+set -a
+. "$ENV_FILE"
+set +a
 APP_PORT="$(systemctl show station-archive.service -p ExecStart --value | grep -oE -- '--bind[= ]+127\.0\.0\.1:[0-9]+' | grep -oE '[0-9]+$' | tail -n1 || true)"
 if [[ -z "$APP_PORT" ]]; then
   APP_PORT="$(grep -RhoE 'proxy_pass[[:space:]]+http://127\.0\.0\.1:[0-9]+' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | grep -oE '[0-9]+$' | head -n1 || true)"
 fi
 [[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Could not detect the existing internal application port from systemd or Nginx." >&2; exit 1; }
 
-NGINX_INFO="$(python3 - <<'PY'
+ENV_DOMAIN="${APP_DOMAIN:-${DOMAIN:-}}"
+ENV_HTTPS_PORT="${PUBLIC_PORT:-${APP_HTTPS_PORT:-443}}"
+DOMAIN=""
+HTTPS_PORT=""
+if [[ "$ENV_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]]; then
+  ENV_DOMAIN="${ENV_DOMAIN,,}"
+  NGINX_PORT="$(python3 - "$ENV_DOMAIN" "$APP_PORT" <<'PY'
 from pathlib import Path
-import re
-roots = [Path('/etc/nginx/sites-enabled'), Path('/etc/nginx/conf.d')]
-for root in roots:
-    if not root.exists():
-        continue
+import re, subprocess, sys
+domain, app_port = sys.argv[1], int(sys.argv[2])
+for root in (Path('/etc/nginx/sites-enabled'), Path('/etc/nginx/conf.d')):
+    if not root.exists(): continue
     for path in sorted(root.iterdir()):
-        if not path.is_file() and not path.is_symlink():
-            continue
-        try:
-            source = path.read_text(errors='ignore')
-        except OSError:
-            continue
-        # Strip comments, then split top-level server blocks by brace depth.
-        source = re.sub(r'(?m)^\s*#.*$', '', source)
+        if not path.is_file(): continue
+        try: source = re.sub(r'(?m)^\s*#.*$', '', path.read_text(errors='ignore'))
+        except OSError: continue
         for match in re.finditer(r'\bserver\s*\{', source):
-            start = match.end()
-            depth = 1
-            i = start
-            while i < len(source) and depth:
-                if source[i] == '{': depth += 1
-                elif source[i] == '}': depth -= 1
-                i += 1
-            block = source[start:i-1]
-            proxy = re.search(r'proxy_pass\s+http://127\.0\.0\.1:(\d+)', block)
-            ssl_listen = re.search(r'listen\s+(?:(?:\d{1,3}\.){3}\d{1,3}:)?(?:\[::\]:)?(\d+)\s+ssl\b', block)
-            domain = re.search(r'(?m)^\s*server_name\s+([^;]+);', block)
-            if proxy and ssl_listen and domain:
-                names = domain.group(1).split()
-                name = next((n for n in names if n != '_' and not n.startswith('~')), '')
-                if name:
-                    print(name)
-                    print(ssl_listen.group(1))
-                    raise SystemExit(0)
-raise SystemExit('Unable to detect an HTTPS server block with a localhost proxy_pass.')
+            depth, index = 1, match.end()
+            while index < len(source) and depth:
+                if source[index] == '{': depth += 1
+                elif source[index] == '}': depth -= 1
+                index += 1
+            if depth: continue
+            block = source[match.end():index-1]
+            names = re.search(r'(?m)^\s*server_name\s+([^;]+);', block)
+            proxy = re.search(r'proxy_pass\s+http://127\.0\.0\.1:(\d+)\b', block)
+            listen = re.search(r'(?m)^\s*listen\s+(?:(?:\d{1,3}\.){3}\d{1,3}:)?(?:\[::\]:)?(\d+)\s+ssl\b', block)
+            cert = re.search(r'(?m)^\s*ssl_certificate\s+([^;]+);', block)
+            if not (names and proxy and listen and cert): continue
+            if domain not in names.group(1).split() or int(proxy.group(1)) != app_port: continue
+            cert_path = Path(cert.group(1).strip().strip('\"\\\''))
+            if not cert_path.is_file(): continue
+            valid = subprocess.run(['openssl','x509','-in',str(cert_path),'-noout','-checkhost',domain,'-checkend','86400'], capture_output=True)
+            if valid.returncode == 0:
+                print(listen.group(1)); raise SystemExit(0)
+raise SystemExit(1)
 PY
-)" || { echo "Could not detect the existing domain and public HTTPS port from Nginx." >&2; exit 1; }
-DOMAIN="$(printf '%s\n' "$NGINX_INFO" | sed -n '1p')"
-HTTPS_PORT="$(printf '%s\n' "$NGINX_INFO" | sed -n '2p')"
-[[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ && "$HTTPS_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "Detected invalid domain or HTTPS port." >&2; exit 1; }
+)" || true
+  if [[ "$NGINX_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$NGINX_PORT >= 1 && 10#$NGINX_PORT <= 65535 && 10#$NGINX_PORT != 80 )) && getent ahostsv4 "$ENV_DOMAIN" >/dev/null 2>&1; then
+    DOMAIN="$ENV_DOMAIN"
+    HTTPS_PORT="$NGINX_PORT"
+  fi
+fi
 
-echo "Existing deployment detected: https://$DOMAIN:$HTTPS_PORT, internal port $APP_PORT."
-echo "SSL certificates will be kept; the application upload and request timeouts will be updated for full backup restore."
+NEEDS_DOMAIN_RECOVERY=0
+if [[ -z "$DOMAIN" ]]; then
+  echo "The saved domain has no matching HTTPS proxy with a valid certificate, or its DNS no longer resolves."
+  if ! (exec 9<>/dev/tty) 2>/dev/null; then
+    echo "A new domain is required, but no interactive terminal is available. Re-run install.sh from an interactive terminal." >&2
+    exit 1
+  fi
+  read -r -p "Enter the new domain name (without https:// or a port): " DOMAIN < /dev/tty
+  DOMAIN="${DOMAIN,,}"
+  python3 - "$DOMAIN" <<'PY'
+import re, sys
+if not re.fullmatch(r'(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', sys.argv[1]):
+    raise SystemExit('Invalid domain. Enter a hostname such as panel.example.com, without URL scheme, path or port.')
+PY
+  [[ "$DOMAIN" != "${ENV_DOMAIN,,}" ]] || { echo "The previous domain is not usable; enter a different domain." >&2; exit 1; }
+  HTTPS_PORT="$ENV_HTTPS_PORT"
+  [[ "$HTTPS_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$HTTPS_PORT >= 1 && 10#$HTTPS_PORT <= 65535 && 10#$HTTPS_PORT != 80 )) || HTTPS_PORT=443
+  NEEDS_DOMAIN_RECOVERY=1
+fi
+
+echo "Existing deployment target: https://$DOMAIN:$HTTPS_PORT, internal port $APP_PORT."
+if (( NEEDS_DOMAIN_RECOVERY == 1 )); then
+  echo "A new HTTPS site and matching certificate will be prepared. The old site and certificate will be retained."
+else
+  echo "The existing HTTPS site and matching certificate will be kept."
+fi
 read -r -p "Type UPGRADE to continue: " CONFIRM < /dev/tty
 [[ "$CONFIRM" == UPGRADE ]] || { echo "Cancelled."; exit 1; }
 
@@ -159,7 +188,39 @@ install -d -o www-data -g www-data -m 0750 "$DATA_DIR"
 WORK_DIR="$(mktemp -d /tmp/station-archive-existing-upgrade.XXXXXX)"
 DEPLOYED=0
 SUCCESS=0
+RECOVERY_CHANGED=0
+RECOVERY_WAS_ACTIVE=0
+RECOVERY_NGINX_STOPPED=0
+RECOVERY_SITE=""
+RECOVERY_LINK=""
 cleanup() {
+  if (( SUCCESS == 0 )); then
+    if (( RECOVERY_CHANGED == 1 )); then
+      echo "Domain recovery failed; restoring the previous environment and Nginx site." >&2
+      cp -a "$BACKUP_DIR/env" "$ENV_FILE" || true
+      if [[ -n "$RECOVERY_SITE" ]]; then
+        if [[ -e "$BACKUP_DIR/recovery-nginx-site" || -L "$BACKUP_DIR/recovery-nginx-site" ]]; then
+          cp -a "$BACKUP_DIR/recovery-nginx-site" "$RECOVERY_SITE" || true
+        else
+          rm -f -- "$RECOVERY_SITE"
+        fi
+      fi
+      if [[ -n "$RECOVERY_LINK" ]]; then
+        if [[ -e "$BACKUP_DIR/recovery-nginx-link" || -L "$BACKUP_DIR/recovery-nginx-link" ]]; then
+          cp -a "$BACKUP_DIR/recovery-nginx-link" "$RECOVERY_LINK" || true
+        else
+          rm -f -- "$RECOVERY_LINK"
+        fi
+      fi
+    fi
+    if (( RECOVERY_CHANGED == 1 && RECOVERY_WAS_ACTIVE == 1 )); then
+      nginx -t && { if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl start nginx; fi; } || true
+    elif (( RECOVERY_CHANGED == 1 )); then
+      if systemctl is-active --quiet nginx; then systemctl stop nginx || true; fi
+    elif (( RECOVERY_NGINX_STOPPED == 1 && RECOVERY_WAS_ACTIVE == 1 )); then
+      systemctl start nginx || true
+    fi
+  fi
   if (( DEPLOYED == 1 && SUCCESS == 0 )); then
     echo "Upgrade failed; restoring the application files and environment from $BACKUP_DIR." >&2
     rsync -a --delete --exclude='.venv/' "$BACKUP_DIR/app/" "$APP_DIR/" || true
@@ -183,9 +244,62 @@ cleanup() {
 }
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station_archive_domain_recovery.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
+
+if (( NEEDS_DOMAIN_RECOVERY == 1 )); then
+  RECOVERY_SITE="/etc/nginx/sites-available/station-archive-$DOMAIN"
+  RECOVERY_LINK="/etc/nginx/sites-enabled/station-archive-$DOMAIN"
+  [[ ! -e "$RECOVERY_SITE" && ! -L "$RECOVERY_SITE" ]] || cp -a "$RECOVERY_SITE" "$BACKUP_DIR/recovery-nginx-site"
+  [[ ! -e "$RECOVERY_LINK" && ! -L "$RECOVERY_LINK" ]] || cp -a "$RECOVERY_LINK" "$BACKUP_DIR/recovery-nginx-link"
+  if systemctl is-active --quiet nginx; then RECOVERY_WAS_ACTIVE=1; fi
+
+  CERT_FILE="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+  CERT_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+  CERT_OK=0
+  if [[ -s "$CERT_FILE" && -s "$CERT_KEY" ]] && openssl x509 -in "$CERT_FILE" -noout -checkhost "$DOMAIN" -checkend 86400 >/dev/null 2>&1; then CERT_OK=1; fi
+  if (( CERT_OK == 0 )); then
+    echo "Requesting a certificate for $DOMAIN using the standalone HTTP-01 challenge..."
+    if (( RECOVERY_WAS_ACTIVE == 1 )); then systemctl stop nginx; RECOVERY_NGINX_STOPPED=1; fi
+    if ! certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email --force-renewal --cert-name "$DOMAIN" -d "$DOMAIN"; then
+      if (( RECOVERY_WAS_ACTIVE == 1 )); then systemctl start nginx || true; RECOVERY_NGINX_STOPPED=0; fi
+      echo "Certificate issuance failed. Check DNS and inbound TCP port 80; the saved domain configuration was not switched." >&2
+      exit 1
+    fi
+    openssl x509 -in "$CERT_FILE" -noout -checkhost "$DOMAIN" -checkend 86400 >/dev/null 2>&1 || { echo "Certbot did not provide a currently valid certificate for $DOMAIN." >&2; exit 1; }
+  fi
+
+  PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+  [[ "$PUBLIC_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { echo "Could not detect the VPS public IPv4 address; cannot create the HTTPS listener." >&2; exit 1; }
+  RECOVERY_CHANGED=1
+  python3 - "$WORK_DIR/source" "$RECOVERY_SITE" "$DOMAIN" "$PUBLIC_IP" "$HTTPS_PORT" "$APP_PORT" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from station_archive_domain_recovery import atomic_write_text, render_nginx_site
+target = Path(sys.argv[2])
+atomic_write_text(target, render_nginx_site(sys.argv[3], sys.argv[4], int(sys.argv[5]), int(sys.argv[6])))
+PY
+  ln -sfn "$RECOVERY_SITE" "$RECOVERY_LINK"
+  python3 - "$WORK_DIR/source" "$ENV_FILE" "$DOMAIN" "$HTTPS_PORT" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from station_archive_domain_recovery import atomic_update_env
+atomic_update_env(Path(sys.argv[2]), {
+    'APP_DOMAIN': sys.argv[3], 'DOMAIN': sys.argv[3],
+    'APP_HTTPS_PORT': sys.argv[4], 'PUBLIC_PORT': sys.argv[4],
+})
+PY
+  chown root:www-data "$ENV_FILE"
+  chmod 0640 "$ENV_FILE"
+  nginx -t
+  if (( RECOVERY_WAS_ACTIVE == 1 )) && systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+  fi
+  echo "Prepared the new HTTPS vhost for $DOMAIN. The previous site's files and certificate were retained."
+fi
 
 # Keep the currently installed virtual environment and all data outside APP_DIR.
 DEPLOYED=1
@@ -322,7 +436,7 @@ git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
 git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station_archive_domain_recovery.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup" "$TMP/venv-backup"
 # Preserve exact dependencies so rollback never relies on PyPI or network access.
