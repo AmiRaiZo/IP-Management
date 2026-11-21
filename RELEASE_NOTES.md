@@ -1,5 +1,6 @@
 ## Version 5.0.5 release notes
 
+- Refresh CSS and JavaScript cache keys to v5.0.5 so existing browsers fetch the release assets.
 - Check each required Debian/Ubuntu system package before installation and install only missing packages; skip APT update/install entirely when the complete dependency set is already present.
 - Apply the same missing-package-only bootstrap to fresh installs and direct in-place upgrades, while retaining command, Python venv, and systemd readiness checks.
 - Add regression coverage for dependency detection, selective installation, and the already-installed fast path.

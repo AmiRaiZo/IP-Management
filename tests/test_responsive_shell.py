@@ -233,9 +233,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0.4")
-        self.assertIn("style.css') }}?v=5.0.4-final-ui", self.base)
-        self.assertIn("app.js') }}?v=5.0.4-final-ui", self.base)
+        self.assertEqual(self.version, "5.0.5")
+        self.assertIn("style.css') }}?v=5.0.5-final-ui", self.base)
+        self.assertIn("app.js') }}?v=5.0.5-final-ui", self.base)
 
     def test_backup_restore_and_live_public_ip_controls_are_present(self):
         self.assertIn("url_for('export_full_backup')", self.settings)

@@ -7,7 +7,7 @@
   <title>{% block title %}{{ app_settings.brand_name }}{% endblock %}</title>
   <!-- v5.0 login security and Notes card actions -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.4-final-ui">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.5-final-ui">
 </head>
 <body class="{% if current_user %}has-sidebar{% endif %}" style="--primary: {{ app_settings.accent_color }}">
 <div class="app-shell">
@@ -47,6 +47,6 @@
   </div>
 </div>
   <div id="copy-toast" class="copy-toast" role="status" aria-live="polite" aria-atomic="true" hidden><span class="copy-toast-check" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m3.5 8.2 3 3 6-6.4"/></svg></span><span>Copied</span></div>
-  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.4-final-ui" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.5-final-ui" defer></script>
 </body></html>
 
