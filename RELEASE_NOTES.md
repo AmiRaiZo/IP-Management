@@ -1,16 +1,19 @@
+## Version 5.0.7 release notes
+
+- Recover an existing installation when its saved domain no longer has a usable HTTPS Nginx virtual host; interactively request and validate a replacement hostname instead of stopping at domain detection.
+- Verify that an existing HTTPS proxy and certificate actually match the saved hostname, and do not treat an unexpired certificate alone as proof that the domain is usable.
+- Issue a certificate for the replacement hostname with Certbot standalone, generate an IP-refresh-compatible Nginx site, and atomically update deployment environment settings while preserving unrelated secrets and the old certificate/site.
+- Read the replacement hostname from `/dev/tty`; fail clearly when recovery requires input but no interactive terminal is available.
+- Add regression coverage for strict hostname validation, certificate matching, Nginx configuration compatibility, atomic environment updates, and atomic site-file replacement.
+
 ## Version 5.0.6 release notes
 
 - Prevent a newly installed Nginx package from trying to start before the existing IP-refresh systemd dependency is repaired during an in-place upgrade.
 - Temporarily suppress only Nginx automatic service starts during dependency installation, preserve and restore any pre-existing `policy-rc.d`, and let the normal upgrade validation start Nginx after its units and helper are refreshed.
 - Add regression checks for the guarded package-install path in both fresh installation and in-place upgrade scripts.
 
-## Version 5.0.6 release notes
-
-- Refresh CSS and JavaScript cache keys to v5.0.6 so existing browsers fetch the release assets.
-
 ## Version 5.0.5 release notes
 
-- Refresh CSS and JavaScript cache keys to v5.0.5 so existing browsers fetch the release assets.
 - Check each required Debian/Ubuntu system package before installation and install only missing packages; skip APT update/install entirely when the complete dependency set is already present.
 - Apply the same missing-package-only bootstrap to fresh installs and direct in-place upgrades, while retaining command, Python venv, and systemd readiness checks.
 - Add regression coverage for dependency detection, selective installation, and the already-installed fast path.
@@ -390,5 +393,4 @@
 - Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
 - A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
 - Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
-
 
