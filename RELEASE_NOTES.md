@@ -1,3 +1,9 @@
+## Version 5.0.5 release notes
+
+- Check each required Debian/Ubuntu system package before installation and install only missing packages; skip APT update/install entirely when the complete dependency set is already present.
+- Apply the same missing-package-only bootstrap to fresh installs and direct in-place upgrades, while retaining command, Python venv, and systemd readiness checks.
+- Add regression coverage for dependency detection, selective installation, and the already-installed fast path.
+
 ## Version 5.0.4 release notes
 
 - Add full ZIP backup and restore for the database and uploaded media, including archive/schema/constraint checks, cross-worker request draining, a durable restore journal with startup recovery, rollback, and invalidation of existing sessions and remembered 2FA devices.
