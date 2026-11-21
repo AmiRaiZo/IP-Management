@@ -2877,6 +2877,8 @@ class ArchiveTests(unittest.TestCase):
             }, headers={"User-Agent": "Test Browser/42 (Windows 11)"})
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"Verification code", response.data)
+            self.assertIn(b"Enter your authenticator code to continue.", response.data)
+            self.assertNotIn(b"telegram", response.data.lower())
             self.assertIn(b"data-login-approval-status", response.data)
             self.assertEqual(send.call_args.kwargs.get("delete_after"), 0)
             self.assertIn("approval-admin", send.call_args.args[1])
@@ -2940,7 +2942,8 @@ class ArchiveTests(unittest.TestCase):
                 "message": {"message_id": 88, "chat": {"id": 12345, "type": "private"}}}})
             response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"rejected by the telegram administrator", response.data.lower())
+        self.assertIn(b"this sign-in was rejected", response.data.lower())
+        self.assertNotIn(b"telegram", response.data.lower())
         with self.client.session_transaction() as sess:
             self.assertNotIn("user_id", sess)
             self.assertNotIn("pending_login_approval_id", sess)

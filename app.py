@@ -2946,7 +2946,7 @@ def login():
                 session.pop("pending_2fa_user_id", None)
                 session.pop("pending_2fa_verified", None)
                 session.pop("pending_auth_generation", None)
-                flash("This sign-in was rejected by the Telegram administrator.", "error")
+                flash("This sign-in was rejected.", "error")
             elif session.get("pending_2fa_user_id"):
                 with connect_db() as db:
                     fallback_user = db.execute(
@@ -2993,7 +2993,7 @@ def login():
                     if approval and approval["status"] == "denied":
                         session.clear()
                         session["csrf_token"] = secrets.token_urlsafe(32)
-                        flash("This sign-in was rejected by the Telegram administrator.", "error")
+                        flash("This sign-in was rejected.", "error")
                         return render_template("login.html", stage="password")
                     if approval and approval["status"] in ("completing", "success", "superseded"):
                         response = login_failure_json(
@@ -3012,7 +3012,7 @@ def login():
                             if current_status == "denied":
                                 session.clear()
                                 session["csrf_token"] = secrets.token_urlsafe(32)
-                                flash("This sign-in was rejected by the Telegram administrator.", "error")
+                                flash("This sign-in was rejected.", "error")
                                 return render_template("login.html", stage="password")
                             if current_status in ("completing", "success", "superseded"):
                                 response = login_failure_json(
@@ -3088,7 +3088,7 @@ def login():
                     security_event("login_approval", username, "blocked",
                                    "Telegram administrator approval request could not be delivered; falling back to configured second factor")
                     if not user_requires_two_factor(user):
-                        flash("Telegram approval is unavailable and no authenticator is configured. Please try again later.", "error")
+                        flash("Automatic sign-in approval is unavailable and no authenticator is configured. Please try again later.", "error")
                         return render_template("login.html", stage="password")
                 else:
                     session.clear()

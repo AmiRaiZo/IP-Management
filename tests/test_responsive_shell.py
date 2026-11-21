@@ -350,6 +350,10 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
     def test_telegram_login_approval_is_silent_on_the_normal_code_screen(self):
         self.assertNotIn("stage == 'approval'", self.login)
         self.assertIn("stage == 'verify'", self.login)
+        self.assertIn("Enter your authenticator code to continue.", self.login)
+        self.assertNotIn("telegram", self.login.lower())
+        self.assertNotIn("telegram", self.js.lower())
+        self.assertIn("Automatic approval is unavailable.", self.js)
         self.assertIn("data-login-approval-status", self.login)
         self.assertIn("data-login-approval-complete", self.login)
         self.assertNotIn('http-equiv="refresh"', self.base)

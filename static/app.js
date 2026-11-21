@@ -79,8 +79,7 @@
       if (event.key === 'Escape') closeMobileSidebar();
     });
   }
-  // Telegram approval is checked silently in the background. The visible page
-  // remains the ordinary authenticator screen; no periodic page reload occurs.
+  // Optional sign-in approval is checked silently in the background.
   const approvalTransport = document.querySelector('[data-login-approval-status]');
   if (approvalTransport) {
     const statusUrl = approvalTransport.dataset.loginApprovalStatus;
@@ -113,7 +112,7 @@
         if (result.status === 'denied') {
           finished = true;
           if (feedback) {
-            feedback.textContent = 'This sign-in was rejected by the Telegram administrator.';
+            feedback.textContent = 'This sign-in was rejected.';
             feedback.hidden = false;
           }
           document.querySelectorAll('.verify-stage form').forEach(form => {
@@ -125,7 +124,7 @@
           finished = true;
           approvalTransport.remove();
           if (feedback) {
-            feedback.textContent = 'Telegram approval was accepted. Sign-in is being completed. Refresh this page if it does not continue.';
+            feedback.textContent = 'Sign-in is being completed. Refresh this page if it does not continue.';
             feedback.hidden = false;
           }
           return;
@@ -134,7 +133,7 @@
           finished = true;
           approvalTransport.remove();
           if (feedback && result.status !== 'superseded') {
-            feedback.textContent = 'Telegram approval is unavailable. You can still sign in with your authenticator code.';
+            feedback.textContent = 'Automatic approval is unavailable. You can still sign in with your authenticator code.';
             feedback.hidden = false;
           }
           return;

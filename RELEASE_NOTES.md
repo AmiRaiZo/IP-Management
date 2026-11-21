@@ -1,3 +1,10 @@
+## Version 5.0.10 release notes
+
+- Remove all visible references to Telegram from the sign-in and authenticator verification experience; the second-factor screen now asks only for the authenticator code.
+- Keep optional approval handling silent in the background and use neutral status/error messages that do not identify the approval channel.
+- Preserve existing authenticator, recovery-code, and background approval behavior; add regression checks that login HTML and its client-side messages contain no Telegram references.
+- Refresh static asset cache keys so existing browsers load the updated login copy and scripts.
+
 ## Version 5.0.9 release notes
 
 - Make Authenticator/recovery-code sign-in and Telegram administrator approval compete through atomic state transitions, so only one method can complete a login attempt.
@@ -409,4 +416,4 @@
 - Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
 - A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
 - Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
-412
+419
