@@ -28,7 +28,41 @@ if [[ "${IPM_SYSTEM_DEPS_READY:-0}" != 1 ]]; then
   if (( ${#MISSING_PACKAGES[@]} > 0 )); then
     echo "Installing missing system packages: ${MISSING_PACKAGES[*]}"
     apt-get update
+    # Nginx's package postinst can try to start the service before this
+    # upgrader refreshes the application's custom systemd preflight unit.
+    # Suppress only that automatic start; the upgrader validates and restarts
+    # Nginx after all current unit files and helpers have been installed.
+    POLICY_RC_D=/usr/sbin/policy-rc.d
+    POLICY_BACKUP=""
+    if [[ -e "$POLICY_RC_D" || -L "$POLICY_RC_D" ]]; then
+      POLICY_BACKUP="$(mktemp /usr/sbin/.policy-rc.d.ipm.XXXXXX)"
+      cp -a "$POLICY_RC_D" "$POLICY_BACKUP"
+    fi
+    restore_policy_rc_d() {
+      rm -f -- "$POLICY_RC_D"
+      if [[ -n "$POLICY_BACKUP" && -e "$POLICY_BACKUP" ]]; then
+        mv -f -- "$POLICY_BACKUP" "$POLICY_RC_D"
+      fi
+    }
+    trap restore_policy_rc_d EXIT
+    cat > "$POLICY_RC_D" <<'POLICY'
+#!/bin/sh
+case "${1:-}" in
+  nginx|nginx.service) exit 101 ;;
+esac
+if [ -n "${IPM_POLICY_RC_D_BACKUP:-}" ] && [ -x "$IPM_POLICY_RC_D_BACKUP" ]; then
+  exec "$IPM_POLICY_RC_D_BACKUP" "$@"
+fi
+exit 0
+POLICY
+    if [[ -n "$POLICY_BACKUP" ]]; then
+      export IPM_POLICY_RC_D_BACKUP="$POLICY_BACKUP"
+    fi
+    chmod 0755 "$POLICY_RC_D"
     apt-get install -y "${MISSING_PACKAGES[@]}"
+    restore_policy_rc_d
+    trap - EXIT
+    unset IPM_POLICY_RC_D_BACKUP
   else
     echo "All required system packages are already installed; skipping APT installation."
   fi
