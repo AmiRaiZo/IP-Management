@@ -68,7 +68,7 @@ HTTPS_PORT="$(printf '%s\n' "$NGINX_INFO" | sed -n '2p')"
 [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ && "$HTTPS_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "Detected invalid domain or HTTPS port." >&2; exit 1; }
 
 echo "Existing deployment detected: https://$DOMAIN:$HTTPS_PORT, internal port $APP_PORT."
-echo "Nginx configuration and SSL certificates will be kept as they are."
+echo "SSL certificates will be kept; the application upload and request timeouts will be updated for full backup restore."
 read -r -p "Type UPGRADE to continue: " CONFIRM < /dev/tty
 [[ "$CONFIRM" == UPGRADE ]] || { echo "Cancelled."; exit 1; }
 
@@ -123,7 +123,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git clone --depth 1 "$REPO_URL" "$WORK_DIR/source"
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do
   [[ -e "$WORK_DIR/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }
 done
 
@@ -131,6 +131,7 @@ done
 DEPLOYED=1
 systemctl stop station-archive.service
 rsync -a --delete --exclude='.git/' --exclude='.venv/' "$WORK_DIR/source/" "$APP_DIR/"
+python3 "$APP_DIR/station_archive_upgrade_limits.py" --domain "$DOMAIN" --https-port "$HTTPS_PORT" --app-port "$APP_PORT"
 install -o root -g root -m 0750 "$APP_DIR/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
 chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
@@ -261,7 +262,7 @@ git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
 git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
 SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
 [[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
+for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
 echo "PROGRESS:25:Backing up the current application"
 mkdir -p "$TMP/backup" "$TMP/venv-backup"
 # Preserve exact dependencies so rollback never relies on PyPI or network access.
@@ -271,6 +272,7 @@ DEPLOYED=1
 	echo "PROGRESS:32:Preparing the application backup"
 	echo "PROGRESS:35:Installing application files while the current worker stays online"
 	rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
+		python3 /opt/station-archive/station_archive_upgrade_limits.py --domain "${APP_DOMAIN:-${DOMAIN:-}}" --https-port "${PUBLIC_PORT:-${APP_HTTPS_PORT:-}}" --app-port "$APP_PORT"
 	install -o root -g root -m 0750 "$TMP/source/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
 	echo "PROGRESS:50:Installing privileged helper and server service configuration"
 install -o root -g root -m 0750 "$TMP/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
@@ -495,3 +497,4 @@ echo "Upgrade completed. Existing domain, public HTTPS port, Nginx configuration
 echo "Backups: $BACKUP_DIR"
 echo "Application URL: https://$DOMAIN:$HTTPS_PORT"
 echo "Updater: sudo /usr/local/sbin/station-archive-update"
+

@@ -618,4 +618,46 @@
     try { await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; showCopyToast(); }
     catch (_) { target.focus(); target.select?.(); }
   }));
+
+  const publicIpPanel = document.querySelector('[data-public-ip-status]');
+  if (publicIpPanel) {
+    const statusUrl = publicIpPanel.dataset.statusUrl;
+    const badge = publicIpPanel.querySelector('[data-public-ip-badge]');
+    const ipValue = publicIpPanel.querySelector('[data-public-ip-value]');
+    const checkedValue = publicIpPanel.querySelector('[data-public-ip-checked]');
+    const changedValue = publicIpPanel.querySelector('[data-public-ip-changed]');
+    const messageValue = publicIpPanel.querySelector('[data-public-ip-message]');
+    let statusRequestActive = false;
+    const refreshPublicIpStatus = async () => {
+      if (statusRequestActive || !statusUrl) return;
+      statusRequestActive = true;
+      try {
+        const response = await fetch(statusUrl, {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}});
+        if (!response.ok) return;
+        const state = await response.json();
+        const detected = Boolean(state.public_ipv4);
+        const healthy = state.status === 'ok' && detected;
+        if (ipValue) ipValue.textContent = state.public_ipv4 || 'Not detected yet';
+        if (checkedValue) checkedValue.textContent = state.checked_at ? `Last checked ${state.checked_at}` : 'The server service reports here after its first check.';
+        if (changedValue) changedValue.textContent = state.changed_at || 'No change recorded yet';
+        if (badge) {
+          badge.classList.toggle('is-online', healthy);
+          badge.classList.toggle('is-pending', !healthy && !state.status);
+          badge.classList.toggle('is-error', !healthy && Boolean(state.status));
+          badge.textContent = healthy ? 'Active' : state.status ? 'Needs attention' : 'Waiting for first check';
+        }
+        if (messageValue) {
+          messageValue.textContent = state.status === 'ok' ? '' : (state.message || 'The latest public IP check has not completed yet.');
+          messageValue.hidden = !messageValue.textContent;
+        }
+      } catch (_) {
+        // Keep the last known status visible if a refresh is temporarily unavailable.
+      } finally {
+        statusRequestActive = false;
+      }
+    };
+    refreshPublicIpStatus();
+    window.setInterval(refreshPublicIpStatus, 30000);
+  }
 })();
+

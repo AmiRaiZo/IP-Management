@@ -1,8 +1,12 @@
 import os
+import json
 import tempfile
 import re
+import secrets
 import shutil
 import subprocess
+import zipfile
+import time
 from pathlib import Path
 import unittest
 from io import BytesIO
@@ -173,6 +177,13 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302, "A trusted device must not be prompted for a second factor again within 24 hours")
         response = self.client.get(response.location)
         self.assertIn(b'Welcome back, two-step!', response.data)
+        with archive.connect_db() as db:
+            db.execute("UPDATE app_settings SET value=? WHERE key='session_generation'", (secrets.token_urlsafe(32),))
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        self.client.get("/login")
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "username": "two-step", "password": "test-pass"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Authenticator code', response.data, "A restored session generation must revoke remembered 2FA devices too")
 
     def test_recovery_codes_are_shown_once_hashed_and_single_use(self):
         user_id, secret = self.create_user("recovery-user")
@@ -1732,6 +1743,257 @@ class ArchiveTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
 
+    def test_saved_branding_and_text_settings_are_rendered(self):
+        _, secret = self.create_user("branding-admin", role="superadmin")
+        self.assertEqual(self.login("branding-admin", secret).status_code, 302)
+        response = self.client.post("/settings", data={
+            "csrf_token": self.csrf(), "brand_subtitle": "MY NETWORK",
+            "brand_logo_text": "NET", "footer_text": "Private network console",
+            "login_title": "Secure sign in", "login_subtitle": "Authorized operators only",
+            "inventory_title": "Address book", "inventory_description": "Current network endpoints",
+            "app_description": "Private inventory", "group_label": "Network groups",
+            "user_label": "Team access", "accent_color": "#1267ab",
+        })
+        self.assertEqual(response.status_code, 302)
+        inventory_page = self.client.get("/").get_data(as_text=True)
+        self.assertIn("Address book", inventory_page)
+        self.assertIn("Current network endpoints", inventory_page)
+        self.assertIn("Network groups", inventory_page)
+        self.assertIn("Team access", inventory_page)
+        self.assertIn("MY NETWORK", inventory_page)
+        self.assertIn("Private network console", inventory_page)
+        self.assertIn("--primary: #1267ab", inventory_page)
+        self.client.post("/logout", data={"csrf_token": self.csrf()})
+        login_page = self.client.get("/login").get_data(as_text=True)
+        self.assertIn("Secure sign in", login_page)
+        self.assertIn("Authorized operators only", login_page)
+        self.assertIn("MY NETWORK", login_page)
+        self.assertIn("Private network console", login_page)
+
+    def test_settings_show_detected_public_ip_status(self):
+        _, secret = self.create_user("ip-status-admin", role="superadmin")
+        self.assertEqual(self.login("ip-status-admin", secret).status_code, 302)
+        state_file = Path(TEMP_DATA.name) / "test-public-ip-state.json"
+        state_file.write_text(json.dumps({
+            "status": "ok", "public_ipv4": "212.64.210.74",
+            "checked_at": "2026-11-21T07:00:00+00:00", "changed_at": "", "message": "ready",
+        }), encoding="utf-8")
+        with patch.object(archive, "PUBLIC_IP_STATE_FILE", state_file):
+            page = self.client.get("/settings").get_data(as_text=True)
+            status_response = self.client.get("/settings/public-ip/status")
+        self.assertIn("212.64.210.74", page)
+        self.assertIn("Every 30 seconds", page)
+        self.assertIn("Automatic public IP detection", page)
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.json["public_ipv4"], "212.64.210.74")
+        self.assertIn("no-store", status_response.headers.get("Cache-Control", ""))
+
+    def test_restore_gate_blocks_new_requests_during_database_and_upload_swap(self):
+        _, secret = self.create_user("restore-gate-admin", role="superadmin")
+        self.assertEqual(self.login("restore-gate-admin", secret).status_code, 302)
+        lock_file = Path(TEMP_DATA.name) / "restore-gate-test.lock"
+        lock_file.write_text(str(os.getpid()), encoding="ascii")
+        try:
+            with patch.object(archive, "RESTORE_MAINTENANCE_FILE", lock_file):
+                response = self.client.get("/settings")
+            self.assertEqual(response.status_code, 503)
+            self.assertIn(b"restore is in progress", response.data)
+        finally:
+            lock_file.unlink(missing_ok=True)
+
+    def test_restore_quiet_point_waits_for_background_worker_leases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lease_dir = Path(temporary) / "request-leases"
+            lease_dir.mkdir()
+            worker_lease = lease_dir / f"{os.getpid()}-999-test-worker.lease"
+            worker_lease.write_text(str(time.time()), encoding="ascii")
+            with archive.app.test_request_context("/"):
+                archive.request.environ["ipm.request_lease"] = str(lease_dir / "own-request.lease")
+                with self.assertRaisesRegex(ValueError, "Other requests are still active"):
+                    archive.wait_for_restore_quiet_point(timeout=0, lease_dir=lease_dir)
+
+    def test_restore_quiet_point_discards_a_lease_from_a_reused_process_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lease_dir = Path(temporary) / "request-leases"
+            lease_dir.mkdir()
+            stale_lease = lease_dir / f"{os.getpid()}-999-stale-worker.lease"
+            stale_lease.write_text(json.dumps({"pid": os.getpid(), "process_start": "old-process-start"}), encoding="utf-8")
+            with patch.object(archive, "_process_start_identity", return_value="new-process-start"):
+                with archive.app.test_request_context("/"):
+                    archive.request.environ["ipm.request_lease"] = str(lease_dir / "own-request.lease")
+                    archive.wait_for_restore_quiet_point(timeout=0, lease_dir=lease_dir)
+            self.assertFalse(stale_lease.exists())
+
+    def test_restore_session_generation_invalidates_other_logged_in_browsers(self):
+        _, secret = self.create_user("session-generation-admin", role="superadmin")
+        self.assertEqual(self.login("session-generation-admin", secret).status_code, 302)
+        second_client = archive.app.test_client()
+        second_client.get("/login")
+        with second_client.session_transaction() as session_data:
+            second_csrf = session_data["csrf_token"]
+        password_step = second_client.post("/login", data={
+            "csrf_token": second_csrf, "username": "session-generation-admin", "password": "test-pass",
+        })
+        self.assertEqual(password_step.status_code, 200)
+        with second_client.session_transaction() as session_data:
+            second_csrf = session_data["csrf_token"]
+        second_factor = second_client.post("/login", data={
+            "csrf_token": second_csrf, "code": pyotp.TOTP(secret).now(),
+        })
+        self.assertEqual(second_factor.status_code, 302)
+        with archive.connect_db() as db:
+            db.execute("UPDATE app_settings SET value=? WHERE key='session_generation'", (secrets.token_urlsafe(32),))
+        response = second_client.get("/settings")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+
+    def test_restore_session_generation_invalidates_pending_two_factor_login(self):
+        _, secret = self.create_user("pending-generation-admin", role="superadmin")
+        self.client.get("/login")
+        password_step = self.client.post("/login", data={
+            "csrf_token": self.csrf(), "username": "pending-generation-admin", "password": "test-pass",
+        })
+        self.assertEqual(password_step.status_code, 200)
+        self.assertIn(b"Authenticator code", password_step.data)
+        with archive.connect_db() as db:
+            db.execute("UPDATE app_settings SET value=? WHERE key='session_generation'", (secrets.token_urlsafe(32),))
+        response = self.client.post("/login", data={"csrf_token": self.csrf(), "code": pyotp.TOTP(secret).now()})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+        with self.client.session_transaction() as session_data:
+            self.assertNotIn("user_id", session_data)
+
+    def test_restore_database_validation_rejects_placeholder_schema(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "incomplete.sqlite3"
+            connection = archive.sqlite3.connect(str(database_path))
+            try:
+                for table in ("users", "ips", "notes", "accounts", "app_settings", "audit_log"):
+                    connection.execute(f"CREATE TABLE {table}(placeholder TEXT)")
+                connection.commit()
+            finally:
+                connection.close()
+            with self.assertRaisesRegex(ValueError, "missing required tables"):
+                archive._verify_restore_database(database_path)
+
+    def test_restore_database_validation_rejects_tables_without_primary_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "no-primary-keys.sqlite3"
+            connection = archive.sqlite3.connect(str(database_path))
+            try:
+                for table, columns in archive.RESTORE_REQUIRED_COLUMNS.items():
+                    declarations = ", ".join(f'"{column}" TEXT' for column in sorted(columns))
+                    connection.execute(f'CREATE TABLE "{table}" ({declarations})')
+                connection.commit()
+            finally:
+                connection.close()
+            with self.assertRaisesRegex(ValueError, "unexpected primary key"):
+                archive._verify_restore_database(database_path)
+
+    def test_startup_recovery_rolls_back_interrupted_database_and_upload_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "archive.sqlite3"
+            connection = archive.sqlite3.connect(str(database_path))
+            connection.execute("CREATE TABLE restore_state(value TEXT)")
+            connection.execute("INSERT INTO restore_state(value) VALUES('before')")
+            connection.commit()
+            connection.close()
+            staging = root / ".ipm-restore-0123456789abcdef"
+            staging.mkdir()
+            rollback_database = staging / "database-before-restore.sqlite3"
+            archive._restore_sqlite_snapshot(database_path, rollback_database)
+            connection = archive.sqlite3.connect(str(database_path))
+            connection.execute("UPDATE restore_state SET value='partially-restored'")
+            connection.commit()
+            connection.close()
+            previous_uploads = staging / "uploads-before-restore"
+            previous_uploads.mkdir()
+            (previous_uploads / "old.txt").write_text("old uploads", encoding="utf-8")
+            uploads = root / "uploads"
+            uploads.mkdir()
+            (uploads / "new.txt").write_text("new uploads", encoding="utf-8")
+            journal_path = root / "restore-journal.json"
+            journal_path.write_text(json.dumps({
+                "format": "ip-management-restore-journal", "version": 1,
+                "staging_dir": staging.name, "phase": "uploads_installed",
+                "had_uploads": True,
+            }), encoding="utf-8")
+            lock_path = root / "restore-in-progress"
+            lock_path.write_text("999999999", encoding="ascii")
+            recovery_path = root / "restore-recovery-required"
+            with patch.multiple(archive,
+                DATA_DIR=root, DB_PATH=database_path, UPLOAD_DIR=uploads,
+                RESTORE_JOURNAL_FILE=journal_path, RESTORE_MAINTENANCE_FILE=lock_path,
+                RESTORE_RECOVERY_REQUIRED_FILE=recovery_path):
+                self.assertTrue(archive.recover_interrupted_restore())
+            connection = archive.sqlite3.connect(str(database_path))
+            try:
+                self.assertEqual(connection.execute("SELECT value FROM restore_state").fetchone()[0], "before")
+            finally:
+                connection.close()
+            self.assertEqual((uploads / "old.txt").read_text(encoding="utf-8"), "old uploads")
+            self.assertFalse((uploads / "new.txt").exists())
+            self.assertFalse(journal_path.exists())
+            self.assertFalse(lock_path.exists())
+            self.assertFalse(recovery_path.exists())
+
+    def test_startup_recovery_keeps_a_committed_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "archive.sqlite3"
+            connection = archive.sqlite3.connect(str(database_path))
+            connection.execute("CREATE TABLE restore_state(value TEXT)")
+            connection.execute("INSERT INTO restore_state(value) VALUES('committed')")
+            connection.commit()
+            connection.close()
+            staging = root / ".ipm-restore-fedcba9876543210"
+            staging.mkdir()
+            previous_uploads = staging / "uploads-before-restore"
+            previous_uploads.mkdir()
+            (previous_uploads / "old.txt").write_text("old", encoding="utf-8")
+            uploads = root / "uploads"
+            uploads.mkdir()
+            (uploads / "new.txt").write_text("new", encoding="utf-8")
+            journal_path = root / "restore-journal.json"
+            journal_path.write_text(json.dumps({
+                "format": "ip-management-restore-journal", "version": 1,
+                "staging_dir": staging.name, "phase": "committed",
+                "had_uploads": True,
+            }), encoding="utf-8")
+            lock_path = root / "restore-in-progress"
+            lock_path.write_text("999999999", encoding="ascii")
+            recovery_path = root / "restore-recovery-required"
+            with patch.multiple(archive,
+                DATA_DIR=root, DB_PATH=database_path, UPLOAD_DIR=uploads,
+                RESTORE_JOURNAL_FILE=journal_path, RESTORE_MAINTENANCE_FILE=lock_path,
+                RESTORE_RECOVERY_REQUIRED_FILE=recovery_path):
+                self.assertTrue(archive.recover_interrupted_restore())
+            connection = archive.sqlite3.connect(str(database_path))
+            try:
+                self.assertEqual(connection.execute("SELECT value FROM restore_state").fetchone()[0], "committed")
+            finally:
+                connection.close()
+            self.assertEqual((uploads / "new.txt").read_text(encoding="utf-8"), "new")
+            self.assertFalse(journal_path.exists())
+            self.assertFalse(lock_path.exists())
+
+    def test_restore_recovery_marker_without_journal_keeps_application_locked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock_path = root / "restore-in-progress"
+            lock_path.write_text("RECOVERY_REQUIRED\nmanual check", encoding="utf-8")
+            journal_path = root / "restore-journal.json"
+            recovery_path = root / "restore-recovery-required"
+            with patch.multiple(archive,
+                DATA_DIR=root, DB_PATH=root / "archive.sqlite3", UPLOAD_DIR=root / "uploads",
+                RESTORE_JOURNAL_FILE=journal_path, RESTORE_MAINTENANCE_FILE=lock_path,
+                RESTORE_RECOVERY_REQUIRED_FILE=recovery_path):
+                self.assertFalse(archive.recover_interrupted_restore())
+            self.assertTrue(recovery_path.exists())
+            self.assertTrue(lock_path.exists())
+            self.assertIn("RECOVERY_REQUIRED", lock_path.read_text(encoding="utf-8"))
+
     def test_login_copy_is_minimal_and_password_toggle_is_present(self):
         response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
@@ -1822,6 +2084,14 @@ class ArchiveTests(unittest.TestCase):
         with archive.Image.open(BytesIO(image_response.data)) as sanitized:
             self.assertEqual(sanitized.format, "PNG")
             self.assertEqual(sanitized.size, (2, 2))
+        image_response.close()
+
+        other_id, _ = self.create_user("other-avatar-user", role="admin")
+        other_image = f"avatars/user-{other_id}.png"
+        (archive.AVATAR_DIR / f"user-{other_id}.png").write_bytes(b"private avatar")
+        with archive.connect_db() as db:
+            db.execute("UPDATE users SET profile_image=? WHERE id=?", (other_image, other_id))
+        self.assertEqual(self.client.get("/media/" + other_image).status_code, 404)
 
     def test_legacy_database_migrates_records_and_promotes_first_user(self):
         with archive.connect_db() as db:
@@ -1849,6 +2119,7 @@ class ArchiveTests(unittest.TestCase):
             with self.client.session_transaction() as sess:
                 sess["user_id"] = user_id
                 sess["two_factor_verified"] = True
+                sess["session_generation"] = archive.current_session_generation()
             response = self.client.get("/update/status")
             self.assertEqual(response.status_code, 200)
             payload = response.get_json()
@@ -1867,6 +2138,7 @@ class ArchiveTests(unittest.TestCase):
             with self.client.session_transaction() as sess:
                 sess["user_id"] = user_id
                 sess["two_factor_verified"] = True
+                sess["session_generation"] = archive.current_session_generation()
             response = self.client.get("/update/status")
             self.assertEqual(response.status_code, 200)
             payload = response.get_json()
@@ -2074,9 +2346,19 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(self.login("backup-admin", secret).status_code, 302)
         with archive.connect_db() as db:
             group_id = db.execute("SELECT id FROM groups WHERE name='Default'").fetchone()["id"]
+            account_group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
+            note_group_id = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()["id"]
             db.execute("INSERT INTO ips(name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                        ("Router A", "192.0.2.10", 22, "root", archive.vault.encrypt(b"device-secret").decode(), "test-note", group_id, "backup-admin", archive.now(), archive.now()))
+            db.execute("INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                       ("Vault account", "vault-user", "vault@example.test", archive.vault.encrypt(b"vault-secret").decode(), account_group_id, "backup-admin", archive.now(), archive.now()))
+            db.execute("INSERT INTO notes(title,note_text,wifi_password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                       ("Vault note", "note content", archive.vault.encrypt(b"wifi-secret").decode(), note_group_id, "backup-admin", archive.now(), archive.now()))
             db.execute("INSERT INTO app_settings(key,value) VALUES('shared_two_factor_secret',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("TOPSECRETSEED",))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('session_generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("SESSIONGENSECRET",))
+            db.execute("INSERT INTO app_settings(key,value) VALUES('telegram_webhook_secret_enc',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("WEBHOOKSECRET",))
+        with self.client.session_transaction() as sess:
+            sess["session_generation"] = "SESSIONGENSECRET"
         bad = self.client.post("/settings/export.txt", data={"csrf_token": self.csrf(), "current_password": "wrong-password"})
         self.assertEqual(bad.status_code, 403)
         response = self.client.post("/settings/export.txt", data={"csrf_token": self.csrf(), "current_password": "test-pass"})
@@ -2088,14 +2370,86 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn("READABLE TEXT DATA BACKUP", body)
         self.assertIn("192.0.2.10", body)
         self.assertIn("device-secret", body)
+        self.assertIn("vault-user", body)
+        self.assertIn("vault-secret", body)
+        self.assertIn("Vault note", body)
+        self.assertIn("wifi-secret", body)
         self.assertIn("[REDACTED: secret]", body)
         self.assertNotIn("TOPSECRETSEED", body)
+        self.assertNotIn("SESSIONGENSECRET", body)
+        self.assertNotIn("WEBHOOKSECRET", body)
         self.assertNotIn("test-pass", body)
         with archive.connect_db() as db:
             account_hash = db.execute("SELECT password_hash FROM users WHERE username='backup-admin'").fetchone()["password_hash"]
         self.assertNotIn(account_hash, body)
         self.assertIn("--- FILE: app.py ---", body)
         self.assertIn("--- FILE: templates/settings.html ---", body)
+
+    def test_full_backup_restores_database_notes_accounts_and_uploaded_files(self):
+        _, secret = self.create_user("full-backup-admin", role="superadmin")
+        self.assertEqual(self.login("full-backup-admin", secret).status_code, 302)
+        with archive.connect_db() as db:
+            account_group_id = db.execute("SELECT id FROM account_groups WHERE name='Default'").fetchone()["id"]
+            note_group_id = db.execute("SELECT id FROM note_groups WHERE name='Default'").fetchone()["id"]
+            db.execute("INSERT INTO accounts(name,username,email,password_enc,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                       ("Backup account", "backup-user", "backup@example.test", archive.vault.encrypt(b"account-pass").decode(), account_group_id, "full-backup-admin", archive.now(), archive.now()))
+            db.execute("INSERT INTO notes(title,service_url,note_text,group_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                       ("Backup note", "https://example.test", "keep this note", note_group_id, "full-backup-admin", archive.now(), archive.now()))
+        (archive.UPLOAD_DIR / "backup-proof.txt").write_text("restore this upload", encoding="utf-8")
+
+        bad_password = self.client.post("/settings/backup/full", data={"csrf_token": self.csrf(), "current_password": "wrong"})
+        self.assertEqual(bad_password.status_code, 403)
+        backup_response = self.client.post("/settings/backup/full", data={"csrf_token": self.csrf(), "current_password": "test-pass"})
+        self.assertEqual(backup_response.status_code, 200)
+        self.assertIn("application/zip", backup_response.content_type)
+        backup_bytes = backup_response.data
+        backup_response.close()
+        with zipfile.ZipFile(BytesIO(backup_bytes)) as archive_file:
+            self.assertIn("manifest.json", archive_file.namelist())
+            self.assertIn("database.sqlite3", archive_file.namelist())
+            self.assertIn("uploads/backup-proof.txt", archive_file.namelist())
+
+        with archive.connect_db() as db:
+            db.execute("UPDATE notes SET title='changed after backup'")
+            db.execute("DELETE FROM accounts")
+        (archive.UPLOAD_DIR / "backup-proof.txt").unlink()
+        (archive.UPLOAD_DIR / "extra-after-backup.txt").write_text("remove me", encoding="utf-8")
+        restored = self.client.post("/settings/backup/restore", data={
+            "csrf_token": self.csrf(), "current_password": "test-pass",
+            "backup_file": (BytesIO(backup_bytes), "ip-management-backup.zip"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(restored.status_code, 302)
+        self.assertIn("/login", restored.location)
+        with archive.connect_db() as db:
+            note = db.execute("SELECT title,note_text FROM notes").fetchone()
+            account = db.execute("SELECT name,username FROM accounts").fetchone()
+        self.assertEqual(note["title"], "Backup note")
+        self.assertEqual(note["note_text"], "keep this note")
+        self.assertEqual(account["username"], "backup-user")
+        self.assertEqual((archive.UPLOAD_DIR / "backup-proof.txt").read_text(encoding="utf-8"), "restore this upload")
+        self.assertFalse((archive.UPLOAD_DIR / "extra-after-backup.txt").exists())
+        self.assertFalse(archive.RESTORE_JOURNAL_FILE.exists())
+        self.assertFalse(archive.RESTORE_MAINTENANCE_FILE.exists())
+        self.assertFalse(archive.RESTORE_RECOVERY_REQUIRED_FILE.exists())
+
+    def test_full_backup_restore_rejects_zip_slip_without_changing_data(self):
+        _, secret = self.create_user("zip-slip-admin", role="superadmin")
+        self.assertEqual(self.login("zip-slip-admin", secret).status_code, 302)
+        with archive.connect_db() as db:
+            db.execute("INSERT INTO notes(title,created_by,created_at,updated_at) VALUES(?,?,?,?)",
+                       ("must remain", "zip-slip-admin", archive.now(), archive.now()))
+        malicious = BytesIO()
+        with zipfile.ZipFile(malicious, "w") as archive_file:
+            archive_file.writestr("../outside.txt", "not allowed")
+        malicious.seek(0)
+        response = self.client.post("/settings/backup/restore", data={
+            "csrf_token": self.csrf(), "current_password": "test-pass",
+            "backup_file": (malicious, "malicious.zip"),
+        }, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 302)
+        with archive.connect_db() as db:
+            note = db.execute("SELECT title FROM notes").fetchone()
+        self.assertEqual(note["title"], "must remain")
 
     def test_security_and_backup_routes_reject_regular_user_and_missing_csrf(self):
         _, secret = self.create_user("route-guard-admin", role="admin")
@@ -2308,6 +2662,7 @@ class ArchiveTests(unittest.TestCase):
         with self.client.session_transaction() as sess:
             sess["pending_2fa_user_id"] = user_id
             sess["pending_2fa_secret"] = pyotp.random_base32()
+            sess["pending_auth_generation"] = archive.current_session_generation()
             sess["csrf_token"] = "enrollment-csrf"
         for _ in range(2):
             response = self.client.post("/setup-2fa", data={"csrf_token": "enrollment-csrf", "code": "not-a-code"})
@@ -2956,6 +3311,23 @@ if __name__ == "__main__":
 
 
 class ReleaseScriptSyntaxTests(unittest.TestCase):
+    def test_nginx_proxy_body_limit_allows_full_backup_restore_uploads(self):
+        root = Path(__file__).resolve().parent
+        for name in ("install.sh", "reconfigure_server.sh"):
+            source = (root / name).read_text(encoding="utf-8")
+            with self.subTest(script=name):
+                self.assertIn("client_max_body_size 512m;", source)
+                self.assertIn("client_body_timeout 900s;", source)
+                self.assertIn("proxy_read_timeout 900s;", source)
+        self.assertIn("--timeout 900", (root / "install.sh").read_text(encoding="utf-8"))
+        reconfigure = (root / "reconfigure_server.sh").read_text(encoding="utf-8")
+        self.assertIn("station_archive_upgrade_limits.py", reconfigure)
+        self.assertIn('--app-port "$NEW_PORT"', reconfigure)
+        upgrade = (root / "upgrade_existing.sh").read_text(encoding="utf-8")
+        self.assertIn("station_archive_upgrade_limits.py", upgrade)
+        self.assertIn("--app-port \"$APP_PORT\"", upgrade)
+        self.assertEqual(archive.MAX_BACKUP_UPLOAD_BYTES, 512 * 1024 * 1024)
+
     def test_deployment_shell_scripts_have_valid_bash_syntax(self):
         bash = shutil.which("bash")
         if not bash:
@@ -3004,3 +3376,4 @@ class ReleaseScriptSyntaxTests(unittest.TestCase):
         self.assertIn('if ! bash -n "$0"; then', updater)
         self.assertNotIn('install -o root -g root -m 0750 "$TMP/station-archive-update.new" /usr/local/sbin/station-archive-update', updater)
         self.assertIn("Never overwrite the executable currently being interpreted", updater)
+

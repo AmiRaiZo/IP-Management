@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import shutil
@@ -18,10 +19,48 @@ from typing import Iterable
 ENV_FILE = Path("/etc/station-archive/env")
 NGINX_SITES = Path("/etc/nginx/sites-available")
 BACKUP_DIR = Path("/var/backups/station-archive-ip-refresh")
+STATE_FILE = Path("/var/lib/station-archive/public-ip-state.json")
 
 
 class NoPublicIPv4(RuntimeError):
     """Raised when the current public IPv4 address cannot be determined safely."""
+
+
+def write_public_ip_state(public_ip: str = "", status: str = "ok", message: str = "", state_file: Path = STATE_FILE) -> None:
+    """Publish the last IP check for the authenticated application settings page."""
+    previous = {}
+    try:
+        previous = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    if not isinstance(previous, dict):
+        previous = {}
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    old_ip = str(previous.get("public_ipv4") or "")
+    current_ip = public_ip or old_ip
+    changed_at = previous.get("changed_at", "")
+    if public_ip and old_ip and public_ip != old_ip:
+        changed_at = checked_at
+    payload = {
+        "status": status,
+        "public_ipv4": current_ip,
+        "checked_at": checked_at,
+        "changed_at": changed_at,
+        "message": str(message or "")[:240],
+    }
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{state_file.name}.", dir=str(state_file.parent))
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # The app runs as www-data and only reads this non-secret public-IP status file.
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, state_file)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def choose_public_ipv4(route_info: str, addresses: Iterable[tuple[str, str]]) -> str:
@@ -224,6 +263,22 @@ def command_result(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(arguments, text=True, capture_output=True, check=False)
 
 
+def restore_previous_listener(config_path: Path, backup_path: Path) -> str:
+    """Restore the last known Nginx file and try to reactivate it after a failed change."""
+    try:
+        shutil.copy2(backup_path, config_path)
+        validation = command_result(["nginx", "-t"])
+        if validation.returncode != 0:
+            return "Previous configuration restored, but its nginx -t validation failed."
+        activation = command_result(["systemctl", "restart", "nginx"])
+        if activation.returncode != 0:
+            details = (activation.stdout + "\n" + activation.stderr).strip()[-300:]
+            return "Previous configuration restored, but Nginx restart also failed: " + details
+        return "Previous Nginx configuration restored and restart succeeded."
+    except OSError as exc:
+        return f"Could not restore the previous Nginx configuration: {exc}"
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if arguments not in ([], ["--preflight"]):
@@ -234,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         print("station-archive-ip-refresh: must run as root.", file=sys.stderr)
         return 1
 
+    public_ip = ""
     try:
         settings = read_env()
         domain = settings.get("APP_DOMAIN", "").strip().lower()
@@ -252,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
             public_ip = detect_public_ipv4()
         except NoPublicIPv4 as exc:
             # The timer retries periodically while the VPS network comes up or changes.
+            write_public_ip_state(status="error", message=str(exc))
             print(f"station-archive-ip-refresh: {exc} Will retry automatically.", flush=True)
             return 1 if preflight else 0
 
@@ -264,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         nginx_active = command_result(["systemctl", "is-active", "--quiet", "nginx"]).returncode == 0
         if not changed and nginx_active and not preflight:
+            write_public_ip_state(public_ip, "ok", "HTTPS listener is already using the detected public IPv4.")
             return 0
 
         test = command_result(["nginx", "-t"])
@@ -278,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(f"Nginx configuration validation failed: {details}")
 
         if preflight:
+            write_public_ip_state(public_ip, "ok", "Public IPv4 and Nginx listener passed preflight validation.")
             print(
                 f"station-archive-ip-refresh: verified {domain} HTTPS listener for {public_ip}:{public_port} before Nginx start.",
                 flush=True,
@@ -291,13 +350,19 @@ def main(argv: list[str] | None = None) -> int:
                     restart_result = command_result(["systemctl", "restart", "nginx"])
                     if restart_result.returncode != 0:
                         details = (restart_result.stdout + "\n" + restart_result.stderr).strip()
-                        raise RuntimeError(f"Nginx reload and restart both failed: {details}")
+                        rollback_message = ""
+                        if changed and backup_path is not None:
+                            rollback_message = restore_previous_listener(config_path, backup_path)
+                        raise RuntimeError(f"Nginx reload and restart both failed: {details} {rollback_message}")
         else:
             command_result(["systemctl", "reset-failed", "nginx"])
             start_result = command_result(["systemctl", "start", "nginx"])
             if start_result.returncode != 0:
                 details = (start_result.stdout + "\n" + start_result.stderr).strip()
-                raise RuntimeError(f"Nginx failed to start after IP refresh: {details}")
+                rollback_message = ""
+                if changed and backup_path is not None:
+                    rollback_message = restore_previous_listener(config_path, backup_path)
+                raise RuntimeError(f"Nginx failed to start after IP refresh: {details} {rollback_message}")
 
         if changed:
             print(
@@ -307,11 +372,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             print("station-archive-ip-refresh: Nginx was started successfully.", flush=True)
+        write_public_ip_state(public_ip, "ok", "HTTPS listener is using the detected public IPv4.")
         return 0
     except Exception as exc:
+        try:
+            write_public_ip_state(public_ip, "error", str(exc))
+        except OSError:
+            pass
         print(f"station-archive-ip-refresh: ERROR: {exc}", file=sys.stderr, flush=True)
         return 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

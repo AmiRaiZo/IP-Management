@@ -5,6 +5,7 @@
 <section class="login-card {% if stage == 'verify' %}verify-stage{% endif %}">
   <div class="login-orb orb-one"></div><div class="login-orb orb-two"></div>
   <p class="login-feedback" data-login-feedback role="alert" aria-live="assertive" hidden></p>
+  <a class="login-brand" href="{{ url_for('login') }}">{% if app_settings.brand_logo %}<img class="brand-image login-logo" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="login-logo">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
   {% if stage == 'verify' %}
   {% if login_user %}<div class="login-user-card"><div class="login-user-avatar">{% if login_user.profile_image %}<img class="login-user-avatar-image" src="{{ url_for('media_file', filename=login_user.profile_image) }}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="login-user-avatar-fallback" hidden>{{ login_user.username[:1]|upper }}</span>{% else %}{{ login_user.username[:1]|upper }}{% endif %}</div><div class="login-user-copy"><p class="login-eyebrow">WELCOME BACK</p><h2>{{ login_user.username }}</h2><p class="login-user-meta">{{ login_user.role|default('admin')|replace('superadmin','Super administrator')|title }} <span>·</span> ID #{{ login_user.id }}</p></div></div>{% endif %}
   <h1>Verification code</h1>
@@ -17,7 +18,9 @@
   {% if approval_pending %}<div class="login-approval-transport" data-login-approval-status="{{ url_for('login_approval_status') }}" data-login-approval-complete="{{ url_for('complete_login_approval', next=request.args.get('next', '')) }}" data-csrf-token="{{ csrf_token }}" aria-hidden="true"></div><p class="login-approval-feedback" data-login-approval-feedback role="status" hidden></p>{% endif %}
   <form class="back-to-password" method="get" action="{{ url_for('login') }}"><input type="hidden" name="reset" value="1"><button type="submit">← Use a different account</button></form>
   {% else %}
-  <h1>Welcome back</h1>
+  <h1>{{ app_settings.login_title }}</h1>
+  {% if app_settings.login_subtitle %}<p class="login-description">{{ app_settings.login_subtitle }}</p>{% endif %}
+  {% if app_settings.app_description %}<p class="login-description login-app-description">{{ app_settings.app_description }}</p>{% endif %}
   <form data-login-form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="username">Username</label><input class="login-input" id="username" name="username" autocomplete="username" required maxlength="80" autofocus placeholder="Enter your username">
@@ -27,3 +30,4 @@
   {% endif %}
 </section>
 {% endblock %}
+

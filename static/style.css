@@ -18,7 +18,7 @@ html[data-theme="dark"] body:has(.login-wrap),html[data-theme="light"] body:has(
 .orb-two{width:170px;height:170px;left:-105px;bottom:-105px;background:radial-gradient(circle,#a18bff38,transparent 70%)}
 .login-brand{margin-bottom:35px;gap:13px;font-size:17px;letter-spacing:-.3px}
 .login-brand small{font-size:9px;letter-spacing:1.7px;color:#7b86a0}
-.login-logo{width:47px;height:47px;border-radius:15px;background:linear-gradient(145deg,#8195ff,#4c5fe0 60%,#7854db);box-shadow:0 10px 25px #5368e84a;font-size:14px}
+.login-logo{width:47px;height:47px;flex:0 0 47px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(145deg,#8195ff,#4c5fe0 60%,#7854db);box-shadow:0 10px 25px #5368e84a;font-size:14px;object-fit:contain}
 .login-emblem{width:43px;height:43px;display:grid;place-items:center;border:1px solid #dfe5ff;border-radius:14px;background:linear-gradient(145deg,#f3f5ff,#e9edff);color:#5269e8;font-size:26px;font-weight:500;margin-bottom:23px;box-shadow:0 5px 15px #4569e812}
 .login-card .login-eyebrow{font-size:10px;letter-spacing:2px;color:#5c6fe8;margin-bottom:11px}
 .login-card h1{font-size:clamp(27px,5vw,34px);letter-spacing:-1.25px;line-height:1.16;margin:0 0 12px;color:#151d32}
@@ -807,6 +807,34 @@ html[data-theme="dark"] .note-card-avatar{background:#1b2b4a;border-color:#30446
 .login-approval-transport{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .login-approval-feedback{margin:14px 0 0;color:#c44b58;font-size:12px;text-align:center}
 
+/* Backup and restore workspace, plus live public-IP status. */
+.backup-feature-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}
+.login-brand .brand-image.login-logo{width:47px;height:47px}
+.app-footer{margin:28px 0 8px;padding:14px 4px 0;border-top:1px solid var(--border);color:var(--muted);font-size:10px;text-align:center;line-height:1.7}
+.backup-feature-card{display:flex;flex-direction:column;align-items:flex-start;gap:13px;min-width:0;padding:20px;border:1px solid var(--border);border-radius:16px;background:linear-gradient(145deg,var(--surface),var(--surface-2));box-shadow:0 8px 24px #17243a08}
+.backup-feature-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);font-size:25px;font-weight:700}
+.backup-feature-card h3,.backup-text-export h3{margin:0 0 6px;font-size:15px;color:var(--text)}
+.backup-feature-card p,.backup-text-export p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
+.backup-feature-card>.stack-form{width:100%;margin-top:auto;padding-top:8px}
+.backup-feature-card>.stack-form,.backup-text-export>.stack-form{padding-inline:0!important}
+.backup-feature-card .btn{width:100%;justify-content:center}
+.backup-restore-card .backup-feature-icon{background:#d14d7218;color:#d14d72}
+.backup-text-export{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.7fr);align-items:center;gap:20px;padding:18px 0 2px;border-top:1px solid var(--border)}
+.backup-text-export .stack-form{display:grid;grid-template-columns:1fr auto;align-items:end;gap:8px 12px}
+.backup-text-export .stack-form input[type=password]{grid-column:1/-1}
+.backup-text-export .stack-form label{grid-column:1/-1}
+.public-ip-overview{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(220px,.7fr);gap:16px;padding:18px;border:1px solid var(--border);border-radius:15px;background:linear-gradient(120deg,var(--surface-2),var(--surface))}
+.public-ip-value{display:flex;flex-direction:column;gap:7px;min-width:0}
+.public-ip-value strong{font:800 clamp(22px,3vw,30px)/1.2 Consolas,monospace;letter-spacing:-.8px;color:var(--text);overflow-wrap:anywhere}
+.public-ip-value small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.public-ip-detail{display:grid;grid-template-columns:1fr;gap:4px 12px;align-content:center;border-left:1px solid var(--border);padding-left:18px}
+.public-ip-detail span{color:var(--muted);font-size:10px}.public-ip-detail strong{margin-bottom:7px;color:var(--text);font-size:12px;overflow-wrap:anywhere}
+.ip-refresh-state{flex:0 0 auto;padding:6px 10px;border-radius:99px;background:#e7f8ef;color:#16834a;font-size:10px;font-weight:800}
+.ip-refresh-state.is-pending{background:var(--surface-2);color:var(--muted)}.ip-refresh-state.is-error{background:#fff0f1;color:#c43d50}
+html[data-theme="dark"] .ip-refresh-state.is-online{background:#12372d;color:#8ce6bd}html[data-theme="dark"] .ip-refresh-state.is-error{background:#3a1c27;color:#ffadbd}
+@media(max-width:760px){.backup-feature-grid{grid-template-columns:1fr}.backup-text-export{grid-template-columns:1fr}.backup-text-export .stack-form{grid-template-columns:1fr}.backup-text-export .stack-form input[type=password],.backup-text-export .stack-form label{grid-column:auto}.public-ip-overview{grid-template-columns:1fr}.public-ip-detail{grid-template-columns:1fr;border-left:0;border-top:1px solid var(--border);padding:12px 0 0}}
+
 /* Keep the Note card Edit link and Delete form as equal-width grid items. */
 .note-card-actions>.note-card-edit,.note-card-actions>form{display:flex;width:100%;min-width:0;flex:1 1 0}
 .note-card-actions>.note-card-edit,.note-card-actions>form>.note-card-delete{box-sizing:border-box;width:100%;min-width:0;flex:1 1 0}
+

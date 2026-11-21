@@ -12,7 +12,8 @@ StandardOutput=journal
 StandardError=journal
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/etc/nginx /var/backups
+ReadWritePaths=/etc/nginx /var/backups /var/lib/station-archive
 PrivateTmp=true
 TimeoutStartSec=30
 UMask=0077
+

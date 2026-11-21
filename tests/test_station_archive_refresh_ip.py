@@ -1,15 +1,37 @@
 import tempfile
 import unittest
 from pathlib import Path
+import json
+import subprocess
+from unittest.mock import patch
 
 from station_archive_refresh_ip import (
     NoPublicIPv4,
     choose_public_ipv4,
     rewrite_listener,
+    write_public_ip_state,
+    restore_previous_listener,
 )
 
 
 class PublicIPv4SelectionTests(unittest.TestCase):
+    def test_public_ip_state_records_detection_and_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_file = Path(temporary) / "public-ip-state.json"
+            write_public_ip_state("212.64.210.74", "ok", "ready", state_file)
+            first = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(first["public_ipv4"], "212.64.210.74")
+            self.assertEqual(first["status"], "ok")
+            self.assertEqual(first["changed_at"], "")
+            write_public_ip_state("212.64.210.75", "ok", "changed", state_file)
+            second = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(second["public_ipv4"], "212.64.210.75")
+            self.assertTrue(second["changed_at"])
+            write_public_ip_state(status="error", message="route unavailable", state_file=state_file)
+            third = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(third["public_ipv4"], "212.64.210.75")
+            self.assertEqual(third["status"], "error")
+
     def test_prefers_public_route_source_when_it_is_local(self):
         self.assertEqual(
             choose_public_ipv4(
@@ -99,6 +121,22 @@ class NginxListenerRewriteTests(unittest.TestCase):
                 self.config, "note.example.test", 443, 8443, "212.64.210.74", self.backups
             )
 
+    def test_failed_activation_restores_previous_listener_and_restarts_nginx(self):
+        previous = self.config.read_text(encoding="utf-8")
+        changed, backup = rewrite_listener(
+            self.config, "note.example.test", 443, 443, "212.64.210.74", self.backups
+        )
+        self.assertTrue(changed)
+        with patch("station_archive_refresh_ip.command_result", side_effect=[
+            subprocess.CompletedProcess(["nginx", "-t"], 0, "ok", ""),
+            subprocess.CompletedProcess(["systemctl", "restart", "nginx"], 0, "", ""),
+        ]) as command:
+            message = restore_previous_listener(self.config, backup)
+        self.assertIn("restart succeeded", message)
+        self.assertEqual(self.config.read_text(encoding="utf-8"), previous)
+        self.assertEqual(command.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
+

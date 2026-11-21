@@ -3,21 +3,22 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{% block title %}IP Archive{% endblock %}</title>
+  <meta name="description" content="{{ app_settings.app_description }}">
+  <title>{% block title %}{{ app_settings.brand_name }}{% endblock %}</title>
   <!-- v5.0 login security and Notes card actions -->
   <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.3-copy-toast">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5.0.4-final-ui">
 </head>
-<body class="{% if current_user %}has-sidebar{% endif %}">
+<body class="{% if current_user %}has-sidebar{% endif %}" style="--primary: {{ app_settings.accent_color }}">
 <div class="app-shell">
   <button type="button" class="theme-toggle global-theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="theme-icon">☾</span><span class="theme-text">Dark mode</span></button>
   {% if current_user %}
   <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-controls="primary-navigation" aria-expanded="false" title="Show sidebar" aria-label="Show sidebar"><span class="sidebar-toggle-icon" aria-hidden="true">☰</span><span class="sidebar-toggle-label">Show sidebar</span></button>
   <aside class="sidebar">
-    <a class="brand" href="{{ url_for('index') }}"><span class="brand-symbol">IP</span><span>IP Archive<small>NETWORK DIRECTORY</small></span></a>
+    <a class="brand" href="{{ url_for('index') }}">{% if app_settings.brand_logo %}<img class="brand-image" src="{{ url_for('media_file', filename=app_settings.brand_logo) }}" alt="">{% else %}<span class="brand-symbol">{{ app_settings.brand_logo_text }}</span>{% endif %}<span>{{ app_settings.brand_name }}<small>{{ app_settings.brand_subtitle }}</small></span></a>
     <nav class="nav-links" id="primary-navigation">
-      <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon nav-icon-ip" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>IP addresses</a>
-      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-groups" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M3.5 10h17"/></svg></span>IP groups</a>{% endif %}
+      <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}"><span class="nav-icon nav-icon-ip" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>{{ app_settings.inventory_title }}</a>
+      {% if current_role == 'superadmin' %}<a href="{{ url_for('groups') }}" class="{% if request.endpoint in ['groups','group_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-groups" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M3.5 10h17"/></svg></span>{{ app_settings.group_label }}</a>{% endif %}
     </nav>
     {% if current_role == 'superadmin' %}
     <p class="nav-label nav-label-spaced">ACCOUNT VAULT</p><nav class="nav-links">
@@ -29,7 +30,7 @@
       <a href="{{ url_for('note_groups') }}" class="{% if request.endpoint in ['note_groups','note_group_color_update','note_group_move','note_group_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-note-groups" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="13" rx="2"/><path d="M8 8h4M8 11h4"/><path d="M8 19h11a2 2 0 0 0 2-2V8"/></svg></span>Notes groups</a>
     </nav>
     <p class="nav-label nav-label-spaced">ADMINISTRATION</p><nav class="nav-links">
-      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit','user_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-users" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19v-1.2A4.8 4.8 0 0 1 8.3 13h1.4a4.8 4.8 0 0 1 4.8 4.8V19"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17 13.5a4.5 4.5 0 0 1 3.5 4.4V19"/></svg></span>Users & permissions</a>
+      <a href="{{ url_for('users') }}" class="{% if request.endpoint in ['users','user_edit','user_delete'] %}active{% endif %}"><span class="nav-icon nav-icon-users" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19v-1.2A4.8 4.8 0 0 1 8.3 13h1.4a4.8 4.8 0 0 1 4.8 4.8V19"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17 13.5a4.5 4.5 0 0 1 3.5 4.4V19"/></svg></span>{{ app_settings.user_label }}</a>
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}"><span class="nav-icon nav-icon-settings" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span>Settings</a>
       <a href="{{ url_for('security_center') }}" class="{% if request.endpoint in ['security_center','add_ip_access_rule','delete_ip_access_rule'] %}active{% endif %}"><span class="nav-icon nav-icon-security" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6z"/><path d="m8.5 12 2.3 2.3 4.8-5"/></svg></span>Security & login logs</a>
       <a href="{{ url_for('update_page') }}" class="{% if request.endpoint in ['update_page','update_app'] %}active{% endif %}"><span class="nav-icon nav-icon-updates" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M4.5 10a7.5 7.5 0 0 1 13-3L20 12M4 17v-5h5"/><path d="M19.5 14a7.5 7.5 0 0 1-13 3L4 12"/></svg></span>Updates</a>
@@ -41,9 +42,11 @@
     <main class="container {% block main_class %}{% endblock %}">
       {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}{% if category == 'welcome' %}<div class="welcome-toast" role="status" data-auto-dismiss="8000" aria-label="Login notification">{% if current_avatar %}<img class="welcome-toast-avatar" src="{{ url_for('media_file', filename=current_avatar) }}" alt="Profile picture" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="welcome-toast-avatar" hidden>{{ (current_user|string)[:1]|upper if current_user else '✓' }}</span>{% else %}<span class="welcome-toast-avatar">{{ current_user[:1]|upper if current_user else '✓' }}</span>{% endif %}<span class="welcome-toast-copy"><strong>{{ message }}</strong><small>Signed in successfully</small></span></div>{% else %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endif %}{% endfor %}{% endwith %}
       {% block content %}{% endblock %}
+      {% if request.endpoint != 'login' or app_settings.footer_text != 'IP Management · Secure network inventory' %}<footer class="app-footer">{{ app_settings.footer_text }}</footer>{% endif %}
     </main>
   </div>
 </div>
   <div id="copy-toast" class="copy-toast" role="status" aria-live="polite" aria-atomic="true" hidden><span class="copy-toast-check" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m3.5 8.2 3 3 6-6.4"/></svg></span><span>Copied</span></div>
-  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.3-copy-toast" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=5.0.4-final-ui" defer></script>
 </body></html>
+

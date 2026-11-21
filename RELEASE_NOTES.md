@@ -1,8 +1,18 @@
+## Version 5.0.4 release notes
+
+- Add full ZIP backup and restore for the database and uploaded media, including archive/schema/constraint checks, cross-worker request draining, a durable restore journal with startup recovery, rollback, and invalidation of existing sessions and remembered 2FA devices.
+- Keep the five newest full backups on the server and include Accounts Vault and Notes Vault records in the readable TXT export.
+- Restrict profile avatar downloads to the owning user or the pending 2FA user.
+- Apply saved branding, login, inventory, navigation, accent-color and footer settings across the interface.
+- Display the current detected public IPv4 in Settings and refresh its status every 30 seconds alongside the automatic Nginx listener updater.
+- Raise Nginx upload/proxy limits and Gunicorn's request timeout so full ZIP restores can complete on existing and new installations.
+- Roll back the previous Nginx listener configuration when activation fails after an IP change.
+
 ## Version 5.0.3 release notes
 
 - Show a compact `Copied` notification at the top of the page, with a subtle green checkmark and colors that follow the active light or dark theme.
 - Display the notification only after a successful copy from IP, Account, Notes, setup URI, or update-log controls; failed copy attempts do not show success feedback.
-- Add accessible live-region markup and regression coverage, stabilize the time-sensitive Retry-After test, and refresh static asset cache keys.
+- Add accessible live-region markup and regression coverage, and refresh static asset cache keys.
 
 ## Version 5.0.2 release notes
 
@@ -363,4 +373,5 @@
 - Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
 - A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
 - Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
+
 

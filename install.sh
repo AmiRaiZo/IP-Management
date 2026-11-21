@@ -153,7 +153,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/station-archive
 EnvironmentFile=/etc/station-archive/env
-ExecStart=/opt/station-archive/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:$HTTPS_PORT --timeout 60 app:app
+ExecStart=/opt/station-archive/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:$HTTPS_PORT --timeout 900 app:app
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=false
@@ -196,7 +196,8 @@ server {
     server_name $DOMAIN;
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-    client_max_body_size 2m;
+    client_max_body_size 512m;
+    client_body_timeout 900s;
     location / {
         proxy_pass http://127.0.0.1:$HTTPS_PORT;
         proxy_set_header Host \$host;
@@ -204,7 +205,8 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_http_version 1.1;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
     }
 }
 EOF
@@ -307,4 +309,5 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
+
 

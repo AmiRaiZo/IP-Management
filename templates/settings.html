@@ -10,7 +10,7 @@
     <a href="#general" data-settings-tab="general">Public address</a>
     <a href="#security" data-settings-tab="security">Two-factor authentication</a>
     <a href="#notifications" data-settings-tab="notifications">Security notifications</a>
-    <a href="#backup" data-settings-tab="backup">Backup / export TXT</a>
+    <a href="#backup" data-settings-tab="backup">Backup & restore</a>
   </nav>
   <div class="settings-content">
     <form class="panel form-panel settings-section is-active" id="branding" data-settings-section="branding" method="post" enctype="multipart/form-data">
@@ -52,6 +52,15 @@
     </section>
 
     <section class="panel form-panel settings-section" id="general" data-settings-section="general">
+      <div data-public-ip-status data-status-url="{{ url_for('public_ip_status_endpoint') }}">
+        <div class="panel-heading"><div><h2>Automatic public IP detection</h2><p>The server checks its assigned public IPv4 every 30 seconds and updates the Nginx HTTPS listener when it changes.</p></div><span class="ip-refresh-state {{ 'is-online' if public_ip_status.status == 'ok' else 'is-pending' if not public_ip_status else 'is-error' }}" data-public-ip-badge role="status" aria-live="polite">{{ 'Active' if public_ip_status.status == 'ok' else 'Waiting for first check' if not public_ip_status else 'Needs attention' }}</span></div>
+        <div class="public-ip-overview">
+          <div class="public-ip-value"><span class="eyebrow">DETECTED PUBLIC IPv4</span><strong data-public-ip-value>{{ public_ip_status.public_ipv4 or 'Not detected yet' }}</strong><small data-public-ip-checked>{% if public_ip_status.checked_at %}Last checked {{ public_ip_status.checked_at }}{% else %}The server service reports here after its first check.{% endif %}</small></div>
+          <div class="public-ip-detail"><span>Automatic refresh</span><strong>Every 30 seconds</strong><span>Last IP change</span><strong data-public-ip-changed>{{ public_ip_status.changed_at or 'No change recorded yet' }}</strong></div>
+        </div>
+        <p class="helper-note" data-public-ip-message {% if not public_ip_status.message or public_ip_status.status == 'ok' %}hidden{% endif %}>{{ public_ip_status.message }}</p>
+      </div>
+      <p class="helper-note">The automatic service handles public IPv4 changes. Keep the domain and HTTPS port below configured; you do not need to enter the new IP address manually. This requires the VPS public IPv4 to be assigned directly to a local network interface.</p>
       <div class="panel-heading"><div><h2>Public domain and port</h2><p>Apply changes to the live server configuration.</p></div></div>
       <form method="post" action="{{ url_for('update_deployment_settings') }}" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="public">
@@ -95,14 +104,37 @@
     </section>
 
     <section class="panel form-panel settings-section" id="backup" data-settings-section="backup">
-      <div class="panel-heading"><div><h2>Readable TXT backup / export</h2><p>Download application records in a structured UTF-8 text file.</p></div></div>
-      <p class="helper-note">The export includes users and roles, groups, IP records and saved connection passwords, access rules, application settings, audit history, recent security events, and selected readable text source files. Account password hashes, authenticator seeds, and Telegram credentials are excluded. This is not a complete, restorable backup: environment secrets, the SQLite database file, binary uploads, and the operating system are not included. Keep the downloaded file encrypted and private.</p>
-      <form method="post" action="{{ url_for('export_text_backup') }}" class="stack-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label for="backup_current_password">Confirm your current superadmin password</label><input id="backup_current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
-        <div class="form-footer"><span class="muted">Re-authentication is required because connection passwords are included.</span><button class="btn btn-primary" type="submit">Download readable TXT backup</button></div>
-      </form>
+      <div class="panel-heading"><div><h2>Backup & restore</h2><p>Protect your complete IP Management data and recover it when needed.</p></div></div>
+      <div class="backup-feature-grid">
+        <article class="backup-feature-card">
+          <span class="backup-feature-icon" aria-hidden="true">↓</span><div><h3>Full backup</h3><p>Includes the SQLite database, IP records, Accounts Vault, Notes Vault, users, permissions, encrypted credentials, settings, audit history and uploaded images.</p></div>
+          <form method="post" action="{{ url_for('export_full_backup') }}" class="stack-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="full_backup_password">Confirm your superadmin password</label><input id="full_backup_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
+            <button class="btn btn-primary" type="submit">Download full ZIP backup</button>
+          </form>
+        </article>
+        <article class="backup-feature-card backup-restore-card">
+          <span class="backup-feature-icon" aria-hidden="true">↥</span><div><h3>Restore backup</h3><p>Upload a ZIP created by IP Management. The archive is checked before any data is replaced. After restore, sign in with an account from that backup.</p></div>
+          <form method="post" action="{{ url_for('restore_full_backup') }}" class="stack-form" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="restore_backup_file">Full backup ZIP (maximum 512 MB)</label><input id="restore_backup_file" name="backup_file" type="file" accept=".zip,application/zip" required>
+            <label for="restore_backup_password">Confirm your current superadmin password</label><input id="restore_backup_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
+            <button class="btn btn-danger" type="submit" data-confirm="Restore this backup? Current application records and uploads will be replaced.">Validate and restore backup</button>
+          </form>
+        </article>
+      </div>
+      <p class="helper-note">Full backups contain sensitive credentials and account data. Store ZIP files securely. The archive includes encrypted database values and uploaded files; restoring on another server requires the same <code>FERNET_KEY</code> and <code>SECRET_KEY</code> from that installation's environment. The backup does not contain server software, TLS certificates or environment secrets.</p>
+      <div class="backup-text-export">
+        <div><h3>Readable TXT export</h3><p class="muted">A human-readable report for reviewing records. This format cannot be restored.</p></div>
+        <form method="post" action="{{ url_for('export_text_backup') }}" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="backup_current_password">Confirm your superadmin password</label><input id="backup_current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="1024">
+          <button class="btn btn-secondary" type="submit">Download TXT export</button>
+        </form>
+      </div>
     </section>
   </div>
 </div>
 {% endblock %}
+

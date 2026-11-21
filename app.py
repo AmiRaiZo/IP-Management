@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import base64
+import atexit
 import json
 import html
 from io import BytesIO
@@ -9,9 +10,13 @@ import re
 import secrets
 import sqlite3
 import socket
+import shutil
+import stat
 import subprocess
+import tempfile
 import time
 import threading
+import zipfile
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
 from urllib.error import URLError, HTTPError
@@ -64,11 +69,67 @@ UPDATE_TARGET_VERSION_FILE = DATA_DIR / "update-target-version"
 UPDATE_REPOSITORY_FILE = DATA_DIR / "update-repository"
 RECONFIGURE_STATUS_FILE = DATA_DIR / "reconfigure-status.json"
 UPDATE_LOG_FILE = DATA_DIR / "update.log"
+PUBLIC_IP_STATE_FILE = DATA_DIR / "public-ip-state.json"
+FULL_BACKUP_DIR = DATA_DIR / "backups"
+RESTORE_MAINTENANCE_FILE = DATA_DIR / "restore-in-progress"
+RESTORE_RECOVERY_REQUIRED_FILE = DATA_DIR / "restore-recovery-required"
+RESTORE_JOURNAL_FILE = DATA_DIR / "restore-journal.json"
 UPLOAD_DIR = DATA_DIR / "uploads"
 AVATAR_DIR = UPLOAD_DIR / "avatars"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_BACKUP_UPLOAD_BYTES = 512 * 1024 * 1024
+MAX_BACKUP_EXPANDED_BYTES = 1024 * 1024 * 1024
+MAX_BACKUP_FILES = 5000
+RESTORE_REQUIRED_COLUMNS = {
+    "users": {"id", "username", "password_hash", "created_at", "role", "totp_secret", "two_factor_enabled", "two_factor_enrolled", "enabled", "profile_image", "can_view_passwords", "login_blocked_until", "login_block_message_id", "login_block_chat_id"},
+    "groups": {"id", "name", "description", "created_at", "sort_order", "color"},
+    "account_groups": {"id", "name", "description", "created_at", "sort_order", "color"},
+    "note_groups": {"id", "name", "description", "color", "created_at", "sort_order"},
+    "ips": {"id", "name", "ip_address", "port", "username", "password_enc", "notes", "group_id", "created_by", "created_at", "updated_at"},
+    "accounts": {"id", "name", "username", "email", "password_enc", "group_id", "created_by", "created_at", "updated_at"},
+    "notes": {"id", "title", "service_url", "ip_name", "ip_address", "ip_port", "ip_username", "ip_password_enc", "account_name", "account_username", "account_email", "account_password_enc", "note_text", "wifi_ssid", "wifi_password_enc", "admin_ip", "admin_username", "admin_password_enc", "group_id", "created_by", "created_at", "updated_at"},
+    "app_settings": {"key", "value"},
+    "audit_log": {"id", "username", "action", "detail", "created_at"},
+    "security_events": {"id", "event_type", "remote_ip", "attempted_username", "result", "detail", "user_agent", "created_at"},
+    "user_group_access": {"user_id", "group_id"},
+    "user_ip_access": {"user_id", "ip_id", "can_view"},
+    "ip_access_rules": {"id", "network", "rule_type", "note", "created_by", "created_at"},
+    "login_attempt_counters": {"scope", "key_hash", "failed_attempts", "window_started_at", "updated_at"},
+    "login_security_blocks": {"block_id", "username_hash", "ip_hash", "device_hash", "agent_hash", "username", "blocked_until", "telegram_message_id", "telegram_chat_id", "created_at"},
+    "login_approval_requests": {"id", "user_id", "username", "remote_ip", "user_agent", "token_hash", "status", "created_at", "expires_at", "decided_at", "telegram_chat_id", "telegram_message_id", "login_method"},
+    "telegram_login_codes": {"id", "user_id", "code_hash", "expires_at", "created_at", "chat_id", "message_id"},
+    "user_recovery_codes": {"id", "user_id", "code_hash", "created_at"},
+}
+RESTORE_REQUIRED_PRIMARY_KEYS = {
+    "users": ("id",), "user_recovery_codes": ("id",), "telegram_login_codes": ("id",),
+    "app_settings": ("key",), "groups": ("id",), "account_groups": ("id",),
+    "note_groups": ("id",), "accounts": ("id",), "notes": ("id",), "ips": ("id",),
+    "user_group_access": ("user_id", "group_id"), "user_ip_access": ("user_id", "ip_id"),
+    "audit_log": ("id",), "security_events": ("id",), "login_approval_requests": ("id",),
+    "login_attempt_counters": ("scope", "key_hash"), "login_security_blocks": ("block_id",),
+    "ip_access_rules": ("id",),
+}
+RESTORE_REQUIRED_UNIQUE_KEYS = {
+    "users": {("username",)}, "groups": {("name",)}, "account_groups": {("name",)},
+    "note_groups": {("name",)}, "user_recovery_codes": {("code_hash",)},
+    "telegram_login_codes": {("code_hash",)}, "ip_access_rules": {("network",)},
+}
+RESTORE_REQUIRED_FOREIGN_KEYS = {
+    "user_recovery_codes": {("user_id", "users", "id")},
+    "telegram_login_codes": {("user_id", "users", "id")},
+    "accounts": {("group_id", "account_groups", "id")},
+    "notes": {("group_id", "note_groups", "id")},
+    "ips": {("group_id", "groups", "id")},
+    "user_group_access": {("user_id", "users", "id"), ("group_id", "groups", "id")},
+    "user_ip_access": {("user_id", "users", "id"), ("ip_id", "ips", "id")},
+    "login_approval_requests": {("user_id", "users", "id")},
+}
+RESTORE_REQUIRED_INDEXES = {
+    "idx_login_approval_user_status", "idx_login_security_blocks_expiry",
+    "idx_security_events_created", "idx_security_events_ip", "idx_ips_ip", "idx_ips_name",
+}
 
 
 @contextmanager
@@ -85,6 +146,151 @@ def connect_db():
         raise
     finally:
         db.close()
+
+
+def _restore_sqlite_snapshot(source_path, destination_path):
+    source = sqlite3.connect(str(source_path), timeout=30)
+    destination = sqlite3.connect(str(destination_path), timeout=30)
+    try:
+        source.backup(destination, pages=256, sleep=0.05)
+    finally:
+        destination.close()
+        source.close()
+
+
+def _write_restore_journal(staging_name, phase, had_uploads):
+    payload = {
+        "format": "ip-management-restore-journal", "version": 1,
+        "staging_dir": staging_name, "phase": phase,
+        "had_uploads": bool(had_uploads),
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    temporary = DATA_DIR / f".restore-journal-{os.getpid()}-{secrets.token_hex(4)}.tmp"
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, RESTORE_JOURNAL_FILE)
+        try:
+            directory_fd = os.open(str(DATA_DIR), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _persist_restore_recovery_marker(details):
+    marker = "RECOVERY_REQUIRED\n" + str(details)[:2000]
+    for marker_path in (RESTORE_RECOVERY_REQUIRED_FILE, RESTORE_MAINTENANCE_FILE):
+        try:
+            marker_path.write_text(marker, encoding="utf-8")
+            os.chmod(marker_path, 0o600)
+        except OSError:
+            app.logger.critical("Could not persist restore recovery marker at %s", marker_path)
+
+
+def _process_start_identity(process_id):
+    try:
+        stat_line = Path(f"/proc/{int(process_id)}/stat").read_text(encoding="ascii")
+        fields = stat_line[stat_line.rfind(")") + 2:].split()
+        return fields[19]
+    except (OSError, ValueError, IndexError):
+        return ""
+
+
+def _restore_lock_owner_alive():
+    try:
+        raw = RESTORE_MAINTENANCE_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if raw.startswith("RECOVERY_REQUIRED"):
+        return False
+    expected_start = ""
+    try:
+        payload = json.loads(raw)
+        process_id = int(payload["pid"])
+        expected_start = str(payload.get("process_start") or "")
+    except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+        try:
+            process_id = int(raw)
+        except ValueError:
+            return False
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    actual_start = _process_start_identity(process_id)
+    return not (expected_start and actual_start and expected_start != actual_start)
+
+
+def recover_interrupted_restore():
+    """Recover an interrupted restore before the app accepts requests after startup."""
+    if _restore_lock_owner_alive():
+        return False
+    if not RESTORE_JOURNAL_FILE.is_file():
+        if RESTORE_MAINTENANCE_FILE.exists() and not RESTORE_RECOVERY_REQUIRED_FILE.exists():
+            try:
+                lock_value = RESTORE_MAINTENANCE_FILE.read_text(encoding="utf-8")
+            except OSError:
+                lock_value = ""
+            if lock_value.startswith("RECOVERY_REQUIRED"):
+                _persist_restore_recovery_marker("Restore recovery marker exists but its journal is missing.")
+            else:
+                RESTORE_MAINTENANCE_FILE.unlink(missing_ok=True)
+        return False
+    try:
+        journal = json.loads(RESTORE_JOURNAL_FILE.read_text(encoding="utf-8"))
+        if not isinstance(journal, dict) or journal.get("format") != "ip-management-restore-journal" or journal.get("version") != 1:
+            raise ValueError("The restore journal format is invalid.")
+        staging_name = str(journal.get("staging_dir") or "")
+        if not re.fullmatch(r"\.ipm-restore-[a-f0-9]{16}", staging_name):
+            raise ValueError("The restore journal staging path is invalid.")
+        staging = DATA_DIR / staging_name
+        if staging.resolve().parent != DATA_DIR.resolve():
+            raise ValueError("The restore journal staging path is outside the data directory.")
+        phase = str(journal.get("phase") or "")
+        if phase not in {"prepared", "uploads_moved", "uploads_installed", "database_installed", "committed"}:
+            raise ValueError("The restore journal phase is invalid.")
+
+        if phase != "committed":
+            rollback_database = staging / "database-before-restore.sqlite3"
+            if not rollback_database.is_file():
+                raise ValueError("The rollback database snapshot is missing.")
+            _restore_sqlite_snapshot(rollback_database, DB_PATH)
+            had_uploads = bool(journal.get("had_uploads"))
+            previous_uploads = staging / "uploads-before-restore"
+            staged_uploads = staging / "uploads"
+            if had_uploads:
+                if previous_uploads.exists():
+                    if UPLOAD_DIR.exists():
+                        shutil.rmtree(UPLOAD_DIR)
+                    shutil.copytree(previous_uploads, UPLOAD_DIR, symlinks=True)
+                elif phase != "prepared":
+                    raise ValueError("The previous uploads directory is missing from the restore journal.")
+            elif not staged_uploads.exists() and UPLOAD_DIR.exists():
+                shutil.rmtree(UPLOAD_DIR)
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+        RESTORE_JOURNAL_FILE.unlink(missing_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        RESTORE_MAINTENANCE_FILE.unlink(missing_ok=True)
+        RESTORE_RECOVERY_REQUIRED_FILE.unlink(missing_ok=True)
+        app.logger.warning("Recovered interrupted IP Management restore (phase=%s)", phase)
+        return True
+    except Exception as exc:
+        _persist_restore_recovery_marker(f"Startup restore recovery failed: {exc}")
+        app.logger.critical("Startup restore recovery failed; application remains in maintenance mode: %s", exc)
+        return False
 
 
 def now():
@@ -256,6 +462,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_ips_ip ON ips(ip_address);
         CREATE INDEX IF NOT EXISTS idx_ips_name ON ips(name);
         """)
+        db.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('session_generation',?)",
+                   (secrets.token_urlsafe(32),))
         # In-place migrations preserve the database created by the first release.
         note_cols = {r[1] for r in db.execute("PRAGMA table_info(notes)")}
         for name, definition in (("wifi_ssid", "TEXT NOT NULL DEFAULT ''"),
@@ -334,7 +542,11 @@ def init_db():
                        (encrypt_authenticator_secret(shared_row["value"]),))
 
 
-init_db()
+recover_interrupted_restore()
+if not RESTORE_RECOVERY_REQUIRED_FILE.exists() and not (RESTORE_MAINTENANCE_FILE.exists() and _restore_lock_owner_alive()):
+    init_db()
+else:
+    app.logger.critical("IP Management startup paused database initialization because restore recovery is required")
 
 
 def client_ip():
@@ -661,6 +873,7 @@ def login_block_countdown_text(username, seconds):
 _LOGIN_BLOCK_WORKER = None
 _LOGIN_BLOCK_WORKER_LOCK = threading.Lock()
 _LOGIN_BLOCK_WORKER_WAKE = threading.Event()
+_LOGIN_BLOCK_WORKER_STOP = threading.Event()
 _LOGIN_BLOCK_WORKER_OWNER = secrets.token_hex(16)
 
 
@@ -679,83 +892,111 @@ def _claim_login_block_worker_lease():
     return claimed.rowcount == 1
 
 
+def _login_block_countdown_cycle():
+    """Refresh persisted Telegram lock messages once, including expired locks."""
+    if not _claim_login_block_worker_lease():
+        return
+    with connect_db() as db:
+        rows = db.execute(
+            "SELECT id,username,login_blocked_until,login_block_message_id,login_block_chat_id "
+            "FROM users WHERE login_block_message_id IS NOT NULL AND login_block_chat_id!=''"
+        ).fetchall()
+    for row in rows:
+        user_id = int(row["id"])
+        message_id = int(row["login_block_message_id"] or 0)
+        chat_id = str(row["login_block_chat_id"] or "")
+        if not message_id or not chat_id:
+            continue
+        remaining = login_block_remaining(row["login_blocked_until"])
+        if remaining <= 0:
+            with connect_db() as db:
+                updated = db.execute(
+                    "UPDATE users SET login_blocked_until='',login_block_message_id=NULL,login_block_chat_id='' "
+                    "WHERE id=? AND login_block_message_id=? AND login_block_chat_id=? "
+                    "AND login_blocked_until=?",
+                    (user_id, message_id, chat_id, str(row["login_blocked_until"] or "")),
+                )
+            if updated.rowcount == 1:
+                telegram_edit_persistent_message(
+                    chat_id, message_id,
+                    f"✅ زمان مسدودسازی حساب {row['username']} به پایان رسید.\nامکان ورود مجدد فعال است.",
+                    reply_markup={"inline_keyboard": []},
+                )
+            continue
+        # Re-read the authoritative row immediately before editing, avoiding stale edits
+        # after a manual release or a newer rejection replaced this message.
+        with connect_db() as db:
+            current = db.execute(
+                "SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+        if (not current or str(current["login_block_chat_id"] or "") != chat_id
+                or int(current["login_block_message_id"] or 0) != message_id
+                or str(current["login_blocked_until"] or "") != str(row["login_blocked_until"] or "")):
+            continue
+        telegram_api("editMessageText", {
+            "chat_id": chat_id, "message_id": message_id,
+            "text": login_block_countdown_text(row["username"], remaining),
+            "reply_markup": {"inline_keyboard": [[{
+                "text": "🔓 رفع فوری مسدودی", "callback_data": f"login_unblock:{user_id}",
+            }]]},
+            "disable_web_page_preview": True,
+        })
+    with connect_db() as db:
+        security_blocks = db.execute(
+            "SELECT block_id,username,blocked_until,telegram_message_id,telegram_chat_id "
+            "FROM login_security_blocks WHERE telegram_message_id IS NOT NULL AND telegram_chat_id!=''"
+        ).fetchall()
+    for block in security_blocks:
+        if login_block_remaining(block["blocked_until"]) > 0:
+            continue
+        with connect_db() as db:
+            expired = db.execute(
+                "UPDATE login_security_blocks SET blocked_until='',telegram_message_id=NULL,telegram_chat_id='' "
+                "WHERE block_id=? AND telegram_message_id=? AND telegram_chat_id=? AND blocked_until=?",
+                (block["block_id"], block["telegram_message_id"], block["telegram_chat_id"], block["blocked_until"]),
+            )
+        if expired.rowcount == 1:
+            telegram_edit_persistent_message(
+                block["telegram_chat_id"], block["telegram_message_id"],
+                f"✅ مدت مسدودی {block['username'] or 'این مرورگر'} به پایان رسید.\nامکان ورود مجدد فعال است.",
+                reply_markup={"inline_keyboard": []},
+            )
+
+
 def _login_block_countdown_worker():
     """One process-local worker refreshes every active Telegram lock, including after restart."""
-    while True:
+    while not _LOGIN_BLOCK_WORKER_STOP.is_set():
+        if (RESTORE_MAINTENANCE_FILE.exists() or RESTORE_RECOVERY_REQUIRED_FILE.exists()
+                or RESTORE_JOURNAL_FILE.exists()):
+            _LOGIN_BLOCK_WORKER_STOP.wait(0.25)
+            _LOGIN_BLOCK_WORKER_WAKE.clear()
+            continue
+        lease_dir = DATA_DIR / "request-leases"
+        lease_dir.mkdir(parents=True, exist_ok=True)
+        lease_path = lease_dir / f"{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(6)}.lease"
+        descriptor = os.open(str(lease_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         try:
-            if not _claim_login_block_worker_lease():
-                _LOGIN_BLOCK_WORKER_WAKE.wait(2)
-                _LOGIN_BLOCK_WORKER_WAKE.clear()
-                continue
-            with connect_db() as db:
-                rows = db.execute(
-                    "SELECT id,username,login_blocked_until,login_block_message_id,login_block_chat_id "
-                    "FROM users WHERE login_block_message_id IS NOT NULL AND login_block_chat_id!=''"
-                ).fetchall()
-            for row in rows:
-                user_id = int(row["id"])
-                message_id = int(row["login_block_message_id"] or 0)
-                chat_id = str(row["login_block_chat_id"] or "")
-                if not message_id or not chat_id:
-                    continue
-                remaining = login_block_remaining(row["login_blocked_until"])
-                if remaining <= 0:
-                    with connect_db() as db:
-                        updated = db.execute(
-                            "UPDATE users SET login_blocked_until='',login_block_message_id=NULL,login_block_chat_id='' "
-                            "WHERE id=? AND login_block_message_id=? AND login_block_chat_id=? "
-                            "AND login_blocked_until=?",
-                            (user_id, message_id, chat_id, str(row["login_blocked_until"] or "")),
-                        )
-                    if updated.rowcount == 1:
-                        telegram_edit_persistent_message(
-                            chat_id, message_id,
-                            f"✅ زمان مسدودسازی حساب {row['username']} به پایان رسید.\nامکان ورود مجدد فعال است.",
-                            reply_markup={"inline_keyboard": []},
-                        )
-                    continue
-                # Re-read the authoritative row immediately before editing, avoiding stale edits
-                # after a manual release or a newer rejection replaced this message.
-                with connect_db() as db:
-                    current = db.execute(
-                        "SELECT login_blocked_until,login_block_message_id,login_block_chat_id FROM users WHERE id=?",
-                        (user_id,),
-                    ).fetchone()
-                if (not current or str(current["login_block_chat_id"] or "") != chat_id
-                        or int(current["login_block_message_id"] or 0) != message_id
-                        or str(current["login_blocked_until"] or "") != str(row["login_blocked_until"] or "")):
-                    continue
-                telegram_api("editMessageText", {
-                    "chat_id": chat_id, "message_id": message_id,
-                    "text": login_block_countdown_text(row["username"], remaining),
-                    "reply_markup": {"inline_keyboard": [[{
-                        "text": "🔓 رفع فوری مسدودی", "callback_data": f"login_unblock:{user_id}",
-                    }]]},
-                    "disable_web_page_preview": True,
-                })
-            with connect_db() as db:
-                security_blocks = db.execute(
-                    "SELECT block_id,username,blocked_until,telegram_message_id,telegram_chat_id "
-                    "FROM login_security_blocks WHERE telegram_message_id IS NOT NULL AND telegram_chat_id!=''"
-                ).fetchall()
-            for block in security_blocks:
-                if login_block_remaining(block["blocked_until"]) > 0:
-                    continue
-                with connect_db() as db:
-                    expired = db.execute(
-                        "UPDATE login_security_blocks SET blocked_until='',telegram_message_id=NULL,telegram_chat_id='' "
-                        "WHERE block_id=? AND telegram_message_id=? AND telegram_chat_id=? AND blocked_until=?",
-                        (block["block_id"], block["telegram_message_id"], block["telegram_chat_id"], block["blocked_until"]),
-                    )
-                if expired.rowcount == 1:
-                    telegram_edit_persistent_message(
-                        block["telegram_chat_id"], block["telegram_message_id"],
-                        f"✅ مدت مسدودی {block['username'] or 'این مرورگر'} به پایان رسید.\nامکان ورود مجدد فعال است.",
-                        reply_markup={"inline_keyboard": []},
-                    )
-        except Exception:
-            app.logger.exception("Telegram login-block countdown worker failed")
-        _LOGIN_BLOCK_WORKER_WAKE.wait(2)
+            os.write(descriptor, json.dumps({
+                "pid": os.getpid(), "process_start": _process_start_identity(os.getpid()),
+                "created_at": time.time(),
+            }).encode("utf-8"))
+        finally:
+            os.close(descriptor)
+        if (RESTORE_MAINTENANCE_FILE.exists() or RESTORE_RECOVERY_REQUIRED_FILE.exists()
+                or RESTORE_JOURNAL_FILE.exists()):
+            lease_path.unlink(missing_ok=True)
+            _LOGIN_BLOCK_WORKER_WAKE.wait(0.25)
+            _LOGIN_BLOCK_WORKER_WAKE.clear()
+            continue
+        try:
+            try:
+                _login_block_countdown_cycle()
+            except Exception:
+                app.logger.exception("Telegram login-block countdown worker failed")
+        finally:
+            lease_path.unlink(missing_ok=True)
+        _LOGIN_BLOCK_WORKER_STOP.wait(2)
         _LOGIN_BLOCK_WORKER_WAKE.clear()
 
 
@@ -769,6 +1010,17 @@ def _ensure_login_block_countdown_worker():
             _LOGIN_BLOCK_WORKER.start()
     _LOGIN_BLOCK_WORKER_WAKE.set()
     return _LOGIN_BLOCK_WORKER
+
+
+def _stop_login_block_countdown_worker():
+    _LOGIN_BLOCK_WORKER_STOP.set()
+    _LOGIN_BLOCK_WORKER_WAKE.set()
+    worker = _LOGIN_BLOCK_WORKER
+    if worker and worker.is_alive() and worker is not threading.current_thread():
+        worker.join(timeout=3)
+
+
+atexit.register(_stop_login_block_countdown_worker)
 
 
 def telegram_start_login_block_countdown(user_id, username, chat_id, message_id):
@@ -1918,6 +2170,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
             session["pending_2fa_user_id"] = user["id"]
             session["pending_2fa_secret"] = pyotp.random_base32()
             session["login_approval_id"] = approval_request_id
+            set_pending_auth_generation()
             session["csrf_token"] = secrets.token_urlsafe(32)
             security_event("login", user["username"], "password_ok_2fa_pending",
                            "Administrator approved password; authenticator enrollment is required")
@@ -1952,6 +2205,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
         session.clear()
         session["pending_2fa_user_id"] = user["id"]
         session["login_approval_id"] = approval_request_id
+        set_pending_auth_generation()
         session["csrf_token"] = secrets.token_urlsafe(32)
         security_event("login", user["username"], "password_ok_2fa_pending",
                        "Administrator approved password; waiting for second factor")
@@ -1971,7 +2225,7 @@ def continue_login_after_approval(user, approval_request_id, bypass_two_factor=F
 
 def login_approval_row_for_session():
     approval_id = session.get("pending_login_approval_id") or session.get("login_approval_id")
-    if not approval_id:
+    if not approval_id or not pending_auth_generation_valid():
         return None
     with connect_db() as db:
         return db.execute("SELECT * FROM login_approval_requests WHERE id=?", (approval_id,)).fetchone()
@@ -2054,11 +2308,31 @@ def audit(action, detail=""):
                    (session.get("username", "system"), action, detail[:300], now()))
 
 
+def current_session_generation():
+    with connect_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key='session_generation'").fetchone()
+    return str(row["value"] or "") if row else ""
+
+
+def set_pending_auth_generation():
+    session["pending_auth_generation"] = current_session_generation()
+
+
+def pending_auth_generation_valid():
+    expected = str(session.get("pending_auth_generation") or "")
+    current = current_session_generation()
+    return bool(expected and current and hmac.compare_digest(expected, current))
+
+
 def current_user_row():
     user_id = session.get("user_id")
-    if not user_id:
+    session_generation = str(session.get("session_generation") or "")
+    if not user_id or not session_generation:
         return None
     with connect_db() as db:
+        generation = db.execute("SELECT value FROM app_settings WHERE key='session_generation'").fetchone()
+        if not generation or not hmac.compare_digest(session_generation, generation["value"]):
+            return None
         return db.execute("SELECT * FROM users WHERE id=? AND enabled=1", (user_id,)).fetchone()
 
 
@@ -2110,14 +2384,16 @@ def remembered_two_factor(user_id):
         return False
     try:
         payload = two_factor_serializer.loads(token, max_age=REMEMBER_2FA_SECONDS)
-        return payload.get("uid") == user_id and payload.get("v") == 1
+        generation = current_session_generation()
+        return (payload.get("uid") == user_id and payload.get("v") == 1
+                and generation and hmac.compare_digest(str(payload.get("g") or ""), generation))
     except (BadSignature, SignatureExpired, AttributeError):
         return False
 
 
 def remember_two_factor_response(response, user_id):
     """Trust this browser for 24 hours without making the login session persistent."""
-    token = two_factor_serializer.dumps({"uid": user_id, "v": 1})
+    token = two_factor_serializer.dumps({"uid": user_id, "v": 1, "g": current_session_generation()})
     response.set_cookie(
         REMEMBER_2FA_COOKIE, token, max_age=REMEMBER_2FA_SECONDS,
         httponly=True, secure=request.is_secure, samesite="Lax", path="/",
@@ -2132,6 +2408,7 @@ def establish_login(user):
     session.permanent = False
     session["user_id"] = user["id"]
     session["username"] = user["username"]
+    session["session_generation"] = current_session_generation()
     session["csrf_token"] = secrets.token_urlsafe(32)
     audit("login_success")
     security_event("login", user["username"], "success", "Password and any required second factor were accepted")
@@ -2145,6 +2422,94 @@ def superadmin_required(fn):
             abort(403)
         return fn(*args, **kwargs)
     return wrapped
+
+
+@app.before_request
+def coordinate_restore_requests():
+    """Track active requests across Gunicorn workers and pause traffic during restore."""
+    if request.endpoint == "static":
+        return None
+    if (RESTORE_RECOVERY_REQUIRED_FILE.exists() or RESTORE_MAINTENANCE_FILE.exists()
+            or RESTORE_JOURNAL_FILE.exists()):
+        recover_interrupted_restore()
+        if RESTORE_RECOVERY_REQUIRED_FILE.exists():
+            abort(503, "Backup restore recovery is required. Contact the server administrator before using the panel.")
+        if RESTORE_MAINTENANCE_FILE.exists() or RESTORE_JOURNAL_FILE.exists():
+            abort(503, "A backup restore is in progress. Retry in a moment.")
+
+    lease_dir = DATA_DIR / "request-leases"
+    lease_dir.mkdir(parents=True, exist_ok=True)
+    lease_path = lease_dir / f"{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(6)}.lease"
+    descriptor = os.open(str(lease_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(descriptor, json.dumps({
+            "pid": os.getpid(), "process_start": _process_start_identity(os.getpid()),
+            "created_at": time.time(),
+        }).encode("utf-8"))
+    finally:
+        os.close(descriptor)
+    request.environ["ipm.request_lease"] = str(lease_path)
+    if (RESTORE_MAINTENANCE_FILE.exists() or RESTORE_RECOVERY_REQUIRED_FILE.exists()
+            or RESTORE_JOURNAL_FILE.exists()):
+        lease_path.unlink(missing_ok=True)
+        request.environ.pop("ipm.request_lease", None)
+        abort(503, "A backup restore or recovery is in progress. Retry in a moment.")
+
+
+@app.teardown_request
+def release_request_lease(error=None):
+    lease_path = request.environ.pop("ipm.request_lease", "")
+    if lease_path:
+        try:
+            Path(lease_path).unlink(missing_ok=True)
+        except OSError:
+            app.logger.warning("Could not remove request lease %s", lease_path)
+
+
+def wait_for_restore_quiet_point(timeout=20, lease_dir=None):
+    """Wait until all requests that began before the restore gate have finished."""
+    own_lease = request.environ.get("ipm.request_lease", "")
+    lease_dir = Path(lease_dir) if lease_dir is not None else DATA_DIR / "request-leases"
+    deadline = time.monotonic() + timeout
+    while True:
+        active = []
+        for lease_path in lease_dir.glob("*.lease"):
+            if str(lease_path) == own_lease:
+                continue
+            try:
+                process_id = int(lease_path.name.split("-", 1)[0])
+                os.kill(process_id, 0)
+            except ProcessLookupError:
+                lease_path.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                try:
+                    if time.time() - lease_path.stat().st_mtime > 3600:
+                        lease_path.unlink(missing_ok=True)
+                    else:
+                        active.append(lease_path.name)
+                except FileNotFoundError:
+                    pass
+            else:
+                try:
+                    lease_metadata = json.loads(lease_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    lease_metadata = {}
+                expected_start = str(lease_metadata.get("process_start") or "") if isinstance(lease_metadata, dict) else ""
+                actual_start = _process_start_identity(process_id)
+                if expected_start and actual_start and expected_start != actual_start:
+                    lease_path.unlink(missing_ok=True)
+                else:
+                    active.append(lease_path.name)
+        if not active:
+            return
+        if time.monotonic() >= deadline:
+            raise ValueError("Other requests are still active. Wait briefly and try the restore again.")
+        time.sleep(0.1)
+
+
+def mark_restore_recovery_required(details):
+    """Keep the application closed if either side of a failed rollback is uncertain."""
+    _persist_restore_recovery_marker(details)
 
 
 @app.before_request
@@ -2200,6 +2565,8 @@ def identify_login_device():
 def csrf_guard():
     if request.endpoint == "telegram_webhook":
         return
+    if request.endpoint == "restore_full_backup":
+        request.max_content_length = MAX_BACKUP_UPLOAD_BYTES
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         token = session.get("csrf_token", "")
         supplied = request.form.get("csrf_token", "")
@@ -2215,11 +2582,11 @@ def inject_globals():
     with connect_db() as db:
         settings_rows = db.execute("SELECT key,value FROM app_settings").fetchall()
     app_settings = {row["key"]: row["value"] for row in settings_rows}
-    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP",
+    defaults = {"brand_name": "IP Management", "brand_subtitle": "NETWORK DIRECTORY", "brand_logo_text": "IP", "brand_logo": "",
                 "login_title": "Welcome back", "login_subtitle": "",
                 "accent_color": "#4569e8", "footer_text": "IP Management · Secure network inventory",
-                "app_description": "Keep connection details organized, searchable, and available to the right people.",
-                "inventory_title": "IP addresses", "inventory_description": "Keep connection details organized, searchable, and available to the right people.",
+                "app_description": "",
+                "inventory_title": "IP addresses", "inventory_description": "",
                 "group_label": "Groups", "user_label": "Users & permissions"}
     for key, value in defaults.items():
         app_settings.setdefault(key, value)
@@ -2458,6 +2825,11 @@ def login():
         flash("The server address was changed successfully. Please sign in again at this new address.", "success")
     if session.get("user_id"):
         return redirect(url_for("index"))
+    pending_auth_keys = ("pending_login_approval_id", "login_approval_id", "pending_2fa_user_id", "pending_2fa_secret")
+    if any(session.get(key) for key in pending_auth_keys) and not pending_auth_generation_valid():
+        session.clear()
+        flash("Your sign-in attempt expired. Please sign in again.", "error")
+        return redirect(url_for("login"))
     if request.method == "POST":
         attempted_username = str(request.form.get("username", "")).strip()[:80]
         if not attempted_username and session.get("pending_2fa_user_id"):
@@ -2498,6 +2870,7 @@ def login():
         session.pop("pending_2fa_remember", None)
         session.pop("pending_2fa_telegram_message", None)
         session.pop("login_approval_id", None)
+        session.pop("pending_auth_generation", None)
         session["csrf_token"] = secrets.token_urlsafe(32)
     if request.method == "GET" and session.get("pending_login_approval_id"):
         approval_id = session["pending_login_approval_id"]
@@ -2648,6 +3021,7 @@ def login():
                 session["login_approval_id"] = approval_id
                 if user_requires_two_factor(user):
                     session["pending_2fa_user_id"] = user["id"]
+                set_pending_auth_generation()
                 session["csrf_token"] = secrets.token_urlsafe(32)
                 security_event("login", username, "password_ok_approval_pending",
                                "Password accepted; waiting for Telegram administrator approval")
@@ -2669,6 +3043,7 @@ def login():
                     session.clear()
                     session["pending_2fa_user_id"] = user["id"]
                     session["pending_2fa_secret"] = pyotp.random_base32()
+                    set_pending_auth_generation()
                     session["csrf_token"] = secrets.token_urlsafe(32)
                     return redirect(url_for("setup_2fa"))
                 secret = shared_two_factor_secret() if mode == "shared" else decrypt_authenticator_secret(user["totp_secret"])
@@ -2678,6 +3053,7 @@ def login():
                     return redirect(url_for("login"))
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
+                set_pending_auth_generation()
                 session["csrf_token"] = secrets.token_urlsafe(32)
                 security_event("login", username, "password_ok_2fa_pending", "Password accepted; waiting for second factor")
                 return render_template("login.html", stage="verify", login_user={"id": user["id"], "username": user["username"], "role": user["role"], "profile_image": user["profile_image"]})
@@ -2733,7 +3109,11 @@ def setup_2fa():
     user_id = session.get("pending_2fa_user_id")
     secret = session.get("pending_2fa_secret")
     mode = two_factor_mode()
-    if mode != "per_user" or not user_id or not secret:
+    if user_id and not pending_auth_generation_valid():
+        session.clear()
+        flash("Your sign-in attempt expired. Please sign in again.", "error")
+        return redirect(url_for("login"))
+    if mode != "per_user" or not user_id or not secret or not pending_auth_generation_valid():
         if session.get("user_id"):
             abort(403)
         session.pop("pending_2fa_secret", None)
@@ -2764,6 +3144,8 @@ def setup_2fa():
             session.permanent = False
             session["user_id"] = user_id
             session["username"] = user["username"]
+            session["session_generation"] = current_session_generation()
+            session.pop("pending_auth_generation", None)
             session["csrf_token"] = secrets.token_urlsafe(32)
             session["two_factor_verified"] = True
             audit("two_factor_enabled")
@@ -4287,13 +4669,34 @@ def settings():
     deployment.setdefault("public_domain", os.environ.get("APP_DOMAIN", ""))
     deployment.setdefault("public_port", os.environ.get("PUBLIC_PORT", os.environ.get("APP_HTTPS_PORT", "443")))
     deployment["update_repository"] = trusted_update_repository()
+    public_ip_status = read_public_ip_status()
     return render_template("settings.html", app_values=values, deployment=deployment,
                            two_factor_mode=two_factor_mode(), shared_two_factor_secret=shared_secret,
                            shared_two_factor_uri=shared_uri, shared_two_factor_qr=shared_qr,
                            telegram_configured=bool(secure_setting("telegram_bot_token_enc") and secure_setting("telegram_chat_id_enc")),
                            show_ip_passwords=show_ip_passwords,
+                           public_ip_status=public_ip_status,
                            github_repo=deployment["update_repository"],
                            public_port=deployment["public_port"])
+
+
+def read_public_ip_status():
+    try:
+        status = json.loads(PUBLIC_IP_STATE_FILE.read_text(encoding="utf-8"))
+        detected_ip = ip_address(str(status.get("public_ipv4") or ""))
+        if detected_ip.version != 4 or not detected_ip.is_global:
+            return {}
+        return status
+    except (OSError, ValueError, json.JSONDecodeError, AttributeError):
+        return {}
+
+
+@app.get("/settings/public-ip/status")
+@superadmin_required
+def public_ip_status_endpoint():
+    response = jsonify(read_public_ip_status())
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    return response
 
 
 def configure_telegram_webhook(public_base=None):
@@ -4388,6 +4791,10 @@ def export_text_backup():
         users = db.execute("SELECT id,username,role,enabled,created_at,two_factor_enabled,two_factor_enrolled,can_view_passwords FROM users ORDER BY id").fetchall()
         groups = db.execute("SELECT id,name,description,created_at,sort_order FROM groups ORDER BY sort_order,id").fetchall()
         ips = db.execute("SELECT id,name,ip_address,port,username,password_enc,notes,group_id,created_by,created_at,updated_at FROM ips ORDER BY id").fetchall()
+        account_groups = db.execute("SELECT id,name,description,created_at,sort_order FROM account_groups ORDER BY sort_order,id").fetchall()
+        accounts = db.execute("SELECT id,name,username,email,password_enc,group_id,created_by,created_at,updated_at FROM accounts ORDER BY id").fetchall()
+        note_groups = db.execute("SELECT id,name,description,color,created_at,sort_order FROM note_groups ORDER BY sort_order,id").fetchall()
+        notes = db.execute("SELECT * FROM notes ORDER BY id").fetchall()
         settings = db.execute("SELECT key,value FROM app_settings ORDER BY key").fetchall()
         group_access = db.execute("SELECT user_id,group_id FROM user_group_access ORDER BY user_id,group_id").fetchall()
         ip_access = db.execute("SELECT user_id,ip_id,can_view FROM user_ip_access ORDER BY user_id,ip_id").fetchall()
@@ -4395,7 +4802,10 @@ def export_text_backup():
         audit_rows = db.execute("SELECT username,action,detail,created_at FROM audit_log ORDER BY id DESC LIMIT 5000").fetchall()
         event_rows = db.execute("SELECT event_type,remote_ip,attempted_username,result,detail,user_agent,created_at FROM security_events ORDER BY id DESC LIMIT 5000").fetchall()
     safe_settings = {}
-    secret_setting_keys = {"shared_two_factor_secret", "telegram_bot_token_enc", "telegram_chat_id_enc"}
+    secret_setting_keys = {
+        "shared_two_factor_secret", "telegram_bot_token_enc", "telegram_chat_id_enc",
+        "telegram_webhook_secret_enc", "session_generation",
+    }
     for row in settings:
         key, value = row["key"], row["value"]
         safe_settings[key] = "[REDACTED: secret]" if key in secret_setting_keys else value
@@ -4428,6 +4838,32 @@ def export_text_backup():
             record["connection_password"] = "[UNREADABLE: encryption key mismatch]"
         ip_records.append(record)
     add_section("IP RECORDS (connection passwords included for backup)", ip_records)
+    account_records = []
+    for row in accounts:
+        record = dict(row)
+        encrypted = record.pop("password_enc", "")
+        try:
+            record["account_password"] = vault.decrypt(encrypted.encode()).decode() if encrypted else ""
+        except (InvalidToken, ValueError, UnicodeDecodeError):
+            record["account_password"] = "[UNREADABLE: encryption key mismatch]"
+        account_records.append(record)
+    add_section("ACCOUNT GROUPS", account_groups)
+    add_section("ACCOUNT VAULT RECORDS (saved passwords included)", account_records)
+    add_section("NOTES GROUPS", note_groups)
+    note_records = []
+    for row in notes:
+        record = dict(row)
+        for encrypted_key, plain_key in (("ip_password_enc", "ip_password"),
+                                         ("account_password_enc", "account_password"),
+                                         ("wifi_password_enc", "wifi_password"),
+                                         ("admin_password_enc", "admin_password")):
+            encrypted = record.pop(encrypted_key, "")
+            try:
+                record[plain_key] = vault.decrypt(encrypted.encode()).decode() if encrypted else ""
+            except (InvalidToken, ValueError, UnicodeDecodeError):
+                record[plain_key] = "[UNREADABLE: encryption key mismatch]"
+        note_records.append(record)
+    add_section("NOTES VAULT RECORDS (saved passwords included)", note_records)
     add_section("APPLICATION SETTINGS (secrets redacted)", [{"key": k, "value": v} for k, v in safe_settings.items()])
     add_section("USER GROUP ACCESS", group_access)
     add_section("USER IP ACCESS", ip_access)
@@ -4466,6 +4902,276 @@ def export_text_backup():
     response.headers["Cache-Control"] = "private, no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+def _sqlite_backup(source_path, destination_path):
+    """Create a consistent SQLite snapshot, including committed WAL contents."""
+    source = sqlite3.connect(str(source_path), timeout=30)
+    destination = sqlite3.connect(str(destination_path), timeout=30)
+    try:
+        source.backup(destination, pages=256, sleep=0.05)
+    finally:
+        destination.close()
+        source.close()
+
+
+def _verify_restore_database(database_path):
+    connection = sqlite3.connect(f"file:{database_path.as_posix()}?mode=ro", uri=True, timeout=10)
+    try:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise ValueError("The backup database failed SQLite integrity validation.")
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing_tables = set(RESTORE_REQUIRED_COLUMNS) - tables
+        if missing_tables:
+            raise ValueError("The archive database is missing required tables: " + ", ".join(sorted(missing_tables)))
+        for table, required_columns in RESTORE_REQUIRED_COLUMNS.items():
+            column_rows = connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+            actual_columns = {row[1] for row in column_rows}
+            missing_columns = required_columns - actual_columns
+            if missing_columns:
+                raise ValueError(f"The archive database table {table} is missing required columns: " + ", ".join(sorted(missing_columns)))
+            actual_primary_key = tuple(row[1] for row in sorted((row for row in column_rows if row[5]), key=lambda row: row[5]))
+            if actual_primary_key != RESTORE_REQUIRED_PRIMARY_KEYS[table]:
+                raise ValueError(f"The archive database table {table} has an unexpected primary key.")
+            actual_unique_keys = set()
+            for index_row in connection.execute(f'PRAGMA index_list("{table}")'):
+                if index_row[2]:
+                    actual_unique_keys.add(tuple(row[2] for row in connection.execute(f'PRAGMA index_info("{index_row[1]}")')))
+            if not RESTORE_REQUIRED_UNIQUE_KEYS.get(table, set()).issubset(actual_unique_keys):
+                raise ValueError(f"The archive database table {table} is missing required unique constraints.")
+            actual_foreign_keys = {
+                (row[3], row[2], row[4])
+                for row in connection.execute(f'PRAGMA foreign_key_list("{table}")')
+            }
+            if not RESTORE_REQUIRED_FOREIGN_KEYS.get(table, set()).issubset(actual_foreign_keys):
+                raise ValueError(f"The archive database table {table} is missing required foreign-key relationships.")
+        actual_indexes = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        if not RESTORE_REQUIRED_INDEXES.issubset(actual_indexes):
+            raise ValueError("The archive database is missing required performance/security indexes.")
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchmany(5)
+        if foreign_key_errors:
+            raise ValueError("The archive database contains broken foreign-key references.")
+        if not connection.execute("SELECT 1 FROM users WHERE role='superadmin' AND enabled=1 LIMIT 1").fetchone():
+            raise ValueError("The backup must contain at least one enabled super administrator account.")
+    finally:
+        connection.close()
+
+
+@app.post("/settings/backup/full")
+@superadmin_required
+def export_full_backup():
+    password = request.form.get("current_password", "")
+    user = current_user_row()
+    if not user or len(password) > 1024 or not password_matches(password, user["password_hash"]):
+        security_event("full_backup_export", session.get("username", ""), "failed", "Re-authentication failed")
+        abort(403)
+
+    FULL_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(FULL_BACKUP_DIR, 0o700)
+    except OSError:
+        pass
+    snapshot_handle = tempfile.NamedTemporaryFile(prefix=".database-snapshot-", suffix=".sqlite3",
+                                                  dir=str(FULL_BACKUP_DIR), delete=False)
+    snapshot_path = Path(snapshot_handle.name)
+    snapshot_handle.close()
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_path = FULL_BACKUP_DIR / f"ip-management-full-backup-{stamp}-{secrets.token_hex(3)}.zip"
+    try:
+        _sqlite_backup(DB_PATH, snapshot_path)
+        manifest = {
+            "format": "ip-management-full-backup", "format_version": 1,
+            "app_version": VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.is_file() else "unknown",
+            "created_at": now(), "created_by": user["username"],
+            "contents": ["database.sqlite3", "uploads/"],
+            "restore_note": "Restore on an IP Management installation using the same FERNET_KEY and SECRET_KEY.",
+        }
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive_file:
+            archive_file.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+            archive_file.write(snapshot_path, "database.sqlite3")
+            if UPLOAD_DIR.is_dir():
+                for source_path in sorted(UPLOAD_DIR.rglob("*")):
+                    if source_path.is_file() and not source_path.is_symlink():
+                        archive_file.write(source_path, "uploads/" + source_path.relative_to(UPLOAD_DIR).as_posix())
+        try:
+            os.chmod(archive_path, 0o600)
+        except OSError:
+            pass
+        for old_backup in sorted(FULL_BACKUP_DIR.glob("ip-management-full-backup-*.zip"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)[5:]:
+            try:
+                old_backup.unlink()
+            except OSError:
+                app.logger.warning("Could not remove an expired full backup: %s", old_backup.name)
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    finally:
+        snapshot_path.unlink(missing_ok=True)
+
+    audit("full_backup_exported", f"created_by={user['username']}")
+    response = send_file(archive_path, mimetype="application/zip", as_attachment=True,
+                         download_name=f"ip-management-full-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip", max_age=0)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.post("/settings/backup/restore")
+@superadmin_required
+def restore_full_backup():
+    password = request.form.get("current_password", "")
+    user = current_user_row()
+    if not user or len(password) > 1024 or not password_matches(password, user["password_hash"]):
+        security_event("full_backup_restore", session.get("username", ""), "failed", "Re-authentication failed")
+        abort(403)
+    uploaded = request.files.get("backup_file")
+    if not uploaded or not uploaded.filename:
+        flash("Choose an IP Management ZIP backup first.", "error")
+        return redirect(url_for("settings") + "#backup")
+    if request.content_length and request.content_length > MAX_BACKUP_UPLOAD_BYTES:
+        abort(413)
+
+    staging = DATA_DIR / f".ipm-restore-{secrets.token_hex(8)}"
+    restore_lock_acquired = False
+    restore_recovery_required = False
+    journal_written = False
+    try:
+        staging.mkdir(mode=0o700)
+        staged_database = staging / "database.sqlite3"
+        staged_uploads = staging / "uploads"
+        staged_uploads.mkdir()
+        seen_names = set()
+        total_unpacked = 0
+        with zipfile.ZipFile(uploaded.stream, "r") as archive_file:
+            members = archive_file.infolist()
+            if len(members) > MAX_BACKUP_FILES:
+                raise ValueError("The backup contains too many files.")
+            for member in members:
+                name = member.filename
+                parts = name.rstrip("/").split("/")
+                if (not name or "\\" in name or name.startswith("/") or ":" in name
+                        or any(part in {"", ".", ".."} for part in parts)):
+                    raise ValueError("The backup contains an unsafe file path.")
+                normalized_name = name.casefold()
+                if normalized_name in seen_names:
+                    raise ValueError("The backup contains duplicate file paths.")
+                seen_names.add(normalized_name)
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise ValueError("Symbolic links are not allowed in backups.")
+                total_unpacked += member.file_size
+                if total_unpacked > MAX_BACKUP_EXPANDED_BYTES:
+                    raise ValueError("The expanded backup is larger than the allowed limit.")
+                if member.is_dir():
+                    if name != "uploads/" and not name.startswith("uploads/"):
+                        raise ValueError("The backup contains an unexpected directory.")
+                    continue
+                if name not in {"manifest.json", "database.sqlite3"} and not name.startswith("uploads/"):
+                    raise ValueError("The backup contains an unexpected file.")
+                if name == "manifest.json" and member.file_size > 65536:
+                    raise ValueError("The backup manifest is too large.")
+                destination = (staging / name) if name in {"manifest.json", "database.sqlite3"} else (staged_uploads / name[len("uploads/"):])
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive_file.open(member, "r") as source_stream, destination.open("wb") as destination_stream:
+                    shutil.copyfileobj(source_stream, destination_stream, length=1024 * 1024)
+
+        manifest_path = staging / "manifest.json"
+        if not manifest_path.is_file() or not staged_database.is_file():
+            raise ValueError("This ZIP is not a complete IP Management backup.")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("The backup manifest must be a JSON object.")
+        if manifest.get("format") != "ip-management-full-backup" or manifest.get("format_version") != 1:
+            raise ValueError("This backup format is not supported.")
+        _verify_restore_database(staged_database)
+
+        lock_payload = json.dumps({"pid": os.getpid(), "process_start": _process_start_identity(os.getpid())})
+        lock_descriptor = os.open(str(RESTORE_MAINTENANCE_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            os.write(lock_descriptor, lock_payload.encode("utf-8"))
+        finally:
+            os.close(lock_descriptor)
+        restore_lock_acquired = True
+        wait_for_restore_quiet_point()
+
+        rollback_database = staging / "database-before-restore.sqlite3"
+        _sqlite_backup(DB_PATH, rollback_database)
+        had_uploads = UPLOAD_DIR.exists()
+        _write_restore_journal(staging.name, "prepared", had_uploads)
+        journal_written = True
+        previous_uploads = staging / "uploads-before-restore"
+        old_uploads_moved = False
+        try:
+            if had_uploads:
+                os.replace(UPLOAD_DIR, previous_uploads)
+                old_uploads_moved = True
+            _write_restore_journal(staging.name, "uploads_moved", had_uploads)
+            os.replace(staged_uploads, UPLOAD_DIR)
+            _write_restore_journal(staging.name, "uploads_installed", had_uploads)
+            _restore_sqlite_snapshot(staged_database, DB_PATH)
+            _write_restore_journal(staging.name, "database_installed", had_uploads)
+            with connect_db() as db:
+                db.execute("INSERT INTO app_settings(key,value) VALUES('session_generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                           (secrets.token_urlsafe(32),))
+                db.execute("INSERT INTO audit_log(username,action,detail,created_at) VALUES('system','full_backup_restored',?,?)",
+                           (f"restored_by={user['username']}; source_version={str(manifest.get('app_version', 'unknown'))[:40]}", now()))
+            _write_restore_journal(staging.name, "committed", had_uploads)
+        except Exception as restore_error:
+            rollback_errors = []
+            if old_uploads_moved:
+                try:
+                    if UPLOAD_DIR.exists():
+                        shutil.rmtree(UPLOAD_DIR)
+                    if not previous_uploads.exists():
+                        raise OSError("The previous uploads directory is missing.")
+                    shutil.copytree(previous_uploads, UPLOAD_DIR, symlinks=True)
+                except Exception as rollback_error:
+                    rollback_errors.append(f"uploads rollback failed: {rollback_error}")
+            try:
+                _restore_sqlite_snapshot(rollback_database, DB_PATH)
+            except Exception as rollback_error:
+                rollback_errors.append(f"database rollback failed: {rollback_error}")
+            if rollback_errors:
+                restore_recovery_required = True
+                mark_restore_recovery_required("; ".join(rollback_errors))
+                app.logger.critical("Restore failed (%s); %s", restore_error, "; ".join(rollback_errors))
+                raise RuntimeError("Automatic rollback was incomplete; the application remains locked for administrator recovery.") from restore_error
+            try:
+                RESTORE_JOURNAL_FILE.unlink(missing_ok=True)
+                journal_written = False
+            except OSError as journal_error:
+                restore_recovery_required = True
+                mark_restore_recovery_required(f"Rollback completed but the journal could not be removed: {journal_error}")
+                raise RuntimeError("Rollback completed, but the restore journal could not be cleared. The panel remains locked for recovery.") from journal_error
+            raise
+
+        session.clear()
+        flash("Backup restored successfully. Sign in again using an account from the restored backup.", "success")
+        return redirect(url_for("login"))
+    except (zipfile.BadZipFile, json.JSONDecodeError, ValueError, OSError, RuntimeError, EOFError, sqlite3.DatabaseError) as exc:
+        if restore_recovery_required:
+            return ("Restore rollback is incomplete. The panel remains in maintenance mode. "
+                    "A server administrator must inspect the restore journal before reopening it.", 503)
+        security_event("full_backup_restore", session.get("username", ""), "failed", str(exc)[:220])
+        flash(f"Backup restore failed: {str(exc)[:220]}", "error")
+        return redirect(url_for("settings") + "#backup")
+    finally:
+        if not restore_recovery_required:
+            if journal_written:
+                try:
+                    RESTORE_JOURNAL_FILE.unlink(missing_ok=True)
+                    journal_written = False
+                except OSError as journal_error:
+                    restore_recovery_required = True
+                    mark_restore_recovery_required(f"Restore finished but its journal could not be cleared: {journal_error}")
+            if not restore_recovery_required and staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            if restore_lock_acquired:
+                try:
+                    RESTORE_MAINTENANCE_FILE.unlink(missing_ok=True)
+                except OSError:
+                    app.logger.exception("Could not remove the restore maintenance lock")
 
 
 @app.post("/settings/deployment")
@@ -4621,13 +5327,19 @@ def generate_recovery_codes():
 @app.get("/media/<path:filename>")
 def media_file(filename):
     # The application logo is public so it can render on the sign-in page.
-    # During 2FA, permit the pending user to load only their own profile image.
-    if filename.startswith("avatars/") and not current_user_row():
-        pending_id = session.get("pending_2fa_user_id")
-        with connect_db() as db:
-            pending = db.execute("SELECT profile_image FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone() if pending_id else None
-        if not pending or pending["profile_image"] != filename:
-            return redirect(url_for("login"))
+    # Profile images are private to their owner, including for authenticated users.
+    if filename.startswith("avatars/"):
+        user = current_user_row()
+        if user:
+            allowed_image = user["profile_image"]
+        else:
+            pending_id = session.get("pending_2fa_user_id")
+            pending_valid = bool(pending_id and pending_auth_generation_valid())
+            with connect_db() as db:
+                pending = db.execute("SELECT profile_image FROM users WHERE id=? AND enabled=1", (pending_id,)).fetchone() if pending_valid else None
+            allowed_image = pending["profile_image"] if pending else ""
+        if not allowed_image or allowed_image != filename:
+            abort(404)
     if filename not in {"brand.png", "brand.jpg", "brand.jpeg", "brand.webp"} and not filename.startswith("avatars/"):
         abort(404)
     return send_from_directory(UPLOAD_DIR, filename)

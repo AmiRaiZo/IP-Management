@@ -160,7 +160,8 @@ server {
     server_name $NEW_DOMAIN;
     ssl_certificate /etc/letsencrypt/live/$NEW_DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$NEW_DOMAIN/privkey.pem;
-    client_max_body_size 2m;
+    client_max_body_size 512m;
+    client_body_timeout 900s;
     location / {
         proxy_pass http://127.0.0.1:$NEW_PORT;
         proxy_set_header Host \$host;
@@ -168,7 +169,8 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_http_version 1.1;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
     }
 }
 EOF
@@ -202,6 +204,7 @@ PY
 ln -sfn "$NEW_AVAILABLE" "$NEW_ENABLED"
 rm -f "$TEMP_ACME_ENABLED"
 if [[ "$OLD_DOMAIN" != "$NEW_DOMAIN" ]]; then rm -f "$OLD_ENABLED"; fi
+python3 "$(dirname "$0")/station_archive_upgrade_limits.py" --domain "$NEW_DOMAIN" --https-port "$NEW_PORT" --app-port "$NEW_PORT"
 systemctl daemon-reload
 nginx -t
 systemctl restart station-archive.service
@@ -233,3 +236,4 @@ trap - EXIT
 write_status success "The new HTTPS endpoint is active. Opening the new address…" "$NEW_DOMAIN" "$NEW_PORT" || true
 echo "SUCCESS: https://$NEW_DOMAIN:$NEW_PORT"
 echo "Old HTTPS port is no longer configured for this application. Backup: $BACKUP"
+

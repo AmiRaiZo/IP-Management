@@ -68,10 +68,19 @@ sudo /usr/local/sbin/ip-management-recover-access
 
 The updater preserves `/var/lib/station-archive` and `/etc/station-archive/env`. Back up both securely. The environment file contains encryption and session secrets; losing them may make stored encrypted values unrecoverable. The GitHub repository must contain `app.py`, `setup_admin.py`, `requirements.txt`, `templates/`, `static/`, and `ip-management-recover-access`. Review repository changes before updating production, because the updater executes the application code supplied by that repository.
 
+## Full backup and restore
+
+Super administrators can create a full ZIP backup from **Settings → Backup & restore**. It contains a consistent SQLite snapshot (including committed WAL data) and uploaded logos/profile images. The archive preserves IP records, Accounts Vault, Notes Vault, users, permissions, encrypted credentials, settings and audit history. The application keeps the five most recent generated ZIP backups in `/var/lib/station-archive/backups` and downloads the archive to the administrator.
+
+Restore accepts IP Management full-backup ZIP files up to 512 MiB (with a 1 GiB expanded-size limit). It validates archive paths and size, the required database schema, primary/unique/foreign-key constraints, SQLite integrity and required indexes before replacing data. Requests and the Telegram lock countdown worker are paused while the database and uploads are restored, and existing login sessions and remembered 2FA devices are invalidated; sign in again with an account from the restored backup. A durable restore journal lets the application roll back an interrupted restore automatically at startup. If automatic recovery itself fails, the panel stays in maintenance mode and the server administrator must inspect `/var/lib/station-archive/restore-journal.json` and `/var/lib/station-archive/restore-recovery-required` before reopening it. The ZIP does not include `/etc/station-archive/env`, TLS certificates, Nginx configuration or the operating system. Restoring on another installation requires the same `FERNET_KEY` and `SECRET_KEY`; keep downloaded archives private because they contain password hashes, encrypted credentials and network inventory. The readable TXT export remains available for review but cannot be restored.
+
 ## Network and TLS notes
 
 Port `80/tcp` must be reachable for certificate issuance and renewal. The selected public HTTPS port must also be reachable. A custom HTTPS port must be included in the URL, for example `https://archive.example.com:8443`. The installer does not change provider-level firewall rules. If certificate issuance fails, verify DNS and port 80, then retry certificate issuance with:
 
+The installer also enables `station-archive-ip-refresh.timer`, which checks the VPS's locally assigned public IPv4 every 30 seconds and updates the IP-specific Nginx HTTPS listener when the address changes. The current address and last check are shown under **Settings → General → Automatic public IP detection** and refreshed in the page automatically. This requires the VPS public IPv4 to be assigned directly to a local network interface; a provider-side NAT address cannot be bound by Nginx on the VPS. The service updates the local Nginx listener; it does not change a domain's DNS A record or provider firewall rules, which must already follow the VPS address.
+
 ```bash
 sudo certbot certonly --webroot -w /var/www/station-archive-acme -d archive.example.com
 ```
+

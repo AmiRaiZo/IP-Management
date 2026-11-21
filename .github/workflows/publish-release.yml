@@ -63,6 +63,7 @@ jobs:
               path for path in root.iterdir()
               if path.is_file() and path.resolve() != package.resolve()
               and path.name not in excluded and not path.name.startswith(".")
+              and not (path.name.startswith("station-archive-v") and path.name.endswith(".zip"))
           ]
           with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
               for path in sorted(root_files):

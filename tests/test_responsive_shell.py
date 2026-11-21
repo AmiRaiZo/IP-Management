@@ -74,7 +74,6 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertNotIn('id="mobile-ip-details-modal"', self.index)
         self.assertIn(".mobile-ip-actions{display:flex!important", self.css)
 
-
     def test_card_scroll_chains_to_page_when_content_is_empty_or_at_a_boundary(self):
         self.assertIn(
             ".mobile-ip-fields,.mobile-account-fields{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:auto}",
@@ -234,9 +233,32 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn(".group-list .group-name-text{color:var(--group-color)!important}", self.css)
 
     def test_assets_are_cache_busted_for_this_release(self):
-        self.assertEqual(self.version, "5.0.3")
-        self.assertIn("style.css') }}?v=5.0.3-copy-toast", self.base)
-        self.assertIn("app.js') }}?v=5.0.3-copy-toast", self.base)
+        self.assertEqual(self.version, "5.0.4")
+        self.assertIn("style.css') }}?v=5.0.4-final-ui", self.base)
+        self.assertIn("app.js') }}?v=5.0.4-final-ui", self.base)
+
+    def test_backup_restore_and_live_public_ip_controls_are_present(self):
+        self.assertIn("url_for('export_full_backup')", self.settings)
+        self.assertIn("url_for('restore_full_backup')", self.settings)
+        self.assertIn('name="backup_file"', self.settings)
+        self.assertIn("database.sqlite3", self.app_source)
+        self.assertIn("PRAGMA foreign_key_check", self.app_source)
+        self.assertIn("wait_for_restore_quiet_point", self.app_source)
+        self.assertIn("session_generation", self.app_source)
+        self.assertIn("restore-journal.json", self.app_source)
+        self.assertIn("recover_interrupted_restore", self.app_source)
+        self.assertIn("data-public-ip-status", self.settings)
+        self.assertIn("url_for('public_ip_status_endpoint')", self.settings)
+        self.assertIn("window.setInterval(refreshPublicIpStatus, 30000)", self.js)
+
+    def test_saved_branding_settings_are_connected_to_the_application_shell(self):
+        self.assertIn("app_settings.brand_logo", self.base)
+        self.assertIn("app_settings.brand_subtitle", self.base)
+        self.assertIn("app_settings.group_label", self.base)
+        self.assertIn("app_settings.user_label", self.base)
+        self.assertIn("app_settings.footer_text", self.base)
+        self.assertIn("app_settings.login_title", (ROOT / "templates" / "login.html").read_text(encoding="utf-8"))
+        self.assertIn("app_settings.inventory_title", self.index)
 
     def test_successful_copy_shows_small_theme_aware_confirmation(self):
         self.assertIn('<div id="copy-toast" class="copy-toast" role="status"', self.base)
@@ -251,7 +273,6 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("showCopyToast();", self.js)
         self.assertIn("if (copied) showCopyToast();", self.js)
         self.assertIn("await navigator.clipboard.writeText(target.value || target.textContent || ''); button.textContent = 'Copied'; showCopyToast();", self.js)
-
 
     def test_release_retention_uses_gh_cli_and_verifies_only_two_releases_remain(self):
         self.assertIn("tr -d '\\r' < RELEASE_NOTES.md | awk", self.release_workflow)
@@ -339,3 +360,4 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
