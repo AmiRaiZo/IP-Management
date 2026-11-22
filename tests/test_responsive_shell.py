@@ -477,6 +477,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
             harness.write_text(
                 "#!/usr/bin/env bash\nset -Eeuo pipefail\n"
                 + "\n\n".join(functions)
+                + '\ncd "$(dirname "$1")"'
                 + '\nnormalize_venv_permissions "$1"\nverify_gunicorn_as_service_user "$1"\n',
                 encoding="utf-8",
             )
