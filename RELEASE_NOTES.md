@@ -1,3 +1,9 @@
+## Version 5.0.12 release notes
+
+- Fix stale systemd updater units that pass the internal `--bootstrapped` flag: updater self-refresh now requires the exact verified target commit as a second argument, so a legacy bare flag cannot bypass bootstrap in the current updater.
+- Rewrite `station-archive-update.service` with the canonical no-argument `ExecStart` during update and log the updater source plus verified target commit for unambiguous diagnostics.
+- Add regression coverage for the legacy bootstrap-argument case and for repairing the privileged updater unit; refresh static asset cache keys.
+
 ## Version 5.0.11 release notes
 
 - Replace the high-contrast red destructive buttons and saturated primary action fills with a shared, soft indigo treatment matching the Notes action palette across IP, Account, group, user, and Notes actions.

@@ -27,8 +27,9 @@ TARGET_SHA="$(cat "$TARGET_FILE" 2>/dev/null || true)"
 
 # Self-heal the installed updater before entering its update logic.
 # The target SHA was verified by the web application and is checked again below.
-# Use an explicit argv marker, not an environment variable from a sourced env file.
-if [[ "${1:-}" != "--bootstrapped" ]]; then
+# A bare legacy --bootstrapped argument is NOT proof that this file was refreshed.
+# The second argument must identify the exact update target.
+if [[ "${1:-}" != "--bootstrapped" || "${2:-}" != "$TARGET_SHA" ]]; then
   echo "PROGRESS:2:Refreshing the privileged updater from the verified release"
   BOOTSTRAP_TMP="$(mktemp -d /tmp/ip-management-updater-bootstrap.XXXXXX)"
   git init -q "$BOOTSTRAP_TMP/source"
@@ -42,7 +43,7 @@ if [[ "${1:-}" != "--bootstrapped" ]]; then
   bash -n "$BOOTSTRAP_TMP/updater.new"
   install -o root -g root -m 0750 "$BOOTSTRAP_TMP/updater.new" /usr/local/sbin/station-archive-update
   rm -rf -- "$BOOTSTRAP_TMP"
-  exec /usr/local/sbin/station-archive-update --bootstrapped
+  exec /usr/local/sbin/station-archive-update --bootstrapped "$TARGET_SHA"
 fi
 
 # Do not modify the installation if the updater source itself is syntactically invalid.
@@ -51,6 +52,7 @@ if ! bash -n "$0"; then
   exit 1
 fi
 echo "PROGRESS:5:Preparing update"
+echo "Updater source: $0 (verified target commit $TARGET_SHA)"
 TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
 DEPLOYED=0
 SUCCESS=0
@@ -149,7 +151,38 @@ TimeoutStartSec=300
 UMask=0077
 RECONFIGUNIT
 chmod 0644 /etc/systemd/system/station-archive-reconfigure.service
+# Replace stale updater units too. Older installations may have persisted an
+# internal --bootstrapped argument in ExecStart, which bypasses the self-update
+# guard and leaves the old Gunicorn verifier running indefinitely.
+cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'
+[Unit]
+Description=IP Management privileged updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/station-archive-update
+StandardOutput=append:/var/lib/station-archive/update.log
+StandardError=inherit
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=false
+ReadWritePaths=/opt/station-archive /var/lib/station-archive /usr/local/sbin /etc/sudoers.d /etc/systemd/system /etc/nginx /var/backups
+UMask=0077
+UPDATEUNIT
+chmod 0644 /etc/systemd/system/station-archive-update.service
 systemctl daemon-reload
+UPDATE_EXEC_START="$(systemctl show --property=ExecStart --value station-archive-update.service)"
+if [[ "$UPDATE_EXEC_START" != *"/usr/local/sbin/station-archive-update"* || "$UPDATE_EXEC_START" == *"--bootstrapped"* ]]; then
+  echo "Update failed: the effective systemd updater command is not canonical: $UPDATE_EXEC_START" >&2
+  echo "Remove any station-archive-update.service drop-in that overrides ExecStart, then retry the update." >&2
+  exit 1
+fi
+echo "Verified systemd updater ExecStart: $UPDATE_EXEC_START"
 chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -type d -exec chmod 0750 {} +

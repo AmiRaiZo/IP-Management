@@ -243,7 +243,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
     def test_assets_are_cache_busted_for_this_release(self):
         self.assertRegex(self.version, r"^\d+\.\d+\.\d+$")
-        cache_key = f"?v={self.version}-gunicorn-repair"
+        cache_key = f"?v={self.version}-updater-bootstrap"
         self.assertIn("style.css') }}" + cache_key, self.base)
         self.assertIn("app.js') }}" + cache_key, self.base)
 
@@ -380,7 +380,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
     def test_all_action_buttons_use_the_soft_notes_palette_in_both_themes(self):
         compact_css = "".join(self.css.split())
-        self.assertIn("v=5.0.11-gunicorn-repair", self.base)
+        self.assertIn("v=5.0.12-updater-bootstrap", self.base)
         self.assertIn(":root{--action-bg:#edf1ff;--action-hover:#e5ebff;--action-border:#dce5ff;--action-text:#5268c9", compact_css)
         self.assertIn(".btn-primary,.btn-danger{background:var(--action-bg);color:var(--action-text);border-color:var(--action-border);box-shadow:none}", compact_css)
         self.assertIn(".danger-icon{color:var(--action-text);background:var(--action-bg);border-color:var(--action-border)}", compact_css)
@@ -428,6 +428,26 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertLess(conditional_normalize, unconditional_rebuild)
         repair_section = self.upgrade.split("# Keep the currently installed virtual environment", 1)[1]
         self.assertNotIn('chown -R root:www-data "$APP_DIR/.venv"', repair_section)
+
+    def test_updater_does_not_trust_a_bare_legacy_bootstrap_argument_and_repairs_systemd_unit(self):
+        self.assertIn(
+            'if [[ "${1:-}" != "--bootstrapped" || "${2:-}" != "$TARGET_SHA" ]]; then',
+            self.updater,
+        )
+        self.assertIn('exec /usr/local/sbin/station-archive-update --bootstrapped "$TARGET_SHA"', self.updater)
+        self.assertIn('cat > /etc/systemd/system/station-archive-update.service <<\'UPDATEUNIT\'', self.updater)
+        unit_block = self.updater.split("cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'", 1)[1].split("UPDATEUNIT", 1)[0]
+        self.assertIn('ExecStart=/usr/local/sbin/station-archive-update\n', unit_block)
+        self.assertNotIn('--bootstrapped', unit_block)
+        self.assertIn('systemctl show --property=ExecStart --value station-archive-update.service', self.updater)
+        self.assertIn('"$UPDATE_EXEC_START" == *"--bootstrapped"*', self.updater)
+        for script in (self.install, self.upgrade):
+            unit_block = script.split("cat > /etc/systemd/system/station-archive-update.service <<'UPDATEUNIT'", 1)[1].split("UPDATEUNIT", 1)[0]
+            self.assertIn('ExecStart=/usr/local/sbin/station-archive-update\n', unit_block)
+            self.assertNotIn('--bootstrapped', unit_block)
+        self.assertIn('systemctl show --property=ExecStart --value station-archive-update.service', self.upgrade)
+        self.assertIn('"$UPDATE_EXEC_START" == *"--bootstrapped"*', self.upgrade)
+        self.assertIn('Updater source: $0 (verified target commit $TARGET_SHA)', self.updater)
 
     def test_update_shell_scripts_and_embedded_updater_are_valid_bash(self):
         if os.name == "nt":

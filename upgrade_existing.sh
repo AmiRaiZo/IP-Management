@@ -450,6 +450,12 @@ chmod 0440 /etc/sudoers.d/station-archive-update
 visudo -cf /etc/sudoers.d/station-archive-update
 
 systemctl daemon-reload
+UPDATE_EXEC_START="$(systemctl show --property=ExecStart --value station-archive-update.service)"
+if [[ "$UPDATE_EXEC_START" != *"/usr/local/sbin/station-archive-update"* || "$UPDATE_EXEC_START" == *"--bootstrapped"* ]]; then
+  echo "Upgrade stopped: the effective systemd updater command is not canonical: $UPDATE_EXEC_START" >&2
+  echo "Remove any station-archive-update.service drop-in that overrides ExecStart, then rerun the upgrade." >&2
+  exit 1
+fi
 /usr/local/sbin/station-archive-refresh-ip
 systemctl enable --now station-archive-ip-refresh.timer
 
