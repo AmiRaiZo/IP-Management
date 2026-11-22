@@ -7,6 +7,7 @@ ENV_FILE=/etc/station-archive/env
 set -a
 . "$ENV_FILE"
 set +a
+export PYTHONDONTWRITEBYTECODE=1
 APP_PORT="${APP_INTERNAL_PORT:-${APP_PORT:-}}"
 [[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Configured internal application port is missing or invalid." >&2; exit 1; }
 UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
@@ -64,7 +65,9 @@ cleanup() {
       find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
       find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
       chown -R root:www-data /opt/station-archive/.venv
-      chmod -R g+rX /opt/station-archive/.venv
+      find /opt/station-archive/.venv -type d -exec chmod 0750 {} +
+      find /opt/station-archive/.venv -type f -exec chmod 0640 {} +
+      find /opt/station-archive/.venv/bin -maxdepth 1 -type f -exec chmod 0750 {} +
       if ! systemctl restart station-archive.service; then systemctl start station-archive.service; fi
       HTTP_CODE=000
       for attempt in $(seq 1 30); do
@@ -151,42 +154,64 @@ chown -R root:www-data /opt/station-archive
 chown root:www-data /opt/station-archive
 find /opt/station-archive -type d -exec chmod 0750 {} +
 find /opt/station-archive -type f -exec chmod 0640 {} +
-chown -R root:www-data /opt/station-archive/.venv
-chmod -R g+rX /opt/station-archive/.venv
-	echo "PROGRESS:58:Checking the Python virtual environment from the application directory"
-	# Check from the exact working directory used by systemd; the updater itself runs from /.
-	if ! (cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import path:", gunicorn.__file__)') >/dev/null 2>&1; then
-	  echo "PROGRESS:60:Rebuilding the damaged Python virtual environment"
-	  mv /opt/station-archive/.venv "$TMP/venv-before-rebuild"
-	  python3 -m venv /opt/station-archive/.venv
-	fi
-	echo "PROGRESS:62:Installing Python dependencies"
-	/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
-	echo "PROGRESS:68:Installing application requirements"
-	/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-	echo "PROGRESS:73:Repairing Gunicorn installation"
-	/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-	echo "PROGRESS:77:Fixing application dependency permissions"
-	chown -R root:www-data /opt/station-archive/.venv
-	chmod -R g+rX /opt/station-archive/.venv
-	chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
-	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version; then
-	  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
-	  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
-	  python3 -m venv /opt/station-archive/.venv
-	  /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-	  /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-	  chown -R root:www-data /opt/station-archive/.venv
-	  chmod -R g+rX /opt/station-archive/.venv
-	  chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-	  chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-	  runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
-	fi
+normalize_venv_permissions() {
+  local venv_dir="$1"
+  [[ -x "$venv_dir/bin/python" && -d "$venv_dir/bin" ]] || return 1
+  # pip inherits umask 077 from this root updater. Set every mode explicitly:
+  # package directories must be traversable and Python modules readable by the
+  # service group; entry-point scripts must also be executable by that group.
+  chown -R root:www-data "$venv_dir"
+  find "$venv_dir" -type d -exec chmod 0750 {} +
+  find "$venv_dir" -type f -exec chmod 0640 {} +
+  find "$venv_dir/bin" -maxdepth 1 -type f -exec chmod 0750 {} +
+}
+verify_gunicorn_as_service_user() {
+  local venv_dir="$1"
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import verified for www-data:", gunicorn.__version__, gunicorn.__file__)'
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/gunicorn" --version
+}
+echo "PROGRESS:58:Checking the Python virtual environment as the application service user"
+if [[ -x /opt/station-archive/.venv/bin/python ]]; then
+  normalize_venv_permissions /opt/station-archive/.venv || true
+fi
+if ! verify_gunicorn_as_service_user /opt/station-archive/.venv >/dev/null 2>&1; then
+  echo "PROGRESS:60:Rebuilding the damaged or service-inaccessible Python virtual environment"
+  [[ ! -e /opt/station-archive/.venv ]] || mv /opt/station-archive/.venv "$TMP/venv-before-rebuild"
+  python3 -m venv /opt/station-archive/.venv
+fi
+echo "PROGRESS:62:Installing Python dependencies"
+/opt/station-archive/.venv/bin/python -m pip install --upgrade pip
+echo "PROGRESS:68:Installing application requirements"
+/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+echo "PROGRESS:73:Repairing Gunicorn installation"
+/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+echo "PROGRESS:77:Applying explicit Python environment permissions"
+normalize_venv_permissions /opt/station-archive/.venv
+echo "PROGRESS:80:Verifying Gunicorn import and command as www-data"
+if ! verify_gunicorn_as_service_user /opt/station-archive/.venv; then
+  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
+  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
+  python3 -m venv /opt/station-archive/.venv
+  /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
+  /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
+  normalize_venv_permissions /opt/station-archive/.venv
+  verify_gunicorn_as_service_user /opt/station-archive/.venv
+fi
 	echo "PROGRESS:84:Validating Nginx configuration"
 	nginx -t
+install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
+cat > /etc/systemd/system/station-archive.service.d/10-python-bytecode.conf <<'PYTHONUNIT'
+[Service]
+Environment=PYTHONDONTWRITEBYTECODE=1
+PYTHONUNIT
+chmod 0644 /etc/systemd/system/station-archive.service.d/10-python-bytecode.conf
+systemctl daemon-reload
 	echo "PROGRESS:88:Restarting application with the verified environment"
 	systemctl restart station-archive
 	systemctl is-active --quiet station-archive

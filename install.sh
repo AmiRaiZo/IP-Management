@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+export PYTHONDONTWRITEBYTECODE=1
+
+normalize_venv_permissions() {
+  local venv_dir="$1"
+  [[ -x "$venv_dir/bin/python" && -d "$venv_dir/bin" ]] || return 1
+  chown -R root:www-data "$venv_dir"
+  find "$venv_dir" -type d -exec chmod 0750 {} +
+  find "$venv_dir" -type f -exec chmod 0640 {} +
+  find "$venv_dir/bin" -maxdepth 1 -type f -exec chmod 0750 {} +
+}
+
+verify_gunicorn_as_service_user() {
+  local venv_dir="$1"
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import verified for www-data:", gunicorn.__version__, gunicorn.__file__)'
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/gunicorn" --version
+}
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this installer as root, for example: curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | sudo bash" >&2
@@ -141,15 +163,13 @@ python3 -m venv /opt/station-archive/.venv
 /opt/station-archive/.venv/bin/pip install --upgrade pip
 /opt/station-archive/.venv/bin/pip install -r /opt/station-archive/requirements.txt
 /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
-chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-/opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
-chown -R root:www-data /opt/station-archive/.venv
-chmod -R g+rX /opt/station-archive/.venv
+# pip inherits the installer's restrictive umask. Set explicit owner/group and
+# modes for every venv path, not just the Gunicorn launcher file.
+normalize_venv_permissions /opt/station-archive/.venv
+install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
+verify_gunicorn_as_service_user /opt/station-archive/.venv
 
 install -d -o root -g root -m 0750 /etc/station-archive
-install -d -o www-data -g www-data -m 0750 /var/lib/station-archive
 if [[ ! -e /etc/station-archive/env ]]; then
   SECRET_KEY="$(openssl rand -hex 48)"
   FERNET_KEY="$(/opt/station-archive/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
@@ -215,6 +235,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/station-archive
 EnvironmentFile=/etc/station-archive/env
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/station-archive/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:$HTTPS_PORT --timeout 900 app:app
 Restart=on-failure
 RestartSec=3
@@ -371,4 +392,3 @@ echo "Runtime data: /var/lib/station-archive"
 echo "Runtime configuration: /etc/station-archive/env"
 echo "To update from the configured GitHub repository: sudo /usr/local/sbin/station-archive-update"
 echo "Allow inbound TCP ports 80 and $HTTPS_PORT in your VPS provider firewall and host firewall."
-

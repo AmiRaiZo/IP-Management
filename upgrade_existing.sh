@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+export PYTHONDONTWRITEBYTECODE=1
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this upgrade as root, for example: curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/upgrade_existing.sh | sudo bash" >&2
@@ -11,6 +12,25 @@ APP_DIR=/opt/station-archive
 DATA_DIR=/var/lib/station-archive
 ENV_FILE=/etc/station-archive/env
 SERVICE_FILE=/etc/systemd/system/station-archive.service
+normalize_venv_permissions() {
+  local venv_dir="$1"
+  [[ -x "$venv_dir/bin/python" && -d "$venv_dir/bin" ]] || return 1
+  chown -R root:www-data "$venv_dir"
+  find "$venv_dir" -type d -exec chmod 0750 {} +
+  find "$venv_dir" -type f -exec chmod 0640 {} +
+  find "$venv_dir/bin" -maxdepth 1 -type f -exec chmod 0750 {} +
+}
+verify_gunicorn_as_service_user() {
+  local venv_dir="$1"
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import verified for www-data:", gunicorn.__version__, gunicorn.__file__)'
+  runuser -u www-data -- /usr/bin/env -i \
+    HOME=/var/lib/station-archive USER=www-data LOGNAME=www-data \
+    PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin \
+    "$venv_dir/bin/gunicorn" --version
+}
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "Automatic dependency installation currently supports Debian and Ubuntu (apt-get)." >&2
   exit 1
@@ -231,7 +251,9 @@ cleanup() {
     find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} + || true
     if [[ -d "$APP_DIR/.venv" ]]; then
       chown -R root:www-data "$APP_DIR/.venv" || true
-    chmod -R g+rX "$APP_DIR/.venv" || true
+      find "$APP_DIR/.venv" -type d -exec chmod 0750 {} + || true
+      find "$APP_DIR/.venv" -type f -exec chmod 0640 {} + || true
+      find "$APP_DIR/.venv/bin" -maxdepth 1 -type f -exec chmod 0750 {} + || true
     fi
     chown -R www-data:www-data "$DATA_DIR" || true
     find "$DATA_DIR" -type d -exec chmod 0750 {} + || true
@@ -311,25 +333,22 @@ chown -R root:www-data "$APP_DIR"
 chown root:www-data "$APP_DIR"
 find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type d -exec chmod 0750 {} +
 find "$APP_DIR" -path "$APP_DIR/.venv" -prune -o -type f -exec chmod 0640 {} +
-chown -R root:www-data "$APP_DIR/.venv"
-chmod -R g+rX "$APP_DIR/.venv"
+if [[ -x "$APP_DIR/.venv/bin/python" && -d "$APP_DIR/.venv/bin" ]]; then
+  normalize_venv_permissions "$APP_DIR/.venv"
+fi
 chown -R www-data:www-data "$DATA_DIR"
 find "$DATA_DIR" -type d -exec chmod 0750 {} +
 find "$DATA_DIR" -type f -exec chmod 0640 {} +
 # Detect an incomplete/corrupt virtualenv before attempting an in-place pip repair.
-if [[ ! -x "$APP_DIR/.venv/bin/python" ]] || ! "$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run' >/dev/null 2>&1; then
+if [[ ! -x "$APP_DIR/.venv/bin/python" ]] || ! verify_gunicorn_as_service_user "$APP_DIR/.venv" >/dev/null 2>&1; then
   if [[ -d "$APP_DIR/.venv" ]]; then mv "$APP_DIR/.venv" "$BACKUP_DIR/venv-before-rebuild"; fi
   python3 -m venv "$APP_DIR/.venv"
 fi
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
 "$APP_DIR/.venv/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
 "$APP_DIR/.venv/bin/python" -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-chown -R root:www-data "$APP_DIR/.venv"
-chmod -R g+rX "$APP_DIR/.venv"
-chown root:www-data "$APP_DIR/.venv/bin/gunicorn"
-chmod 0750 "$APP_DIR/.venv/bin/gunicorn"
-"$APP_DIR/.venv/bin/python" -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__)'
-sudo -u www-data "$APP_DIR/.venv/bin/gunicorn" --version
+normalize_venv_permissions "$APP_DIR/.venv"
+verify_gunicorn_as_service_user "$APP_DIR/.venv"
 
 # Update only deployment metadata; retain existing secret values and unrelated settings.
 python3 - "$ENV_FILE" "$REPO_URL" "$DOMAIN" "$HTTPS_PORT" "$APP_PORT" <<'PY'
@@ -363,198 +382,8 @@ chmod 0640 "$ENV_FILE"
 chown root:www-data /etc/station-archive
 chmod 0750 /etc/station-archive
 
-cat > /usr/local/sbin/station-archive-update <<'UPDATER'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-[[ ${EUID} -eq 0 ]] || { echo "This updater must run as root." >&2; exit 1; }
-ENV_FILE=/etc/station-archive/env
-[[ -r "$ENV_FILE" ]] || { echo "Missing deployment configuration." >&2; exit 1; }
-set -a; . "$ENV_FILE"; set +a
-# The deployed environment stores APP_INTERNAL_PORT; the old updater mistakenly
-# referenced an unset APP_PORT under `set -u`, causing rollback after restart.
-APP_PORT="${APP_INTERNAL_PORT:-${APP_PORT:-}}"
-[[ "$APP_PORT" =~ ^[0-9]{1,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "Configured internal application port is missing or invalid." >&2; exit 1; }
-UPDATE_REPO="${GITHUB_REPO:-${APP_REPO_URL:-}}"
-if [[ -f /var/lib/station-archive/update-repository ]]; then
-  UPDATE_REPO="$(cat /var/lib/station-archive/update-repository)"
-fi
-[[ "$UPDATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] || { echo "Configured repository URL is invalid." >&2; exit 1; }
-TRUSTED_REPO="${GITHUB_REPO:-${APP_REPO_URL:-https://github.com/AmiRaiZo/IP-Management}}"
-normalize_repo() { local value="${1%/}"; value="${value%.git}"; printf '%s' "${value,,}"; }
-[[ "$(normalize_repo "$UPDATE_REPO")" == "$(normalize_repo "$TRUSTED_REPO")" ]] || { echo "Update refused: repository differs from the trusted repository configured by the installer." >&2; exit 1; }
-[[ -d /opt/station-archive && -f /opt/station-archive/app.py ]] || { echo "Application installation not found." >&2; exit 1; }
-VERSION_FILE=/var/lib/station-archive/version
-TARGET_FILE=/var/lib/station-archive/update-target
-TARGET_SHA="$(cat "$TARGET_FILE" 2>/dev/null || true)"
-[[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Update failed: no verified target commit was provided. Check for updates in the web interface first." >&2; exit 1; }
-echo "PROGRESS:5:Preparing update"
-TMP="$(mktemp -d /tmp/station-archive-update.XXXXXX)"
-DEPLOYED=0; SUCCESS=0
-cleanup() {
-  # Roll back even when the updater exits under set -e.
-  set +e
-  KEEP_TMP=0
-  if (( DEPLOYED == 1 && SUCCESS == 0 )); then
-    echo "Update failed; restoring the last known-good application and Python environment." >&2
-    if rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/backup/" /opt/station-archive/ && [[ -d "$TMP/venv-backup" ]] && rsync -a --delete "$TMP/venv-backup/" /opt/station-archive/.venv/; then
-      chown -R root:www-data /opt/station-archive
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-      find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-      chown -R root:www-data /opt/station-archive/.venv
-      chmod -R g+rX /opt/station-archive/.venv
-      if ! systemctl restart station-archive.service; then systemctl start station-archive.service; fi
-      HTTP_CODE=000
-      for attempt in $(seq 1 30); do
-        if systemctl is-active --quiet station-archive.service; then
-          HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: ${APP_DOMAIN:-${DOMAIN:-localhost}}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:${APP_PORT}/" 2>/dev/null || true)"
-          if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then break; fi
-        fi
-        sleep 1
-      done
-      if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
-        echo "Rollback succeeded; previous version is serving requests (HTTP $HTTP_CODE)." >&2
-      else
-        systemctl start station-archive.service >/dev/null 2>&1 || true
-        KEEP_TMP=1
-        echo "CRITICAL: restored files but health check still fails (HTTP $HTTP_CODE). Recovery backup retained at $TMP. Run: systemctl status station-archive; journalctl -u station-archive -n 100 --no-pager" >&2
-      fi
-    else
-      KEEP_TMP=1
-      echo "CRITICAL: rollback could not restore app and venv. Recovery backup retained at $TMP; do not delete it." >&2
-      systemctl start station-archive.service >/dev/null 2>&1 || true
-    fi
-  fi
-  if (( SUCCESS == 0 && DEPLOYED == 0 )); then echo "Update failed before deployment; running application files were not changed." >&2; fi
-  if (( KEEP_TMP == 0 )); then rm -rf -- "$TMP"; fi
-}
-trap cleanup EXIT
-echo "PROGRESS:12:Downloading repository and checking target version"
-git init -q "$TMP/source"
-git -C "$TMP/source" remote add origin "${UPDATE_REPO%/}"
-git -C "$TMP/source" fetch --depth 1 origin "$TARGET_SHA"
-git -C "$TMP/source" checkout --quiet --detach FETCH_HEAD
-SOURCE_SHA="$(git -C "$TMP/source" rev-parse HEAD)"
-[[ "$SOURCE_SHA" == "$TARGET_SHA" ]] || { echo "Update failed: downloaded commit does not match the verified target." >&2; exit 1; }
-for required in app.py requirements.txt templates static reconfigure_server.sh ip-management-recover-access station_archive_refresh_ip.py station_archive_upgrade_limits.py station_archive_domain_recovery.py station-archive-ip-refresh.service station-archive-ip-refresh.timer station-archive-ip-refresh-boot.service nginx-station-archive-ip-refresh.conf; do [[ -e "$TMP/source/$required" ]] || { echo "Repository is missing required path: $required" >&2; exit 1; }; done
-echo "PROGRESS:25:Backing up the current application"
-mkdir -p "$TMP/backup" "$TMP/venv-backup"
-# Preserve exact dependencies so rollback never relies on PyPI or network access.
-rsync -a --exclude='.git/' --exclude='.venv/' /opt/station-archive/ "$TMP/backup/"
-rsync -a /opt/station-archive/.venv/ "$TMP/venv-backup/"
-DEPLOYED=1
-	echo "PROGRESS:32:Preparing the application backup"
-	echo "PROGRESS:35:Installing application files while the current worker stays online"
-	rsync -a --delete --exclude='.git/' --exclude='.venv/' "$TMP/source/" /opt/station-archive/
-		python3 /opt/station-archive/station_archive_upgrade_limits.py --domain "${APP_DOMAIN:-${DOMAIN:-}}" --https-port "${PUBLIC_PORT:-${APP_HTTPS_PORT:-}}" --app-port "$APP_PORT"
-	install -o root -g root -m 0750 "$TMP/source/ip-management-recover-access" /usr/local/sbin/ip-management-recover-access
-	echo "PROGRESS:50:Installing privileged helper and server service configuration"
-install -o root -g root -m 0750 "$TMP/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
-install -o root -g root -m 0750 "$TMP/source/station_archive_refresh_ip.py" /usr/local/sbin/station-archive-refresh-ip
-install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh.service" /etc/systemd/system/station-archive-ip-refresh.service
-install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh.timer" /etc/systemd/system/station-archive-ip-refresh.timer
-install -o root -g root -m 0644 "$TMP/source/station-archive-ip-refresh-boot.service" /etc/systemd/system/station-archive-ip-refresh-boot.service
-install -d -o root -g root -m 0755 /etc/systemd/system/nginx.service.d
-install -o root -g root -m 0644 "$TMP/source/nginx-station-archive-ip-refresh.conf" /etc/systemd/system/nginx.service.d/10-station-archive-ip-refresh.conf
-systemctl daemon-reload
-/usr/local/sbin/station-archive-refresh-ip
-systemctl enable --now station-archive-ip-refresh.timer
-cat > /etc/sudoers.d/station-archive-update <<'SUDOERS'
-www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start station-archive-update.service, /usr/bin/systemctl --no-block start station-archive-reconfigure.service
-SUDOERS
-chmod 0440 /etc/sudoers.d/station-archive-update
-visudo -cf /etc/sudoers.d/station-archive-update
-cat > /etc/systemd/system/station-archive-reconfigure.service <<'RECONFIGUNIT'
-[Unit]
-Description=IP Management server address reconfiguration
-After=network-online.target nginx.service
-Wants=network-online.target
-[Service]
-Type=oneshot
-User=root
-Group=root
-ExecStart=/usr/local/sbin/station-archive-reconfigure
-StandardOutput=journal
-StandardError=journal
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-NoNewPrivileges=false
-ReadWritePaths=/etc/nginx /etc/letsencrypt /etc/systemd/system /etc/station-archive /var/lib/station-archive /var/backups /usr/local/sbin -/etc/ufw
-TimeoutStartSec=300
-UMask=0077
-RECONFIGUNIT
-chmod 0644 /etc/systemd/system/station-archive-reconfigure.service
-systemctl daemon-reload
-chown -R root:www-data /opt/station-archive
-chown root:www-data /opt/station-archive
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type d -exec chmod 0750 {} +
-find /opt/station-archive -path /opt/station-archive/.venv -prune -o -type f -exec chmod 0640 {} +
-chown -R root:www-data /opt/station-archive/.venv
-chmod -R g+rX /opt/station-archive/.venv
-	echo "PROGRESS:58:Checking the Python virtual environment from the application directory"
-	# Check from the exact working directory used by systemd; the updater itself runs from /.
-	if ! (cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn import path:", gunicorn.__file__)') >/dev/null 2>&1; then
-	  echo "PROGRESS:60:Rebuilding the damaged Python virtual environment"
-	  mv /opt/station-archive/.venv "$TMP/venv-before-rebuild"
-	  python3 -m venv /opt/station-archive/.venv
-	fi
-	echo "PROGRESS:62:Installing Python dependencies"
-	/opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-	echo "PROGRESS:70:Repairing Gunicorn installation"
-	/opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-	echo "PROGRESS:77:Fixing application dependency permissions"
-	# Ensure the systemd service account can execute Gunicorn (pip-created files are root-owned).
-	chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-	chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-	echo "PROGRESS:80:Verifying Gunicorn as the actual service user"
-	(cd /opt/station-archive && /opt/station-archive/.venv/bin/python -c 'from gunicorn.app.wsgiapp import run; import gunicorn; print("Gunicorn verified:", gunicorn.__version__, gunicorn.__file__)')
-	if ! runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version; then
-	  echo "PROGRESS:81:Rebuilding Gunicorn environment after service-user verification failed"
-	  mv /opt/station-archive/.venv "$TMP/venv-verification-failed"
-	  python3 -m venv /opt/station-archive/.venv
-	  /opt/station-archive/.venv/bin/python -m pip install -r /opt/station-archive/requirements.txt
-	  /opt/station-archive/.venv/bin/python -m pip install --no-cache-dir --force-reinstall 'gunicorn>=23,<24'
-	  chown -R root:www-data /opt/station-archive/.venv
-	  chmod -R g+rX /opt/station-archive/.venv
-	  chown root:www-data /opt/station-archive/.venv/bin/gunicorn
-	  chmod 0750 /opt/station-archive/.venv/bin/gunicorn
-	  runuser -u www-data -- /opt/station-archive/.venv/bin/gunicorn --version
-	fi
-	echo "PROGRESS:84:Validating Nginx configuration"
-	nginx -t
-	echo "PROGRESS:88:Restarting application with the verified environment"
-	systemctl restart station-archive.service
-	echo "PROGRESS:91:Waiting for the application health check"
-# Wait for Gunicorn readiness; systemd may become active before its socket is bound.
-HTTP_CODE=000
-for attempt in $(seq 1 30); do
-  if systemctl is-active --quiet station-archive.service; then
-    HTTP_CODE="$(curl --noproxy '*' -sS --connect-timeout 2 --max-time 5 -H "Host: ${APP_DOMAIN:-${DOMAIN:-localhost}}" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/" 2>/dev/null || true)"
-    if [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
-      break
-    fi
-  fi
-  sleep 1
-done
-if ! [[ "$HTTP_CODE" =~ ^[23][0-9]{2}$ ]]; then
-  echo "Application health check failed after 30 seconds (HTTP $HTTP_CODE)." >&2
-  journalctl -u station-archive.service -n 60 --no-pager >&2 || true
-  exit 1
-fi
-	echo "PROGRESS:97:Recording the installed version"
-	TARGET_VERSION="$(cat /var/lib/station-archive/update-target-version 2>/dev/null || true)"
-[[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "Update failed: release version is missing or invalid." >&2; exit 1; }
-printf '%s\n' "$TARGET_VERSION" > "$VERSION_FILE"
-printf '%s\n' "$SOURCE_SHA" > /var/lib/station-archive/commit
-chown www-data:www-data "$VERSION_FILE"
-chmod 0640 "$VERSION_FILE"
-SUCCESS=1
-echo "PROGRESS:100:Update completed successfully"
-echo "IP Management updated successfully."
-UPDATER
-chown root:root /usr/local/sbin/station-archive-update
-chmod 0750 /usr/local/sbin/station-archive-update
+install -o root -g root -m 0750 "$WORK_DIR/source/station-archive-update" /usr/local/sbin/station-archive-update
+bash -n /usr/local/sbin/station-archive-update
 install -o root -g root -m 0750 "$WORK_DIR/source/reconfigure_server.sh" /usr/local/sbin/station-archive-reconfigure
 install -o root -g root -m 0750 "$WORK_DIR/source/station_archive_refresh_ip.py" /usr/local/sbin/station-archive-refresh-ip
 install -o root -g root -m 0644 "$WORK_DIR/source/station-archive-ip-refresh.service" /etc/systemd/system/station-archive-ip-refresh.service
@@ -568,6 +397,7 @@ install -d -o root -g root -m 0755 /etc/systemd/system/station-archive.service.d
 cat > /etc/systemd/system/station-archive.service.d/update-privileges.conf <<'OVERRIDE'
 [Service]
 NoNewPrivileges=false
+Environment=PYTHONDONTWRITEBYTECODE=1
 # sudo needs setuid/setgid within the service capability bounding set.
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
 OVERRIDE

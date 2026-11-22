@@ -1,3 +1,14 @@
+## Version 5.0.11 release notes
+
+- Replace the high-contrast red destructive buttons and saturated primary action fills with a shared, soft indigo treatment matching the Notes action palette across IP, Account, group, user, and Notes actions.
+- Apply matching light and dark theme colors to Delete controls and destructive group icons; soften the fixed security and backup-restore accent icons and remove the pink default group fallback color.
+- Preserve red styling for actual error messages and error statuses so validation and failure states remain recognizable.
+- Fix Gunicorn verification under the www-data service account: set explicit directory, module-file, and executable permissions after pip installation, test both `gunicorn.app.wsgiapp` and the console entry point as the actual service user, and prevent root-created bytecode caches from blocking service imports.
+- Make fresh installs, in-place upgrades, and panel updates use the same updater implementation; the in-place upgrader now installs the canonical updater from the verified checkout instead of maintaining a divergent embedded copy.
+- Let in-place upgrades rebuild a missing or incomplete virtual environment instead of failing early while trying to change ownership of a nonexistent `.venv` directory.
+- Set `PYTHONDONTWRITEBYTECODE=1` in the privileged updater and Gunicorn systemd service, simplify service-user checks to execute the virtualenv binaries directly through `runuser`, and add a Linux integration test that recreates restrictive root-owned Python bytecode before verifying the real Gunicorn import and CLI as `www-data`.
+- Refresh static asset cache keys.
+
 ## Version 5.0.10 release notes
 
 - Remove all visible references to Telegram from the sign-in and authenticator verification experience; the second-factor screen now asks only for the authenticator code.
@@ -416,4 +427,3 @@
 - Add regression tests for a new browser and different username on the locked IP, IPv4-mapped IPv6 normalization, equal Notes action sizing, lock timing, 2FA shared failure budget, and both administrator unlock paths.
 - A browser cookie is a random browser identifier, not a hardware ID. IP-based locking can also temporarily affect other people sharing the same public NAT address. A native device agent or network-level identity is required for reliable hardware identification.
 - Refresh static asset cache keys and update the release workflow to accept the requested `5.0` version format.
-419

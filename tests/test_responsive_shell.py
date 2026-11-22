@@ -1,5 +1,11 @@
 import unittest
 from pathlib import Path
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +31,9 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         cls.groups = (ROOT / "templates" / "groups.html").read_text(encoding="utf-8")
         cls.users = (ROOT / "templates" / "users.html").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+        cls.updater = (ROOT / "station-archive-update").read_text(encoding="utf-8")
+        cls.install = (ROOT / "install.sh").read_text(encoding="utf-8")
+        cls.upgrade = (ROOT / "upgrade_existing.sh").read_text(encoding="utf-8")
         cls.js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         cls.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         cls.release_workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(encoding="utf-8")
@@ -234,7 +243,7 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
 
     def test_assets_are_cache_busted_for_this_release(self):
         self.assertRegex(self.version, r"^\d+\.\d+\.\d+$")
-        cache_key = f"?v={self.version}-final-ui"
+        cache_key = f"?v={self.version}-gunicorn-repair"
         self.assertIn("style.css') }}" + cache_key, self.base)
         self.assertIn("app.js') }}" + cache_key, self.base)
 
@@ -368,6 +377,142 @@ class ResponsiveShellRegressionTests(unittest.TestCase):
         self.assertIn("elif action == \"ack_telegram_login\":", self.app_source)
         self.assertIn("Legacy audit callbacks are intentionally inert", self.app_source)
         self.assertNotIn('"text": "⌂ Menu", "callback_data": "menu"', self.app_source[self.app_source.index("def send_login_success_alert"):self.app_source.index("def send_login_failure_alert")])
+
+    def test_all_action_buttons_use_the_soft_notes_palette_in_both_themes(self):
+        compact_css = "".join(self.css.split())
+        self.assertIn("v=5.0.11-gunicorn-repair", self.base)
+        self.assertIn(":root{--action-bg:#edf1ff;--action-hover:#e5ebff;--action-border:#dce5ff;--action-text:#5268c9", compact_css)
+        self.assertIn(".btn-primary,.btn-danger{background:var(--action-bg);color:var(--action-text);border-color:var(--action-border);box-shadow:none}", compact_css)
+        self.assertIn(".danger-icon{color:var(--action-text);background:var(--action-bg);border-color:var(--action-border)}", compact_css)
+        self.assertIn('html[data-theme="dark"]{--action-bg:#283254;--action-hover:#303d66;--action-border:#3a4b78;--action-text:#b8c6ff}', compact_css)
+        self.assertIn('html[data-theme="dark"].btn-primary,html[data-theme="dark"].btn-danger{background:var(--action-bg)', compact_css)
+        self.assertIn(".nav-icon-security{background:#edf1ff;color:#6273c9}", compact_css)
+        self.assertIn(".backup-restore-card.backup-feature-icon{background:#edf1ff;color:#6273c9}", compact_css)
+        for template in (self.index, self.groups, self.accounts, self.account_groups):
+            self.assertNotIn("#d14d72", template, "The pink color must not be used as a default group fallback.")
+
+    def test_gunicorn_is_verified_as_www_data_without_root_owned_bytecode(self):
+        for script in (self.updater, self.install, self.upgrade):
+            self.assertIn("PYTHONDONTWRITEBYTECODE=1", script)
+            self.assertIn("find ", script)
+            self.assertIn("-type d -exec chmod 0750", script)
+            self.assertIn("-type f -exec chmod 0640", script)
+            self.assertIn("runuser -u www-data --", script)
+            self.assertIn("--version", script)
+            self.assertIn("/usr/bin/env -i", script)
+            self.assertIn("from gunicorn.app.wsgiapp import run", script)
+        self.assertIn('export PYTHONDONTWRITEBYTECODE=1', self.updater)
+        self.assertIn('Environment=PYTHONDONTWRITEBYTECODE=1', self.updater)
+        self.assertIn('Environment=PYTHONDONTWRITEBYTECODE=1', self.install)
+        self.assertIn('Environment=PYTHONDONTWRITEBYTECODE=1', self.upgrade)
+        self.assertNotIn("chmod -R g+rX", self.updater)
+        self.assertNotIn("chmod -R g+rX", self.install)
+        self.assertNotIn("chmod -R g+rX", self.upgrade)
+        self.assertIn('PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin', self.updater)
+        self.assertIn('PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin', self.install)
+        self.assertIn('PYTHONDONTWRITEBYTECODE=1 PATH=/usr/bin:/bin', self.upgrade)
+
+    def test_in_place_upgrade_installs_the_canonical_updater_and_recovers_missing_venv(self):
+        self.assertNotIn("<<'UPDATER'", self.upgrade)
+        self.assertIn(
+            'install -o root -g root -m 0750 "$WORK_DIR/source/station-archive-update" /usr/local/sbin/station-archive-update',
+            self.upgrade,
+        )
+        self.assertIn("bash -n /usr/local/sbin/station-archive-update", self.upgrade)
+        conditional_normalize = self.upgrade.index(
+            'if [[ -x "$APP_DIR/.venv/bin/python" && -d "$APP_DIR/.venv/bin" ]]; then'
+        )
+        unconditional_rebuild = self.upgrade.index(
+            'if [[ ! -x "$APP_DIR/.venv/bin/python" ]] || ! verify_gunicorn_as_service_user'
+        )
+        self.assertLess(conditional_normalize, unconditional_rebuild)
+        repair_section = self.upgrade.split("# Keep the currently installed virtual environment", 1)[1]
+        self.assertNotIn('chown -R root:www-data "$APP_DIR/.venv"', repair_section)
+
+    def test_update_shell_scripts_and_embedded_updater_are_valid_bash(self):
+        if os.name == "nt":
+            self.skipTest("Bash syntax checks run in the Linux GitHub Actions environment.")
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("Bash is unavailable in this local test environment.")
+        scripts = [
+            ROOT / "station-archive-update",
+            ROOT / "install.sh",
+            ROOT / "upgrade_existing.sh",
+        ]
+        for script in scripts:
+            result = subprocess.run([bash, "-n", str(script)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        self.assertNotIn("<<'UPDATER'", self.upgrade)
+        self.assertIn('bash -n /usr/local/sbin/station-archive-update', self.upgrade)
+
+    def test_gunicorn_permissions_allow_www_data_to_import_and_run_the_real_entrypoint(self):
+        if os.name != "posix":
+            self.skipTest("Service-user integration runs in the Linux GitHub Actions environment.")
+        sudo = shutil.which("sudo")
+        if not sudo or not shutil.which("runuser"):
+            self.skipTest("sudo and runuser are required for the Linux service-user integration test.")
+        try:
+            import pwd
+            pwd.getpwnam("www-data")
+        except (ImportError, KeyError):
+            self.skipTest("The www-data service account is unavailable.")
+        if subprocess.run([sudo, "-n", "true"], capture_output=True).returncode != 0:
+            self.skipTest("Passwordless sudo is unavailable for the Linux service-user integration test.")
+
+        with tempfile.TemporaryDirectory(prefix="ipm-gunicorn-service-test-") as temporary:
+            root = Path(temporary)
+            os.chmod(root, 0o755)
+            venv = root / ".venv"
+            function_names = ("normalize_venv_permissions", "verify_gunicorn_as_service_user")
+            functions = []
+            for name in function_names:
+                match = re.search(rf"(?ms)^{name}\(\) \{{.*?^\}}", self.updater)
+                self.assertIsNotNone(match, f"Updater function {name} is missing.")
+                # Keep the production function intact except for HOME, which is
+                # redirected to an existing temporary-safe path for this test.
+                functions.append(match.group(0).replace("HOME=/var/lib/station-archive", "HOME=/tmp"))
+            harness = root / "verify-gunicorn.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\nset -Eeuo pipefail\n"
+                + "\n\n".join(functions)
+                + '\nnormalize_venv_permissions "$1"\nverify_gunicorn_as_service_user "$1"\n',
+                encoding="utf-8",
+            )
+
+            prepare = (
+                "set -Eeuo pipefail; umask 077; unset PYTHONDONTWRITEBYTECODE; "
+                '"$2" -m venv "$1"; '
+                '"$1/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -q "gunicorn>=23,<24"; '
+                '"$1/bin/python" -c \'from gunicorn.app.wsgiapp import run\''
+            )
+            try:
+                result = subprocess.run(
+                    [sudo, "-n", "/bin/bash", "-c", prepare, "bash", str(venv), sys.executable],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+                verification = subprocess.run(
+                    [sudo, "-n", "/bin/bash", str(harness), str(venv)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            finally:
+                cleanup = subprocess.run(
+                    [sudo, "-n", "rm", "-rf", "--", str(root)],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+            self.assertEqual(verification.returncode, 0, verification.stdout + verification.stderr)
+            self.assertIn("Gunicorn import verified for www-data", verification.stdout)
+            self.assertIn("gunicorn", verification.stdout.lower())
+            self.assertIn("23.", verification.stdout)
 
 
 if __name__ == "__main__":
